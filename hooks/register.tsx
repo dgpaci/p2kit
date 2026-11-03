@@ -77,11 +77,24 @@ export const register: Register = on => {
     await $.command.register({ name: 'pm-desk', description: 'Open the project desk: every registered p2kit project' })
     // A reload of the module mid-refresh would leave the flag set for good.
     await update($, meta, now => ({ ...now, isLoading: false }))
+    void $.ui.open({ id: PANE, title: TITLE })
     void reload($)
     timer?.cancel()
     timer = $.clock.every(REFRESH_MS, () => void reload($))
 
     return next(e)
+  })
+
+  // The desktop app attaches after session.start: seat the pane there if it still waits.
+  on('session.attach', async ($, e, next) => {
+    const result = await next(e)
+    const pane = (await $.ui.panes()).find(open => open.id === PANE)
+    if (!pane?.isPlaced) {
+      const opened = await $.ui.open({ id: PANE, title: TITLE })
+      if (!opened.isPlaced) $.ui.log(`p2kit: pane not placed on ${e.surface}: ${opened.reason}`, { to: 'debug' })
+    }
+
+    return result
   })
 
   on('command.run', { command: 'pm-desk' }, async $ => {
