@@ -1,0 +1,40 @@
+# p2kit
+
+A Claude Code plugin for project management aligned with PRINCE2®: skills that prepare the
+management products of each process, project data kept in the project's own repo under `.pm/`,
+and a multi-project "project desk" pane. Claude prepares; the human Project Board decides.
+
+## Maintainer
+
+dgpaci (Davide Paci) — owns the repo and reviews its PRs.
+
+## Target branch for PRs
+
+`main`.
+
+## Language
+
+English for issues, PRs, review comments, code comments, skills, templates and documentation.
+Identifiers and commit messages are English as everywhere. Conversations with the user stay in
+Italian.
+
+## Forge
+
+GitHub, public repo `dgpaci/p2kit` (MIT), CLI `gh`. The repo is **not created yet**: create it or
+push only on the user's explicit OK. Not a Softwell repo: Claude attribution in commits and PRs is
+allowed.
+
+## Guidelines
+
+- Trademark: PRINCE2® is a registered trademark of PeopleCert. Never put "PRINCE2" in the plugin
+  name, a skill name or a command; write every template from scratch, never copy text from the
+  official manual. The README says "aligned with, not affiliated".
+- Claude never records a Board decision on its own: approvals in `project.yaml` are written only
+  after the user states the decision in chat.
+- The core works standalone. The forge-desk integration (work packages ↔ issues/PRs) is an
+  optional extension (roadmap phase 3) and must stay optional.
+- The `.pm/` schema is documented in `docs/pm-schema.md`; change the doc together with the code
+  (`hooks/project.ts`, `hooks/yaml.ts`) and the skills that write it.
+- YAML in `.pm/` stays within the subset `hooks/yaml.ts` parses (the mod has no Node and no npm).
+- Ask the user whether a new branch should be a worktree or a plain branch.
+- Mod style reference: `~/sviluppo/claude/forge-desk`.

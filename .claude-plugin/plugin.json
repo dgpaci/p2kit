@@ -1,0 +1,8 @@
+{
+  "name": "p2kit",
+  "version": "0.1.0",
+  "description": "Project management aligned with PRINCE2: skills per process, .pm/ data in the repo, a multi-project desk pane",
+  "author": { "name": "Davide Paci" },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

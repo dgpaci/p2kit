@@ -1,0 +1,26 @@
+# p2kit project file — schema: docs/pm-schema.md
+schema: 1
+name: <Project name>
+code: <SHORT>
+profile: light
+status: start-up
+stage:
+  current: 0
+  name: Start-up
+  start: <YYYY-MM-DD>
+  planned_end: null
+tolerances:
+  time: { limit: 0, used: 0, unit: days }
+  cost: { limit: 0, used: 0, unit: EUR }
+roles:
+  executive: <name>
+  senior_user: []
+  senior_supplier: []
+  project_manager: <name>
+  team_manager: []
+  assurance: []
+  support: []
+reporting:
+  highlight_every_days: 14
+  last_highlight: null
+approvals: []
