@@ -15,6 +15,8 @@ export type WorkPackage = {
   status: string
   teamManager: string
   due: string
+  // Its work theme, when it links an issue, a milestone or a branch; null otherwise.
+  delivery: WpDelivery | null
 }
 
 export type Risk = { id: string; title: string; probability: string; impact: string; status: string; owner: string; score: number }
@@ -25,33 +27,32 @@ export type Approval = { decision: string; by: string; date: string; note: strin
 
 export type PhaseState = 'done' | 'in-progress' | 'todo' | 'failed' | 'blocked'
 
-// One phase of the phased-workflow plan found on a stage branch.
+// One phase of the phased-workflow plan found on a work package's branch.
 export type Phase = { number: number; title: string; state: PhaseState }
 
-// A commit of a stage branch, from local git.
+// A commit of a work package's branch, from local git.
 export type Commit = { sha: string; short: string; date: string; subject: string }
 
 // An internal note on a commit, from `.pm/registers/commit-notes.yaml`.
-export type CommitNote = { sha: string; stage: number | null; kind: string; status: string; text: string; date: string }
+// `wp` is the work package it belongs to, '' when absent.
+export type CommitNote = { sha: string; wp: string; kind: string; status: string; text: string; date: string }
 
-// A pull request of a stage branch.
+// A pull request of a work package's branch.
 export type Pull = { number: number; title: string; state: 'open' | 'merged' | 'closed'; url: string }
 
 // A forge milestone: open and closed issues, due date as an ISO day or ''.
 export type Milestone = { title: string; open: number; closed: number; due: string }
 
-// What the forge says about a stage: its issue or milestone, the pull requests of its branch.
-export type StageForge = {
+// What the forge says about a work package: its issue or milestone, the pull requests of its branch.
+export type WpForge = {
   issue?: { number: number; title: string; state: string }
   milestone?: Milestone
   pulls: Pull[]
   isReadyToClose: boolean
 }
 
-// A stage linked to an issue or a milestone and worked on a branch; `ref` and `planPath` are '' when not found.
-export type StageDelivery = {
-  number: number | null
-  name: string
+// A work package linked to an issue, a milestone or a branch; `ref` and `planPath` are '' when not found.
+export type WpDelivery = {
   issue: number | null
   milestone: string
   branch: string
@@ -59,15 +60,15 @@ export type StageDelivery = {
   ref: string
   planPath: string
   phases: Phase[]
+  // `current` is 'Phase N: title', '' when every phase is done.
+  summary: { done: number; total: number; current: string; failed: number }
   // The commits of the branch over its base, newest first, each with its notes.
   commits: (Commit & { notes: CommitNote[] })[]
-  // Notes of this stage matching no listed commit, e.g. after a squash merge.
+  // Notes of this work package matching no listed commit, e.g. after a squash merge.
   unlinkedNotes: CommitNote[]
-  // Read from the forge for the current stage only, by loadProjects; null otherwise or when there is no forge.
-  forge: StageForge | null
+  // Read by loadProjects for the open work packages of the current stage; null otherwise or when there is no forge.
+  forge: WpForge | null
 }
-
-export type Delivery = { stage: number; done: number; total: number; current: string; failed: number }
 
 export type Project = {
   path: string
@@ -89,13 +90,10 @@ export type Project = {
   risks: Risk[]
   issues: Issue[]
   approvals: Approval[]
-  stages: StageDelivery[]
-  // The phases of the current stage, when it is linked.
-  delivery: Delivery | null
   // Open blocker notes over the whole commit-notes register.
   openBlockers: number
-  // Notes whose stage is not linked under `stages:`, or that name no stage: counted, so shown too.
-  unstagedNotes: CommitNote[]
+  // Notes naming no linked work package: counted, so shown too.
+  unthemedNotes: CommitNote[]
   // What could not be read; a project with errors is still listed.
   errors: string[]
 }

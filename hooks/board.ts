@@ -1,4 +1,5 @@
 import { getSessionLink } from './actions'
+import { getWorkThemes } from './project'
 import type { Project } from '../types'
 
 // The page reloads itself to pick up the file the next refresh writes.
@@ -12,7 +13,7 @@ const embed = (value: unknown): string => JSON.stringify(value).replaceAll('<', 
 /** The whole desk as one self-contained HTML page: the overview, and a project's detail on click. */
 export function renderBoard(input: BoardInput): string {
   const data = {
-    projects: input.projects.map(project => ({ ...project, sessionLink: getSessionLink(project) })),
+    projects: input.projects.map(project => ({ ...project, sessionLink: getSessionLink(project), themes: getWorkThemes(project) })),
     refreshedAt: new Date(input.refreshedAt).toISOString(),
     errors: input.errors,
     reloadMs: RELOAD_MS,
@@ -107,6 +108,8 @@ function table(head, rows) {
 }
 
 function detail(p) {
+  const linked = p.workPackages.filter(w => w.delivery)
+  linked.sort((a, b) => Number(b.stage === p.stage.current) - Number(a.stage === p.stage.current))
   const stage = p.stage.current === null ? 'no stage' : 'Stage ' + p.stage.current + (p.stage.name ? ' — ' + p.stage.name : '')
   return [
     el('h2', { textContent: p.name + (p.code ? ' (' + p.code + ')' : '') }),
@@ -117,10 +120,10 @@ function detail(p) {
       section('Roles', table(['Role', 'People'], p.roles.map(r => [r.label, r.people.join(', ') || '—']))),
       section('Tolerances', table(['', 'Area', 'Used / limit'], p.tolerances.map(t => [dot(t.light), t.area, t.used + ' / ' + t.limit + ' ' + t.unit]))),
     ),
-    ...(p.stages.length ? [] : [el('p', { className: 'dim', textContent: 'No stage linked: add stages: to .pm/project.yaml (docs/pm-schema.md) to see phases, commits and pull requests.' })]),
-    ...(p.unstagedNotes.length ? [section('Notes without a linked stage', ...p.unstagedNotes.map(n => el('div', {}, el('span', { className: 'mono', textContent: n.sha + ' ' }), note(n))))] : []),
-    ...(p.stages.length ? [section('Delivery', ...p.stages.map(s => el('div', {},
-      el('p', { textContent: ['Stage ' + (s.number ?? '?'), s.name, s.issue === null ? '' : '#' + s.issue, s.milestone && 'milestone ' + s.milestone, s.ref || s.branch].filter(Boolean).join(' · ') }),
+    ...(linked.length ? [] : [el('p', { className: 'dim', textContent: "No work package linked: run /pm-link in the project's repo to see phases, commits and pull requests." })]),
+    ...(p.unthemedNotes.length ? [section('Notes without a work theme', ...p.unthemedNotes.map(n => el('div', {}, el('span', { className: 'mono', textContent: n.sha + ' ' }), note(n))))] : []),
+    ...(linked.length ? [section('Work themes', ...linked.map(w => { const s = w.delivery; return el('div', {},
+      el('p', { textContent: [(w.id + ' ' + w.title).trim(), s.issue === null ? '' : '#' + s.issue, s.milestone && 'milestone ' + s.milestone, s.ref || s.branch].filter(Boolean).join(' · ') }),
       ...(s.forge ? [
         ...(s.forge.issue ? [el('p', { textContent: '#' + s.forge.issue.number + ' · ' + s.forge.issue.state + ' · ' + s.forge.issue.title })] : []),
         ...(s.forge.milestone ? [el('p', { textContent: s.forge.milestone.title + ' ' + s.forge.milestone.closed + '/' + (s.forge.milestone.open + s.forge.milestone.closed) + (s.forge.milestone.due ? ' · due ' + s.forge.milestone.due : '') })] : []),
@@ -130,8 +133,8 @@ function detail(p) {
       table(['', 'Phase', 'State'], s.phases.map(ph => [String(ph.number), ph.title, el('span', { className: 'phase-' + ph.state, textContent: ph.state })])),
       table(['Commit', 'Date', 'Subject and notes'], s.commits.map(c => [el('span', { className: 'mono', textContent: c.short }), c.date,
         el('div', {}, c.subject, ...c.notes.map(note))])),
-      ...(s.unlinkedNotes.length ? [el('p', { className: 'dim', textContent: 'Notes on commits not on the branch' }),
-        ...s.unlinkedNotes.map(n => el('div', {}, el('span', { className: 'mono', textContent: n.sha + ' ' }), note(n)))] : []))))] : []),
+      ...(s.unlinkedNotes.length ? [el('p', { className: 'dim', textContent: w.status === 'completed' || w.status === 'cancelled' ? 'Branch not read: the work package is closed' : 'Notes on commits not on the branch' }),
+        ...s.unlinkedNotes.map(n => el('div', {}, el('span', { className: 'mono', textContent: n.sha + ' ' }), note(n)))] : [])) }))] : []),
     section('Documents', table(['Document', 'Status', 'Version'], p.documents.map(d => [fileLink(d.path, d.title), d.status, d.version]))),
     section('Work packages', table(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due'],
       p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage ?? '', w.status, w.teamManager, w.due]))),
@@ -152,9 +155,10 @@ function draw() {
       el('td', {}, el('strong', { textContent: p.name }), el('div', { className: 'dim', textContent: p.code })),
       el('td', { textContent: p.stage.current === null ? '—' : p.stage.current + ' ' + p.stage.name }),
       el('td', {}, progress(p.progress)),
-      el('td', {}, p.delivery ? el('span', {}, progress(p.delivery), el('div', { className: 'dim', textContent: p.delivery.current }),
-        p.delivery.failed ? el('div', { className: 'err', textContent: p.delivery.failed + ' failed' }) : '',
-        p.stages.some(s => s.forge && s.forge.isReadyToClose) ? el('div', { className: 'ready', textContent: 'ready to close' }) : '') : '—'),
+      el('td', {}, p.themes.length ? el('div', {}, ...p.themes.map(w => el('div', {}, el('span', { className: 'mono', textContent: w.id + ' ' }),
+        progress(w.delivery.summary), el('div', { className: 'dim', textContent: w.delivery.summary.current }),
+        w.delivery.summary.failed ? el('div', { className: 'err', textContent: w.delivery.summary.failed + ' failed' }) : '',
+        w.delivery.forge && w.delivery.forge.isReadyToClose ? el('div', { className: 'ready', textContent: 'ready to close' }) : ''))) : '—'),
       el('td', { className: p.highRisks ? 'overdue' : '', textContent: p.highRisks }),
       el('td', { className: p.openBlockers ? 'overdue' : '', textContent: p.openBlockers }),
       el('td', { textContent: p.openIssues }),
