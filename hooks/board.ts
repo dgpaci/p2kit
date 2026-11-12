@@ -29,7 +29,7 @@ export function renderBoard(input: BoardInput): string {
 <body>
 <header><h1>Project desk</h1><p class="dim" id="summary"></p><div id="errors"></div></header>
 <table id="overview">
-  <thead><tr><th></th><th>Project</th><th>Stage</th><th>Progress</th><th>High risks</th><th>Open issues</th><th>Next report</th><th></th></tr></thead>
+  <thead><tr><th></th><th>Project</th><th>Stage</th><th>Progress</th><th>Phases</th><th>High risks</th><th>Blockers</th><th>Open issues</th><th>Next report</th><th></th></tr></thead>
   <tbody id="rows"></tbody>
 </table>
 <section id="detail" hidden></section>
@@ -61,6 +61,9 @@ th { color: var(--dim); font-weight: 500; }
 .bar { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: var(--line); vertical-align: middle; margin-right: 6px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--on); }
 .overdue { color: var(--red); }
+.phase-done { color: var(--green); } .phase-in-progress { color: var(--on); } .phase-failed { color: var(--red); }
+.pull-merged, .ready { color: var(--green); } .pull-open { color: var(--on); }
+.phase-blocked { color: var(--amber); } .phase-todo { color: var(--dim); }
 a { color: var(--on); text-decoration: none; }
 a:hover { text-decoration: underline; }
 #detail { margin-top: 20px; padding-top: 4px; border-top: 2px solid var(--line); }
@@ -91,6 +94,11 @@ function progress(p) {
   return el('span', {}, el('span', { className: 'bar' }, el('i', { style: 'width:' + pct + '%' })), p.done + '/' + p.total)
 }
 
+function note(n) {
+  const open = n.kind === 'blocker' && n.status === 'open'
+  return el('div', { className: open ? 'err' : 'dim', textContent: n.kind + ' · ' + n.status + ' · ' + n.text + (n.date ? ' (' + n.date + ')' : '') })
+}
+
 function section(title, ...children) { return el('div', {}, el('h3', { textContent: title }), ...children) }
 function table(head, rows) {
   if (rows.length === 0) return el('p', { className: 'dim', textContent: 'None.' })
@@ -109,6 +117,21 @@ function detail(p) {
       section('Roles', table(['Role', 'People'], p.roles.map(r => [r.label, r.people.join(', ') || '—']))),
       section('Tolerances', table(['', 'Area', 'Used / limit'], p.tolerances.map(t => [dot(t.light), t.area, t.used + ' / ' + t.limit + ' ' + t.unit]))),
     ),
+    ...(p.stages.length ? [] : [el('p', { className: 'dim', textContent: 'No stage linked: add stages: to .pm/project.yaml (docs/pm-schema.md) to see phases, commits and pull requests.' })]),
+    ...(p.unstagedNotes.length ? [section('Notes without a linked stage', ...p.unstagedNotes.map(n => el('div', {}, el('span', { className: 'mono', textContent: n.sha + ' ' }), note(n))))] : []),
+    ...(p.stages.length ? [section('Delivery', ...p.stages.map(s => el('div', {},
+      el('p', { textContent: ['Stage ' + (s.number ?? '?'), s.name, s.issue === null ? '' : '#' + s.issue, s.milestone && 'milestone ' + s.milestone, s.ref || s.branch].filter(Boolean).join(' · ') }),
+      ...(s.forge ? [
+        ...(s.forge.issue ? [el('p', { textContent: '#' + s.forge.issue.number + ' · ' + s.forge.issue.state + ' · ' + s.forge.issue.title })] : []),
+        ...(s.forge.milestone ? [el('p', { textContent: s.forge.milestone.title + ' ' + s.forge.milestone.closed + '/' + (s.forge.milestone.open + s.forge.milestone.closed) + (s.forge.milestone.due ? ' · due ' + s.forge.milestone.due : '') })] : []),
+        table(['Pull request', 'State', 'Title'], s.forge.pulls.map(pr => [el('a', { href: pr.url, textContent: '#' + pr.number }), el('span', { className: 'pull-' + pr.state, textContent: pr.state }), pr.title])),
+        ...(s.forge.isReadyToClose ? [el('p', { className: 'ready', textContent: 'ready to close' })] : []),
+      ] : []),
+      table(['', 'Phase', 'State'], s.phases.map(ph => [String(ph.number), ph.title, el('span', { className: 'phase-' + ph.state, textContent: ph.state })])),
+      table(['Commit', 'Date', 'Subject and notes'], s.commits.map(c => [el('span', { className: 'mono', textContent: c.short }), c.date,
+        el('div', {}, c.subject, ...c.notes.map(note))])),
+      ...(s.unlinkedNotes.length ? [el('p', { className: 'dim', textContent: 'Notes on commits not on the branch' }),
+        ...s.unlinkedNotes.map(n => el('div', {}, el('span', { className: 'mono', textContent: n.sha + ' ' }), note(n)))] : []))))] : []),
     section('Documents', table(['Document', 'Status', 'Version'], p.documents.map(d => [fileLink(d.path, d.title), d.status, d.version]))),
     section('Work packages', table(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due'],
       p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage ?? '', w.status, w.teamManager, w.due]))),
@@ -129,7 +152,11 @@ function draw() {
       el('td', {}, el('strong', { textContent: p.name }), el('div', { className: 'dim', textContent: p.code })),
       el('td', { textContent: p.stage.current === null ? '—' : p.stage.current + ' ' + p.stage.name }),
       el('td', {}, progress(p.progress)),
+      el('td', {}, p.delivery ? el('span', {}, progress(p.delivery), el('div', { className: 'dim', textContent: p.delivery.current }),
+        p.delivery.failed ? el('div', { className: 'err', textContent: p.delivery.failed + ' failed' }) : '',
+        p.stages.some(s => s.forge && s.forge.isReadyToClose) ? el('div', { className: 'ready', textContent: 'ready to close' }) : '') : '—'),
       el('td', { className: p.highRisks ? 'overdue' : '', textContent: p.highRisks }),
+      el('td', { className: p.openBlockers ? 'overdue' : '', textContent: p.openBlockers }),
       el('td', { textContent: p.openIssues }),
       el('td', { className: p.nextReport.isOverdue ? 'overdue' : '', textContent: (p.nextReport.due || '—') + (p.nextReport.isOverdue ? ' overdue' : '') }),
       el('td', {}, p.errors.length ? el('span', { className: 'err', textContent: '⚠ ' + p.errors.length }) : ''),

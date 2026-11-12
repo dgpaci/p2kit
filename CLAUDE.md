@@ -20,8 +20,7 @@ Italian.
 
 ## Forge
 
-GitHub, public repo `dgpaci/p2kit` (MIT), CLI `gh`. The repo is **not created yet**: create it or
-push only on the user's explicit OK. Not a Softwell repo: Claude attribution in commits and PRs is
+GitHub, public repo `dgpaci/p2kit` (MIT), CLI `gh`. Push only on the user's explicit OK. Not a Softwell repo: Claude attribution in commits and PRs is
 allowed.
 
 ## Guidelines
@@ -38,3 +37,13 @@ allowed.
 - YAML in `.pm/` stays within the subset `hooks/yaml.ts` parses (the mod has no Node and no npm).
 - Ask the user whether a new branch should be a worktree or a plain branch.
 - Mod style reference: `~/sviluppo/claude/forge-desk`.
+
+## Mod notes (learned in the stage-delivery workflow)
+
+- `claude plugin test` runs every `*.test.ts(x)` under the folder but skips dot folders, so tests
+  under `.phased/` and worktrees under `.claude/` never run by accident.
+- `$.http.fetch` takes no timeout. A hung call stalls every later refresh behind the `isLoading`
+  flag: race it with `$.clock.sleep(ms, { signal })` and abort the sleep once the answer is in
+  (`hooks/forge.ts:getForgeJson`). `$.process.run` takes `timeoutMs`.
+- Forgejo's pull-request list has no head-branch filter: page `pulls?state=all&sort=recentupdate`.
+  GitHub filters server-side with `pulls?head=<owner>:<branch>`.
