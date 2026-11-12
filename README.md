@@ -11,9 +11,13 @@ written from scratch.
   tags `pm/stage-<n>-approved`. Schema: [docs/pm-schema.md](docs/pm-schema.md).
 - **Project desk.** A side pane in the Claude Desktop Code tab with every registered project as a
   card — stage, progress, open high risks, next report due — with its work themes beneath. A
-  project opens on a form: a header, a bar of its work themes and the tabs Recap, Roles,
+  project opens on a form: a header, a bar of its work themes and the tabs Recap, Roles, Team,
   Documents, Work packages, Risks, Issues and Approvals; picking a theme shows its phases, issue
-  and pull requests, commits with notes. The same desk is a local browser page.
+  and pull requests, commits with notes. The Team tab lists each person of the roles with the
+  open issues and pull requests that are theirs — to do, in progress, review asked, waiting for
+  review, stalled — filterable by member; a red `WIP <person> n/limit` badge on the card and in
+  the recap flags anyone over their work-in-progress limit. Logins and limits come from the
+  `team:` section of `project.yaml`. The same desk is a local browser page.
 - **Work themes.** The work packages of a stage run in parallel; one linked with `/pm-link` to an
   issue, a milestone or a branch shows the phases of the phased-workflow plan found on its branch
   and its commits, read with local git, with internal notes on them kept in

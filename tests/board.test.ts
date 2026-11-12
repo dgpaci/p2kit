@@ -15,7 +15,7 @@ const wp = (id: string, title: string, status: string): WorkPackage => ({
 const PROJECT: Project = {
   path: '/p', name: 'Portal', code: 'PORTAL', profile: 'standard', status: 'delivery',
   stage: { current: 2, name: 'Build', start: '2026-10-01', plannedEnd: '' },
-  roles: [], tolerances: [], light: 'green', progress: { done: 1, total: 3 }, highRisks: 0, openIssues: 0,
+  roles: [], team: [], tolerances: [], light: 'green', progress: { done: 1, total: 3 }, highRisks: 0, openIssues: 0,
   nextReport: { due: '', isOverdue: false }, documents: [],
   workPackages: [wp('WP-01', 'Open one', 'in-progress'), wp('WP-02', 'Bad </script><b>', 'authorized'), wp('WP-03', 'Closed', 'completed')],
   risks: [], issues: [], approvals: [], openBlockers: 0, unthemedNotes: [], errors: [],

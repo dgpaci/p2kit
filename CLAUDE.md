@@ -38,7 +38,7 @@ allowed.
 - Ask the user whether a new branch should be a worktree or a plain branch.
 - Mod style reference: `~/sviluppo/claude/forge-desk`.
 
-## Mod notes (learned in the stage-delivery and desk-redesign workflows)
+## Mod notes (learned in the stage-delivery, desk-redesign and team-wip workflows)
 
 - `claude plugin test` runs every `*.test.ts(x)` under the folder but skips dot folders, so tests
   under `.phased/` and worktrees under `.claude/` never run by accident.
@@ -57,3 +57,9 @@ allowed.
   use `claude-code` for types only, so a scratch `npx tsx` script can `await import()` it (no
   package.json: a static import fails; take `mod.renderBoard ?? mod.default.renderBoard`) and feed
   it fixture projects.
+- Forgejo's `issues/search?assigned=true|created=true|review_requested=true` answers only for the
+  token's own user. A per-person view reads the repo's open issues and pulls once and partitions
+  them locally (`hooks/project.ts:addTeamState`, `hooks/team.ts:toTeamItems`).
+- In `claude plugin test` the test `$` has no `env`/`fs`, so `loadProjects` cannot be called
+  directly: drive the plugin (session start, forced `/pm-desk`) and read the `projects` atom through
+  a `state.set` pass-through hook (`tests/team-forge.test.ts`).

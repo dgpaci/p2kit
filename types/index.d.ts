@@ -70,6 +70,13 @@ export type WpDelivery = {
   forge: WpForge | null
 }
 
+// The status of an open issue or pull request from one team member's point of view.
+export type TeamStatus = 'review' | 'inprogress' | 'todo' | 'waiting' | 'stalled'
+// `updatedAt` is an ISO day.
+export type TeamItem = { kind: 'issue' | 'pr'; number: number; title: string; status: TeamStatus; url: string; updatedAt: string }
+// One person of the roles; `login` is '' when team.people gives none. WIP counts every item but `review`.
+export type TeamMember = { person: string; login: string; roles: string[]; items: TeamItem[]; wip: number; wipLimit: number; isOverLimit: boolean }
+
 export type Project = {
   path: string
   name: string
@@ -78,6 +85,8 @@ export type Project = {
   status: string
   stage: { current: number | null; name: string; start: string; plannedEnd: string }
   roles: RoleLine[]
+  // The people of the roles, once each; their items are read by loadProjects from the forge.
+  team: TeamMember[]
   tolerances: Tolerance[]
   light: Light
   // Work packages of the current stage: completed over not cancelled.
@@ -105,6 +114,7 @@ declare module 'claude-code' {
   interface PluginState {
     // `selected` is the path of the project the pane drills into; '' shows the overview.
     // `view` is that project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
-    p2kit: { projects: Shaped<Project[]>; selected: Shaped<string>; view: Shaped<string>; meta: Shaped<Meta> }
+    // `members` are the people the Team tab shows; empty shows everyone.
+    p2kit: { projects: Shaped<Project[]>; selected: Shaped<string>; view: Shaped<string>; members: Shaped<string[]>; meta: Shaped<Meta> }
   }
 }

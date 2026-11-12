@@ -75,6 +75,9 @@ th { color: var(--dim); font-weight: 500; font-size: 13px; }
 .pill { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; font-size: 12px; color: var(--dim); }
 .pill.open { color: var(--on); border-color: var(--on); } .pill.merged, .pill.ready { color: var(--green); border-color: var(--green); }
 .pill.red { color: var(--red); border-color: var(--red); }
+.pill.review { color: var(--amber); border-color: var(--amber); } .pill.inprogress { color: var(--on); border-color: var(--on); }
+.pill.waiting { color: var(--dim); } .pill.stalled { color: var(--red); border-color: var(--red); } .pill.todo { color: var(--fg); }
+.pill.wip-over { color: #fff; background: var(--red); border-color: var(--red); }
 .forge { display: flex; flex-wrap: wrap; gap: 6px; }
 button { border: 1px solid var(--line); background: var(--chip); color: var(--fg); border-radius: 999px; padding: 3px 10px; font: inherit; cursor: pointer; }
 .project { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
@@ -105,6 +108,15 @@ button { border: 1px solid var(--line); background: var(--chip); color: var(--fg
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 24px; }
 .note { padding-left: 12px; font-size: 13px; }
 .crumb { margin-bottom: 10px; }
+.members { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
+.members .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin-right: 4px; }
+.member-chip.sel { border-color: var(--on); color: var(--on); }
+.person { border: 1px solid var(--line); border-radius: 8px; margin-top: 10px; overflow: hidden; }
+.person.over { border-color: var(--red); }
+.person-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; background: var(--chip); flex-wrap: wrap; }
+.person-head .who small { color: var(--dim); margin-left: 6px; }
+.person table td, .person table th { padding: 5px 12px; }
+.person .empty { padding: 7px 12px; }
 @media (max-width: 720px) {
   .theme-row { grid-template-columns: 18px 1fr; } .theme-row .forge { grid-column: 2; justify-content: flex-start; }
   .theme-row > :nth-child(3) { grid-column: 2; }
@@ -123,6 +135,10 @@ const phaseBar = d => d.phases.length ? el('span', { className: 'phases', title:
 const pill = (text, cls = '') => el('span', { className: 'pill ' + cls, textContent: text })
 const stageOf = p => p.stage.current === null ? 'no stage' : 'stage ' + p.stage.current + (p.stage.name ? ' ' + p.stage.name : '')
 const isOpen = s => s === 'open'
+// WIP: one red badge per person over the limit, in the card head and in the recap's "Needs attention".
+const overLimit = p => p.team.filter(m => m.isOverLimit)
+const wipText = m => 'WIP ' + m.person + ' ' + m.wip + '/' + m.wipLimit
+const wipBadges = p => overLimit(p).map(m => pill(wipText(m), 'wip-over'))
 
 let route = decodeURIComponent(location.hash.slice(1))
 const go = r => { route = r; history.replaceState(null, '', r ? '#' + encodeURIComponent(r) : location.pathname); draw() }
@@ -173,7 +189,8 @@ function overview() {
             el('span', { className: p.openBlockers ? 'err' : '', textContent: 'blockers ' + p.openBlockers }),
             el('span', { textContent: 'open issues ' + p.openIssues }),
             el('span', { className: p.nextReport.isOverdue ? 'err' : '', textContent: 'next report ' + (p.nextReport.due || '—') + (p.nextReport.isOverdue ? ' overdue' : '') }),
-            p.errors.length ? el('span', { className: 'err', textContent: '⚠ ' + p.errors.length + ' errors' }) : null)),
+            p.errors.length ? el('span', { className: 'err', textContent: '⚠ ' + p.errors.length + ' errors' }) : null,
+            ...wipBadges(p))),
         el('span', {}, sessionLink(p))),
       ...(p.themes.length ? p.themes.map(w => el('div', { className: 'theme-row', onclick: () => go(p.path + '/theme/' + w.id) },
         el('span', { className: 'tree', textContent: '└' }),
@@ -191,6 +208,7 @@ function attention(p) {
     ...blockers.map(([wp, sha, text]) => el('div', { className: 'err' }, el('span', { className: 'mono', textContent: wp + ' ' + sha + ' ' }), text)),
     ...risks.map(r => el('div', { className: 'err', textContent: r.id + ' [' + r.score + '] ' + r.title })),
     p.nextReport.isOverdue ? el('div', { className: 'err', textContent: 'Highlight report overdue since ' + p.nextReport.due }) : null,
+    ...overLimit(p).map(m => el('div', { className: 'err', textContent: wipText(m) })),
   ].filter(Boolean)
   return lines.length ? lines : [el('p', { className: 'dim', textContent: 'Nothing.' })]
 }
@@ -240,12 +258,38 @@ function themePanel(p, w) {
 
 const wpLink = (p, w) => w.delivery ? link([w.delivery.issue === null ? '' : '#' + w.delivery.issue, w.delivery.milestone, w.delivery.branch].filter(Boolean).join(' · ') || 'theme', p.path + '/theme/' + w.id) : el('span', { className: 'dim', textContent: '—' })
 
+const STATUS_LABEL = { review: 'review asked', inprogress: 'in progress', todo: 'to do', waiting: 'waiting for review', stalled: 'stalled' }
+// Member filter of the Team tab: page-local, everyone shown when none is picked; another project starts unfiltered.
+const picked = new Set()
+let pickedFor = ''
+function team(p) {
+  if (pickedFor !== p.path) { picked.clear(); pickedFor = p.path }
+  const shown = picked.size ? p.team.filter(m => picked.has(m.person)) : p.team
+  const toggle = name => { picked.has(name) ? picked.delete(name) : picked.add(name); draw() }
+  return el('div', {},
+    el('div', { className: 'members' }, el('span', { className: 'label', textContent: 'Members' }),
+      ...p.team.map(m => el('button', { className: 'member-chip' + (picked.has(m.person) ? ' sel' : ''), onclick: () => toggle(m.person) }, m.person)),
+      picked.size ? el('a', { href: '#', textContent: 'all', onclick: e => { e.preventDefault(); picked.clear(); draw() } }) : null),
+    ...shown.map(m => el('div', { className: 'person' + (m.isOverLimit ? ' over' : '') },
+      el('div', { className: 'person-head' },
+        el('div', { className: 'who' }, el('strong', { textContent: m.person }), el('small', { textContent: (m.login ? '@' + m.login : 'no forge login') + ' · ' + m.roles.join(', ') })),
+        m.login ? pill('WIP ' + m.wip + '/' + m.wipLimit, m.isOverLimit ? 'wip-over' : '') : el('span', { className: 'dim', textContent: 'add team.people in project.yaml' })),
+      !m.login ? null : m.items.length
+        ? el('table', {}, el('tbody', {}, ...m.items.map(i => el('tr', {},
+            el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: (i.kind === 'pr' ? 'PR #' : '#') + i.number })),
+            el('td', { textContent: i.title }),
+            el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
+            el('td', { style: 'width:150px; text-align:right' }, pill(STATUS_LABEL[i.status], i.status))))))
+        : el('div', { className: 'empty dim', textContent: 'No open item.' }))))
+}
+
 // One entry per tab: [id, label, count(p), render(p)].
 // Risks and issues list every entry, the open ones first; a closed one is dimmed.
 const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
 const dimUnlessOpen = (status, cells) => isOpen(status) ? cells : cells.map(c => el('span', { className: 'dim' }, c))
 const TABS = [
   ['roles', 'Roles', p => p.roles.length, p => tableOf(['Role', 'People'], p.roles.map(r => [r.label, r.people.join(', ') || '—']))],
+  ['team', 'Team', p => p.team.length, team],
   ['documents', 'Documents', p => p.documents.length, p => tableOf(['Document', 'Status', 'Version'], p.documents.map(d => [fileLink(d.path, d.title), d.status, d.version]))],
   ['wps', 'Work packages', p => p.workPackages.length, p => tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Link'],
     p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.teamManager, w.due, wpLink(p, w)]))],

@@ -5,6 +5,8 @@ import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from 
 import type { ForgeTarget } from './forge'
 import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
 import { findPlanPath, getPhaseSummary, parsePhases } from './stage'
+import { readTeam, toTeamItems, withItems } from './team'
+import type { RestIssue, RestPull } from './team'
 import { isDoc, parseFrontmatter, parseYaml } from './yaml'
 import type { Doc, Value } from './yaml'
 
@@ -32,6 +34,9 @@ const FORGE_TTL_MS = 5 * 60 * 1000
 // Forgejo has no head filter: its pull requests are paged, most recently updated first, up to this many pages.
 const FORGEJO_PULL_PAGES = 5
 const FORGEJO_PAGE = 50
+// The open issues and pull requests of a repo, for the team, are paged up to this many pages each.
+const TEAM_PAGES = 5
+const GITHUB_PAGE = 100
 
 // The raw text of a project's .pm/ files, as the loader found them; paths are absolute.
 export type ProjectFiles = {
@@ -231,6 +236,9 @@ export function buildProject(files: ProjectFiles, today: string): Project {
   const since = text(reporting.last_highlight) || stage.start
   const due = every && since ? addDays(since, every) : ''
 
+  const roles = getRoles(data.roles)
+  const team = readTeam(roles, data.team, errors)
+
   return {
     path: files.path,
     name: text(data.name) || basename(files.path),
@@ -238,7 +246,8 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     profile: text(data.profile) || 'light',
     status: text(data.status),
     stage,
-    roles: getRoles(data.roles),
+    roles,
+    team,
     tolerances,
     light: getWorstLight(tolerances.map(one => one.light)),
     progress: { done: inStage.filter(wp => wp.status === 'completed').length, total: inStage.length },
@@ -416,12 +425,19 @@ const forgeCache = new Map<string, { at: number; forge: WpForge; errors: string[
 export const getWorkThemes = (project: Project): WorkPackage[] =>
   project.workPackages.filter(pkg => pkg.delivery && pkg.stage !== null && pkg.stage === project.stage.current && isOpen(pkg))
 
+// The forge of a project's origin, asked of git at most once per project read, and only when called.
+type OriginTarget = () => Promise<ForgeTarget | undefined>
+
+function getOriginTarget($: EngineInterface, path: string): OriginTarget {
+  let target: Promise<ForgeTarget | undefined> | undefined
+  return () => (target ??= git($, path, ['remote', 'get-url', 'origin']).then(origin => (origin.ok ? detectForge(origin.stdout.trim()) : undefined)))
+}
+
 /** The project with the forge state of its open linked work packages of the current stage attached; with none, nothing is read. */
-async function addForgeState($: EngineInterface, project: Project, isForced: boolean): Promise<Project> {
+async function addForgeState($: EngineInterface, project: Project, isForced: boolean, originTarget: OriginTarget): Promise<Project> {
   const themes = getWorkThemes(project)
   if (themes.length === 0) return project
-  const origin = await git($, project.path, ['remote', 'get-url', 'origin'])
-  const target = origin.ok ? detectForge(origin.stdout.trim()) : undefined
+  const target = await originTarget()
   if (!target) return project
   const now = await $.clock.now()
   const allErrors: string[] = []
@@ -442,6 +458,48 @@ async function addForgeState($: EngineInterface, project: Project, isForced: boo
   return { ...project, workPackages, errors: [...project.errors, ...allErrors] }
 }
 
+/** Reads, GET only, every page of an open list of the repo, up to TEAM_PAGES; failures go to `errors` and leave the list empty. */
+async function readOpenList<T>($: EngineInterface, target: ForgeTarget, what: 'issues' | 'pulls', errors: string[]): Promise<T[]> {
+  const size = target.forge === 'github' ? GITHUB_PAGE : FORGEJO_PAGE
+  const query = target.forge === 'github' ? `per_page=${size}` : `${what === 'issues' ? 'type=issues&' : ''}limit=${size}`
+  const list: T[] = []
+  try {
+    for (let n = 1; n <= TEAM_PAGES; n++) {
+      const batch = (await getForgeJson($, target, `repos/${target.repo}/${what}?state=open&${query}&page=${n}`)) as T[]
+      list.push(...batch)
+      if (batch.length < size) break
+    }
+    return list
+  } catch (error) {
+    errors.push(`team: ${target.forge} ${what}: ${error instanceof Error ? error.message : String(error)}`)
+    return []
+  }
+}
+
+// The last read of each project's open issues and pull requests, shared by its whole team.
+const teamCache = new Map<string, { at: number; issues: RestIssue[]; pulls: RestPull[]; errors: string[] }>()
+
+/** The project with the items of each team member who has a login; with none, nothing is read and git is not asked. */
+async function addTeamState($: EngineInterface, project: Project, isForced: boolean, originTarget: OriginTarget): Promise<Project> {
+  if (!project.team.some(member => member.login)) return project
+  const target = await originTarget()
+  if (!target) return project
+  const now = await $.clock.now()
+  let read = teamCache.get(project.path)
+  if (!read || isForced || now - read.at >= FORGE_TTL_MS) {
+    const errors: string[] = []
+    const [issues, pulls] = await Promise.all([
+      readOpenList<RestIssue>($, target, 'issues', errors),
+      readOpenList<RestPull>($, target, 'pulls', errors),
+    ])
+    read = { at: now, issues, pulls, errors }
+    teamCache.set(project.path, read)
+  }
+  const { issues, pulls, errors } = read
+  const team = project.team.map(member => (member.login ? withItems(member, toTeamItems(member.login, issues, pulls, now)) : member))
+  return { ...project, team, errors: [...project.errors, ...errors] }
+}
+
 /** Every registered project, read afresh; registry problems come back as errors. */
 export async function loadProjects($: EngineInterface, isForced = false): Promise<{ projects: Project[]; errors: string[] }> {
   const home = (await $.env.get('HOME')) ?? ''
@@ -457,7 +515,9 @@ export async function loadProjects($: EngineInterface, isForced = false): Promis
   const projects = await Promise.all(
     paths.map(async path => {
       try {
-        return await addForgeState($, buildProject(await readProjectFiles($, path), today), isForced)
+        const originTarget = getOriginTarget($, path)
+        const project = await addForgeState($, buildProject(await readProjectFiles($, path), today), isForced, originTarget)
+        return await addTeamState($, project, isForced, originTarget)
       } catch (error) {
         const empty = buildProject({ path, products: [], workPackages: [] }, today)
         return { ...empty, errors: [`cannot read ${path}: ${String(error)}`] }

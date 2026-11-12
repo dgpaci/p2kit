@@ -62,6 +62,11 @@ roles:
   team_manager: []
   assurance: []
   support: []
+team:                           # optional: forge logins and WIP limits of the people of the roles
+  wip_limit: 3                  # project default; 3 when absent
+  people:
+    Davide Paci: { login: dgpaci, wip_limit: 4 }
+    Marco Bianchi: { login: mbianchi }
 reporting:
   highlight_every_days: 14
   last_highlight: 2026-10-20    # date of the last highlight report, or null
@@ -86,6 +91,31 @@ one and the project by its worst:
 
 A tolerance with `limit: 0` is red as soon as `used > 0`. Any other tolerance area (quality,
 risk, benefits) may be added the same way.
+
+### Team and WIP
+
+The team is the people of `roles`, once each, in role order, with the labels of every role they
+hold. `team.people` maps a person, named exactly as in `roles`, to their forge `login` and an
+optional `wip_limit` (else `team.wip_limit`, else 3). A `team.people` key naming nobody in the
+roles is not added and gives the error `team.people: <name> is in no role`; an entry that is not a
+flow map (`Davide Paci: dgpaci`) gives `team.people: <name>: expected { login, wip_limit }`.
+
+When at least one person has a login and the origin is a forge, the desk reads the repo's open
+issues and open pull requests once per project (GET only, up to 5 pages each, again after 5
+minutes) and gives each person with a login the items that are theirs, with the status from their
+point of view:
+
+| status | item |
+|---|---|
+| `review` | open pull request authored by someone else, review requested from them |
+| `inprogress` | open pull request they authored or are assigned: draft, or no review requested from others |
+| `todo` | open issue assigned to them |
+| `waiting` | their open pull request with a review requested from someone else |
+| `stalled` | the same, untouched for more than 7 days |
+
+Items are listed in that order, most recently updated first within one status. The WIP of a
+person counts every item but `review`; over `wip_limit` the desk flags them. A forge failure is
+the project error `team: <forge> issues|pulls: <reason>`; the team still shows, with no item.
 
 ### Approval decisions
 
