@@ -47,3 +47,7 @@ allowed.
   (`hooks/forge.ts:getForgeJson`). `$.process.run` takes `timeoutMs`.
 - Forgejo's pull-request list has no head-branch filter: page `pulls?state=all&sort=recentupdate`.
   GitHub filters server-side with `pulls?head=<owner>:<branch>`.
+- QA of a worktree build: `claude -p --plugin-dir <worktree>` loads the mod without the pane; read
+  the board it writes to `~/.claude/p2kit/desk.html`. Another session loading p2kit rewrites that
+  file every 60 s, so wait for content only the new code writes. `/pm-desk` run while the
+  session-start reload is in flight returns "0 registered projects".

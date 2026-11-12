@@ -3,8 +3,8 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { openFile, openSession } from './actions'
 import { renderBoard } from './board'
-import type { CommitNote, Light, PhaseState, Project, Pull, StageForge } from '../types'
-import { loadProjects } from './project'
+import type { CommitNote, Light, PhaseState, Project, Pull, WpForge } from '../types'
+import { getWorkThemes, isOpen, loadProjects } from './project'
 
 const PANE = 'p2kit-desk'
 const TITLE = 'Project desk'
@@ -15,7 +15,7 @@ const BOARD_PATH = '.claude/p2kit/desk.html'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-3' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-4' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 const meta = atom(
   { plugin: 'p2kit', key: 'meta' } as const,
@@ -38,8 +38,8 @@ async function getBoardPath($: EngineInterface): Promise<string> {
 const getStageLabel = (project: Project): string =>
   project.stage.current === null ? 'no stage' : `stage ${project.stage.current}${project.stage.name ? ` ${project.stage.name}` : ''}`
 
-/** The forge's word on a stage in one line: issue and state, milestone closed/total, pull requests. */
-function getForgeLine(forge: StageForge): string {
+/** The forge's word on a work package in one line: issue and state, milestone closed/total, pull requests. */
+function getForgeLine(forge: WpForge): string {
   const open = forge.pulls.filter(pull => pull.state === 'open').length
   return [
     forge.issue ? `#${forge.issue.number} · ${forge.issue.state}` : '',
@@ -163,21 +163,26 @@ export const register: Register = on => {
               <Text dimColor wrap="truncate-end">
                 {`high risks ${project.highRisks} · open issues ${project.openIssues} · next report ${project.nextReport.due || '—'}`}
               </Text>
-              {project.delivery && (
-                <Box flexDirection="row" columnGap={1}>
-                  <Text wrap="truncate-end">
-                    {[`phases ${project.delivery.done}/${project.delivery.total}`, project.delivery.current].filter(Boolean).join(' · ')}
-                  </Text>
-                  {project.delivery.failed > 0 && <Text color="red">{`${project.delivery.failed} failed`}</Text>}
-                </Box>
-              )}
+              {getWorkThemes(project).map(({ id, delivery }) => {
+                const { summary, forge } = delivery!
+                return (
+                  <Box key={`theme:${id}`} flexDirection="column">
+                    <Box flexDirection="row" columnGap={1}>
+                      <Text wrap="truncate-end">
+                        {[id, summary.total ? `phases ${summary.done}/${summary.total}` : '', summary.current].filter(Boolean).join(' · ')}
+                      </Text>
+                      {summary.failed > 0 && <Text color="red">{`${summary.failed} failed`}</Text>}
+                    </Box>
+                    {forge && (
+                      <Box flexDirection="row" columnGap={1}>
+                        <Text dimColor wrap="truncate-end">{getForgeLine(forge)}</Text>
+                        {forge.isReadyToClose && <Text color="green">ready to close</Text>}
+                      </Box>
+                    )}
+                  </Box>
+                )
+              })}
               {project.openBlockers > 0 && <Text color="red">{`blockers ${project.openBlockers}`}</Text>}
-              {project.stages.filter(one => one.forge).map(({ forge }) => (
-                <Box flexDirection="row" columnGap={1}>
-                  <Text dimColor wrap="truncate-end">{getForgeLine(forge!)}</Text>
-                  {forge!.isReadyToClose && <Text color="green">ready to close</Text>}
-                </Box>
-              ))}
               {project.nextReport.isOverdue && <Text color="red">highlight report overdue</Text>}
               {project.errors.length > 0 && <Text color="red" wrap="truncate-end">{`⚠ ${project.errors[0]}`}</Text>}
               <Box flexDirection="row" columnGap={2}>
@@ -193,6 +198,8 @@ export const register: Register = on => {
     const p = chosen
     const openRisks = p.risks.filter(risk => risk.status === 'open').sort((a, b) => b.score - a.score)
     const openIssues = p.issues.filter(issue => issue.status === 'open')
+    const linked = p.workPackages.filter(pkg => pkg.delivery)
+    linked.sort((a, b) => Number(b.stage === p.stage.current) - Number(a.stage === p.stage.current))
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -208,50 +215,55 @@ export const register: Register = on => {
           <Button key="session" plain onPress={() => void openSession($, p)}>Open session</Button>
         </Box>
 
-        {p.stages.length === 0 && (
-          <Text dimColor wrap="truncate-end">No stage linked: add `stages:` to .pm/project.yaml (docs/pm-schema.md) to see phases, commits and pull requests.</Text>
+        {linked.length === 0 && (
+          <Text dimColor wrap="truncate-end">No work package linked: run /pm-link in the project's repo to see phases, commits and pull requests.</Text>
         )}
-        {p.unstagedNotes.length > 0 && (
+        {p.unthemedNotes.length > 0 && (
           <Box flexDirection="column">
-            <Text bold>Notes without a linked stage</Text>
-            {p.unstagedNotes.map(note => getNoteLine(note, true))}
+            <Text bold>Notes without a work theme</Text>
+            {p.unthemedNotes.map(note => getNoteLine(note, true))}
           </Box>
         )}
-        {p.stages.length > 0 && (
+        {linked.length > 0 && (
           <Box flexDirection="column">
-            <Text bold>Delivery</Text>
-            {p.stages.map(one => (
-              <Box key={`stage:${one.number}`} flexDirection="column">
-                <Text wrap="truncate-end">
-                  {[`Stage ${one.number ?? '?'}`, one.name, one.issue === null ? '' : `#${one.issue}`, one.milestone && `milestone ${one.milestone}`, one.ref || one.branch]
-                    .filter(Boolean).join(' · ')}
-                </Text>
-                {one.forge?.issue && (
-                  <Text wrap="truncate-end">{`#${one.forge.issue.number} · ${one.forge.issue.state} · ${one.forge.issue.title}`}</Text>
-                )}
-                {one.forge?.milestone && (
+            <Text bold>Work themes</Text>
+            {linked.map(({ id, title, status, delivery }) => {
+              const one = delivery!
+              return (
+                <Box key={`theme:${id}`} flexDirection="column">
                   <Text wrap="truncate-end">
-                    {[`${one.forge.milestone.title} ${one.forge.milestone.closed}/${one.forge.milestone.open + one.forge.milestone.closed}`, one.forge.milestone.due && `due ${one.forge.milestone.due}`].filter(Boolean).join(' · ')}
+                    {[`${id} ${title}`.trim(), one.issue === null ? '' : `#${one.issue}`, one.milestone && `milestone ${one.milestone}`, one.ref || one.branch]
+                      .filter(Boolean).join(' · ')}
                   </Text>
-                )}
-                {one.forge?.pulls.map(pull => (
-                  <Text color={PULL_COLOR[pull.state]} wrap="truncate-end">{`PR #${pull.number} · ${pull.state} · ${pull.title}`}</Text>
-                ))}
-                {one.forge?.isReadyToClose && <Text color="green">ready to close</Text>}
-                {one.ref && one.phases.length === 0 && <Text dimColor>No phased plan on the branch.</Text>}
-                {one.phases.map(phase => (
-                  <Text color={PHASE_COLOR[phase.state]} wrap="truncate-end">{`Phase ${phase.number}: ${phase.title} · ${phase.state}`}</Text>
-                ))}
-                {one.commits.map(commit => (
-                  <Box key={`commit:${commit.sha}`} flexDirection="column">
-                    <Text mono wrap="truncate-end">{`${commit.short} ${commit.subject}`}</Text>
-                    {commit.notes.map(note => getNoteLine(note))}
-                  </Box>
-                ))}
-                {one.unlinkedNotes.length > 0 && <Text dimColor>Notes on commits not on the branch</Text>}
-                {one.unlinkedNotes.map(note => getNoteLine(note, true))}
-              </Box>
-            ))}
+                  {one.forge?.issue && (
+                    <Text wrap="truncate-end">{`#${one.forge.issue.number} · ${one.forge.issue.state} · ${one.forge.issue.title}`}</Text>
+                  )}
+                  {one.forge?.milestone && (
+                    <Text wrap="truncate-end">
+                      {[`${one.forge.milestone.title} ${one.forge.milestone.closed}/${one.forge.milestone.open + one.forge.milestone.closed}`, one.forge.milestone.due && `due ${one.forge.milestone.due}`].filter(Boolean).join(' · ')}
+                    </Text>
+                  )}
+                  {one.forge?.pulls.map(pull => (
+                    <Text color={PULL_COLOR[pull.state]} wrap="truncate-end">{`PR #${pull.number} · ${pull.state} · ${pull.title}`}</Text>
+                  ))}
+                  {one.forge?.isReadyToClose && <Text color="green">ready to close</Text>}
+                  {one.ref && one.phases.length === 0 && <Text dimColor>No phased plan on the branch.</Text>}
+                  {one.phases.map(phase => (
+                    <Text color={PHASE_COLOR[phase.state]} wrap="truncate-end">{`Phase ${phase.number}: ${phase.title} · ${phase.state}`}</Text>
+                  ))}
+                  {one.commits.map(commit => (
+                    <Box key={`commit:${commit.sha}`} flexDirection="column">
+                      <Text mono wrap="truncate-end">{`${commit.short} ${commit.subject}`}</Text>
+                      {commit.notes.map(note => getNoteLine(note))}
+                    </Box>
+                  ))}
+                  {one.unlinkedNotes.length > 0 && (
+                    <Text dimColor>{isOpen({ status }) ? 'Notes on commits not on the branch' : 'Branch not read: the work package is closed'}</Text>
+                  )}
+                  {one.unlinkedNotes.map(note => getNoteLine(note, true))}
+                </Box>
+              )
+            })}
           </Box>
         )}
 

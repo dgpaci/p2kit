@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import type { Approval, CommitNote, Delivery, Issue, Light, Product, Project, Risk, RoleLine, StageDelivery, StageForge, Tolerance, WorkPackage } from '../types'
+import type { Approval, CommitNote, Issue, Light, Product, Project, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
 import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from './forge'
 import type { ForgeTarget } from './forge'
 import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
@@ -27,7 +27,7 @@ const HIGH_RISK = 6
 const DAY_MS = 24 * 60 * 60 * 1000
 // git and the forge are cut off past this; a hung call would stall every later refresh.
 const CALL_TIMEOUT_MS = 30 * 1000
-// The forge state of a stage is read again only past this age, unless the refresh is forced.
+// The forge state of a work package is read again only past this age, unless the refresh is forced.
 const FORGE_TTL_MS = 5 * 60 * 1000
 // Forgejo has no head filter: its pull requests are paged, most recently updated first, up to this many pages.
 const FORGEJO_PULL_PAGES = 5
@@ -41,15 +41,19 @@ export type ProjectFiles = {
   workPackages: { path: string; text: string }[]
   risks?: string
   issues?: string
-  // The plan read from each linked stage's branch; `path` and `text` are '' when the branch has none.
-  stagePlans?: { stage: number; ref: string; path: string; text: string }[]
-  // `git log` of each linked stage's branch over its base, in LOG_FORMAT.
-  stageLogs?: { stage: number; text: string }[]
+  // The plan read from each linked work package's branch; `path` and `text` are '' when the branch has none.
+  wpPlans?: { wp: string; ref: string; path: string; text: string }[]
+  // `git log` of each linked work package's branch over its base, in LOG_FORMAT.
+  wpLogs?: { wp: string; text: string }[]
   commitNotes?: string
   gitErrors?: string[]
 }
 
-type StageLink = Pick<StageDelivery, 'number' | 'name' | 'issue' | 'milestone' | 'branch' | 'base'>
+type WpLink = Pick<WpDelivery, 'issue' | 'milestone' | 'branch' | 'base'>
+// What the loader and buildProject both read from a work package's frontmatter.
+type WpFront = Omit<WorkPackage, 'delivery'> & { link: WpLink | null }
+
+const STAGES_ERROR = '.pm/project.yaml: stages: is no longer read — link the work packages with /pm-link (docs/pm-schema.md)'
 
 const text = (value: Value | undefined): string => (value === null || value === undefined ? '' : String(value))
 const num = (value: Value | undefined): number | null => (typeof value === 'number' ? value : null)
@@ -98,13 +102,23 @@ export function addDays(date: string, days: number): string {
   return Number.isNaN(time) ? '' : new Date(time + days * DAY_MS).toISOString().slice(0, 10)
 }
 
-/** The stages `project.yaml` links to an issue or a milestone. */
-function getStageLinks(value: Value | undefined): StageLink[] {
-  return docs(value).map(one => ({
-    number: num(one.number), name: text(one.name), issue: num(one.issue),
-    milestone: text(one.milestone), branch: text(one.branch), base: text(one.base),
-  }))
+/** A work package file's frontmatter; `link` is null unless it names an issue, a milestone or a branch. Throws on bad YAML. */
+function readWpFront(file: { path: string; text: string }): WpFront {
+  const { data: front } = parseFrontmatter(file.text)
+  const link = { issue: num(front.issue), milestone: text(front.milestone), branch: text(front.branch), base: text(front.base) }
+  return {
+    path: file.path,
+    id: text(front.id) || basename(file.path).replace(/\.md$/, ''),
+    title: text(front.title),
+    stage: num(front.stage),
+    status: text(front.status) || 'draft',
+    teamManager: text(front.team_manager),
+    due: text(front.due),
+    link: link.issue !== null || link.milestone || link.branch ? link : null,
+  }
 }
+
+export const isOpen = (wp: { status: string }): boolean => wp.status !== 'completed' && wp.status !== 'cancelled'
 
 /** Reads one register file: the list under `key`, or the error that stopped it. */
 function readRegister(name: string, raw: string | undefined, key: string, errors: string[]): Doc[] {
@@ -157,24 +171,19 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     }
   }
 
-  const workPackages: WorkPackage[] = []
+  if (data.stages !== undefined) errors.push(STAGES_ERROR)
+
+  const fronts: WpFront[] = []
   for (const file of files.workPackages) {
     try {
-      const { data: front } = parseFrontmatter(file.text)
-      workPackages.push({
-        path: file.path,
-        id: text(front.id) || basename(file.path).replace(/\.md$/, ''),
-        title: text(front.title),
-        stage: num(front.stage),
-        status: text(front.status) || 'draft',
-        teamManager: text(front.team_manager),
-        due: text(front.due),
-      })
+      const front = readWpFront(file)
+      const twin = fronts.find(one => one.id === front.id)
+      if (twin) errors.push(`duplicate work package id ${front.id} (${basename(twin.path)}, ${basename(front.path)})`)
+      fronts.push(front)
     } catch (error) {
       errors.push(`${basename(file.path)}: ${String(error)}`)
     }
   }
-  workPackages.sort((a, b) => a.id.localeCompare(b.id))
 
   const risks: Risk[] = readRegister('risks.yaml', files.risks, 'risks', errors).map(risk => {
     const probability = text(risk.probability)
@@ -193,29 +202,27 @@ export function buildProject(files: ProjectFiles, today: string): Project {
   }))
 
   const notes: CommitNote[] = readRegister('commit-notes.yaml', files.commitNotes, 'notes', errors).map(note => ({
-    sha: text(note.sha), stage: num(note.stage), kind: text(note.kind),
+    sha: text(note.sha), wp: text(note.wp), kind: text(note.kind),
     status: text(note.status) || 'open', text: text(note.text), date: text(note.date),
   }))
 
-  const links = getStageLinks(data.stages)
-  const stages: StageDelivery[] = links.map(link => {
-    const plan = files.stagePlans?.find(one => one.stage === link.number)
-    const log = files.stageLogs?.find(one => one.stage === link.number)
-    const ofStage = link.number === null ? [] : notes.filter(note => note.stage === link.number)
-    const commits = parseCommits(log?.text ?? '').map(commit => ({ ...commit, notes: ofStage.filter(note => isNoteOf(note, commit)) }))
-    return {
-      ...link, ref: plan?.ref ?? '', planPath: plan?.path ?? '', phases: parsePhases(plan?.text ?? ''),
-      commits, unlinkedNotes: ofStage.filter(note => !commits.some(commit => isNoteOf(note, commit))), forge: null,
+  const workPackages: WorkPackage[] = fronts.map(({ link, ...wp }) => {
+    if (!link) return { ...wp, delivery: null }
+    const plan = files.wpPlans?.find(one => one.wp === wp.id)
+    const log = files.wpLogs?.find(one => one.wp === wp.id)
+    const ofWp = notes.filter(note => note.wp === wp.id)
+    const commits = parseCommits(log?.text ?? '').map(commit => ({ ...commit, notes: ofWp.filter(note => isNoteOf(note, commit)) }))
+    const phases = parsePhases(plan?.text ?? '')
+    const { done, total, current, failed } = getPhaseSummary(phases)
+    const delivery: WpDelivery = {
+      ...link, ref: plan?.ref ?? '', planPath: plan?.path ?? '', phases,
+      summary: { done, total, current: current ? `Phase ${current.number}: ${current.title}` : '', failed },
+      commits, unlinkedNotes: ofWp.filter(note => !commits.some(commit => isNoteOf(note, commit))), forge: null,
     }
+    return { ...wp, delivery }
   })
-  stages.sort((a, b) => Number(b.number === stage.current) - Number(a.number === stage.current))
+  workPackages.sort((a, b) => a.id.localeCompare(b.id))
   errors.push(...(files.gitErrors ?? []))
-  const linked = stages.find(one => one.number === stage.current)
-  let delivery: Delivery | null = null
-  if (linked && stage.current !== null) {
-    const { done, total, current, failed } = getPhaseSummary(linked.phases)
-    delivery = { stage: stage.current, done, total, current: current ? `Phase ${current.number}: ${current.title}` : '', failed }
-  }
 
   const inStage = workPackages.filter(wp => wp.stage === stage.current && wp.status !== 'cancelled')
   const tolerances = getTolerances(data.tolerances)
@@ -243,10 +250,8 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     risks,
     issues,
     approvals,
-    stages,
-    delivery,
     openBlockers: notes.filter(note => note.kind === 'blocker' && note.status === 'open').length,
-    unstagedNotes: notes.filter(note => !links.some(link => link.number !== null && link.number === note.stage)),
+    unthemedNotes: notes.filter(note => !workPackages.some(pkg => pkg.delivery && pkg.id === note.wp)),
     errors,
   }
 }
@@ -285,22 +290,29 @@ async function resolveRef($: EngineInterface, path: string, branch: string): Pro
   return ''
 }
 
-/** Reads, from git only, the phased plan and the commits over its base on the branch of each linked stage. Never fetches. */
-async function readStagePlans($: EngineInterface, path: string, links: StageLink[]): Promise<Pick<ProjectFiles, 'stagePlans' | 'stageLogs' | 'gitErrors'>> {
-  const stagePlans: NonNullable<ProjectFiles['stagePlans']> = []
-  const stageLogs: NonNullable<ProjectFiles['stageLogs']> = []
+/** Reads, from git only, the phased plan and the commits over its base on the branch of each open linked work package. Never fetches. */
+async function readWpPlans($: EngineInterface, path: string, files: ProjectFiles['workPackages']): Promise<Pick<ProjectFiles, 'wpPlans' | 'wpLogs' | 'gitErrors'>> {
+  const wpPlans: NonNullable<ProjectFiles['wpPlans']> = []
+  const wpLogs: NonNullable<ProjectFiles['wpLogs']> = []
   const gitErrors: string[] = []
-  for (const link of links) {
-    if (!link.branch || link.number === null) continue
+  for (const file of files) {
+    let wp: WpFront
+    try {
+      wp = readWpFront(file)
+    } catch {
+      continue // buildProject reports the parse error.
+    }
+    const link = wp.link
+    if (!link?.branch || !isOpen(wp)) continue
     const ref = await resolveRef($, path, link.branch)
     if (!ref) {
-      gitErrors.push(`stage ${link.number}: branch ${link.branch} not found`)
+      gitErrors.push(`${wp.id}: branch ${link.branch} not found`)
       continue
     }
     const tree = await git($, path, ['ls-tree', '-r', '--name-only', ref, '--', '.phased'])
     const planPath = tree.ok ? findPlanPath(tree.stdout.split('\n').filter(Boolean), link.issue) : undefined
     const plan = planPath ? await git($, path, ['show', `${ref}:${planPath}`]) : undefined
-    stagePlans.push(planPath && plan?.ok ? { stage: link.number, ref, path: planPath, text: plan.stdout } : { stage: link.number, ref, path: '', text: '' })
+    wpPlans.push(planPath && plan?.ok ? { wp: wp.id, ref, path: planPath, text: plan.stdout } : { wp: wp.id, ref, path: '', text: '' })
 
     let base = ''
     if (link.base) base = await resolveRef($, path, link.base)
@@ -309,14 +321,14 @@ async function readStagePlans($: EngineInterface, path: string, links: StageLink
       if (head.ok) base = head.stdout.trim()
     }
     if (!base) {
-      gitErrors.push(`stage ${link.number}: base ${link.base || 'origin/HEAD'} not found`)
+      gitErrors.push(`${wp.id}: base ${link.base || 'origin/HEAD'} not found`)
       continue
     }
     const log = await git($, path, ['log', '--date=short', `--format=${LOG_FORMAT}`, `${base}..${ref}`])
-    if (log.ok) stageLogs.push({ stage: link.number, text: log.stdout })
-    else gitErrors.push(`stage ${link.number}: git log ${base}..${ref} failed`)
+    if (log.ok) wpLogs.push({ wp: wp.id, text: log.stdout })
+    else gitErrors.push(`${wp.id}: git log ${base}..${ref} failed`)
   }
-  return { stagePlans, stageLogs, gitErrors }
+  return { wpPlans, wpLogs, gitErrors }
 }
 
 /** Reads the .pm/ folder of the project at `path`. */
@@ -329,82 +341,97 @@ export async function readProjectFiles($: EngineInterface, path: string): Promis
     for (const stage of stages) products.push(...(await listMarkdown($, `${pm}/stages/${stage.name}`)))
   }
   products.push(...(await listMarkdown($, `${pm}/reports`)))
-  const project = await readIfExists($, `${pm}/project.yaml`)
-  let links: StageLink[] = []
-  try {
-    const parsed = project === undefined ? undefined : parseYaml(project)
-    if (isDoc(parsed)) links = getStageLinks(parsed.stages)
-  } catch {
-    // buildProject reports the parse error.
-  }
+  const workPackages = await listMarkdown($, `${pm}/work-packages`)
 
   return {
     path,
-    project,
-    ...(await readStagePlans($, path, links)),
+    project: await readIfExists($, `${pm}/project.yaml`),
+    ...(await readWpPlans($, path, workPackages)),
     products,
-    workPackages: await listMarkdown($, `${pm}/work-packages`),
+    workPackages,
     risks: await readIfExists($, `${pm}/registers/risks.yaml`),
     issues: await readIfExists($, `${pm}/registers/issues.yaml`),
     commitNotes: await readIfExists($, `${pm}/registers/commit-notes.yaml`),
   }
 }
 
-/** Reads, GET only, the issue or milestone of a stage and the pull requests of its branch; failures go to `errors`. */
-async function readStageForge($: EngineInterface, target: ForgeTarget, stage: StageDelivery, errors: string[]): Promise<StageForge> {
+type PullList = Parameters<typeof toPulls>[0]
+
+/** Reads, GET only, the issue or milestone of a work package and the pull requests of its branch; failures go to `errors`. */
+async function readWpForge(
+  $: EngineInterface, target: ForgeTarget, id: string, link: WpDelivery, errors: string[], shared: { pulls?: Promise<PullList> },
+): Promise<WpForge> {
   const page = target.forge === 'github' ? 'per_page=100' : `limit=${FORGEJO_PAGE}`
   const get = async <T>(what: string, path: string): Promise<T | undefined> => {
     try {
       return (await getForgeJson($, target, `repos/${target.repo}/${path}`)) as T
     } catch (error) {
-      errors.push(`stage ${stage.number}: ${target.forge} ${what}: ${error instanceof Error ? error.message : String(error)}`)
+      errors.push(`${id}: ${target.forge} ${what}: ${error instanceof Error ? error.message : String(error)}`)
       return undefined
     }
   }
-  const forge: StageForge = { pulls: [], isReadyToClose: false }
-  if (stage.issue !== null) {
-    const issue = await get<{ number: number; title: string; state: string }>('issue', `issues/${stage.issue}`)
+  const forge: WpForge = { pulls: [], isReadyToClose: false }
+  if (link.issue !== null) {
+    const issue = await get<{ number: number; title: string; state: string }>('issue', `issues/${link.issue}`)
     if (issue) forge.issue = { number: issue.number, title: issue.title, state: issue.state }
   }
-  if (stage.milestone) {
+  if (link.milestone) {
     const list = await get<Parameters<typeof toMilestone>[0]>('milestones', `milestones?state=all&${page}`)
-    if (list) forge.milestone = toMilestone(list, stage.milestone)
+    if (list) forge.milestone = toMilestone(list, link.milestone)
   }
-  if (stage.branch && target.forge === 'github') {
+  if (link.branch && target.forge === 'github') {
     const owner = target.repo.split('/')[0]
-    const list = await get<Parameters<typeof toPulls>[0]>('pulls', `pulls?state=all&head=${owner}:${encodeURIComponent(stage.branch)}&${page}`)
-    if (list) forge.pulls = toPulls(list, stage.branch)
-  } else if (stage.branch) {
-    for (let n = 1; n <= FORGEJO_PULL_PAGES; n++) {
-      const list = await get<Parameters<typeof toPulls>[0]>('pulls', `pulls?state=all&sort=recentupdate&limit=${FORGEJO_PAGE}&page=${n}`)
-      if (!list) break
-      forge.pulls.push(...toPulls(list, stage.branch))
-      if (list.length < FORGEJO_PAGE) break
-    }
+    const list = await get<Parameters<typeof toPulls>[0]>('pulls', `pulls?state=all&head=${owner}:${encodeURIComponent(link.branch)}&${page}`)
+    if (list) forge.pulls = toPulls(list, link.branch)
+  } else if (link.branch) {
+    // Forgejo has no head filter: the repo's pull list is paged once per read of the project and shared by its work packages.
+    shared.pulls ??= (async () => {
+      const all: PullList = []
+      for (let n = 1; n <= FORGEJO_PULL_PAGES; n++) {
+        const list = await get<PullList>('pulls', `pulls?state=all&sort=recentupdate&limit=${FORGEJO_PAGE}&page=${n}`)
+        if (!list) break
+        all.push(...list)
+        if (list.length < FORGEJO_PAGE) break
+      }
+      return all
+    })()
+    forge.pulls = toPulls(await shared.pulls, link.branch)
   }
   forge.isReadyToClose = isReadyToClose(forge.pulls)
   return forge
 }
 
-// The last forge read per project stage link, so the 60 s refresh does not hit the forge every time.
-const forgeCache = new Map<string, { at: number; forge: StageForge; errors: string[] }>()
+// The last forge read per project work package link, so the 60 s refresh does not hit the forge every time.
+const forgeCache = new Map<string, { at: number; forge: WpForge; errors: string[] }>()
 
-/** The project with the forge state of its current stage attached; a project with no linked current stage reads nothing. */
+/** The open linked work packages of the current stage: the ones the forge is read for. */
+export const getWorkThemes = (project: Project): WorkPackage[] =>
+  project.workPackages.filter(pkg => pkg.delivery && pkg.stage !== null && pkg.stage === project.stage.current && isOpen(pkg))
+
+/** The project with the forge state of its open linked work packages of the current stage attached; with none, nothing is read. */
 async function addForgeState($: EngineInterface, project: Project, isForced: boolean): Promise<Project> {
-  const current = project.stages.find(one => one.number !== null && one.number === project.stage.current)
-  if (!current || (current.issue === null && !current.milestone && !current.branch)) return project
+  const themes = getWorkThemes(project)
+  if (themes.length === 0) return project
   const origin = await git($, project.path, ['remote', 'get-url', 'origin'])
   const target = origin.ok ? detectForge(origin.stdout.trim()) : undefined
   if (!target) return project
-  const key = [project.path, current.number, current.issue, current.milestone, current.branch].join('|')
   const now = await $.clock.now()
-  const cached = forgeCache.get(key)
-  let { forge, errors } = cached && !isForced && now - cached.at < FORGE_TTL_MS ? cached : { forge: undefined, errors: [] as string[] }
-  if (!forge) {
-    forge = await readStageForge($, target, current, errors)
-    forgeCache.set(key, { at: now, forge, errors })
+  const allErrors: string[] = []
+  const forges = new Map<string, WpForge>()
+  const shared: { pulls?: Promise<PullList> } = {}
+  for (const { id, delivery } of themes) {
+    const key = [project.path, id, delivery.issue, delivery.milestone, delivery.branch].join('|')
+    const cached = forgeCache.get(key)
+    let { forge, errors } = cached && !isForced && now - cached.at < FORGE_TTL_MS ? cached : { forge: undefined, errors: [] as string[] }
+    if (!forge) {
+      forge = await readWpForge($, target, id, delivery!, errors, shared)
+      forgeCache.set(key, { at: now, forge, errors })
+    }
+    forges.set(id, forge)
+    allErrors.push(...errors)
   }
-  return { ...project, stages: project.stages.map(one => (one === current ? { ...one, forge } : one)), errors: [...project.errors, ...errors] }
+  const workPackages = project.workPackages.map(pkg => (pkg.delivery && forges.has(pkg.id) ? { ...pkg, delivery: { ...pkg.delivery, forge: forges.get(pkg.id)! } } : pkg))
+  return { ...project, workPackages, errors: [...project.errors, ...allErrors] }
 }
 
 /** Every registered project, read afresh; registry problems come back as errors. */

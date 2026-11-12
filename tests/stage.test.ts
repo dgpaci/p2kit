@@ -23,18 +23,13 @@ Mode: manual
 - [ ] a checklist item in the notes is not a phase
 `
 
-const PROJECT = `
-name: Anaci
-stage: { current: 3, name: Certificate }
-stages:
-  - number: 3
-    name: Certificate header and rows
-    issue: 498
-    branch: feature/498-certificato-testata-righe
-    base: develop
-  - number: 4
-    milestone: v2.5
-`
+const PROJECT = 'name: Anaci\nstage: { current: 3, name: Certificate }\n'
+const WP = (id: string, front: string) => ({ path: `/src/anaci/.pm/work-packages/${id}.md`, text: `---\nid: ${id}\nproduct: work-package\n${front}---\n` })
+const WORK_PACKAGES = [
+  WP('WP-03', 'title: Certificate header and rows\nstage: 3\nstatus: in-progress\nissue: 498\nbranch: feature/498-certificato-testata-righe\nbase: develop\n'),
+  WP('WP-04', 'title: Release\nstage: 3\nstatus: authorized\nmilestone: v2.5\n'),
+  WP('WP-05', 'title: Docs\nstage: 3\nstatus: draft\n'),
+]
 
 test('the phases of a plan: number, title without tags, state by marker', async () => {
   expect(parsePhases(PLAN)).toEqual([
@@ -67,35 +62,38 @@ test('the plan of a branch: the active one, else the archived one of the issue',
   expect(findPlanPath([], null)).toBeUndefined()
 })
 
-test('stages link to an issue or a milestone and carry the phases read from their branch', async () => {
+test('work packages link to an issue, a milestone or a branch and carry the phases read from their branch', async () => {
   const project = buildProject(
     {
       path: '/src/anaci',
       project: PROJECT,
       products: [],
-      workPackages: [],
-      stagePlans: [{ stage: 3, ref: 'origin/feature/498-certificato-testata-righe', path: '.phased/active/498-cert/plan.md', text: PLAN }],
-      gitErrors: ['stage 4: no branch to read'],
+      workPackages: WORK_PACKAGES,
+      wpPlans: [{ wp: 'WP-03', ref: 'origin/feature/498-certificato-testata-righe', path: '.phased/active/498-cert/plan.md', text: PLAN }],
+      gitErrors: ['WP-04: no branch to read'],
     },
     '2026-11-12',
   )
+  const [wp3, wp4, wp5] = project.workPackages
 
-  expect(project.stages).toMatchObject([
-    {
-      number: 3, name: 'Certificate header and rows', issue: 498, milestone: '',
-      branch: 'feature/498-certificato-testata-righe', base: 'develop',
-      ref: 'origin/feature/498-certificato-testata-righe', planPath: '.phased/active/498-cert/plan.md',
-    },
-    { number: 4, name: '', issue: null, milestone: 'v2.5', branch: '', base: '', ref: '', planPath: '', phases: [] },
-  ])
-  expect(project.stages[0].phases).toHaveLength(7)
-  expect(project.delivery).toEqual({ stage: 3, done: 3, total: 7, current: 'Phase 4: Signature flow', failed: 1 })
-  expect(project.errors).toContain('stage 4: no branch to read')
+  expect(wp3.delivery).toMatchObject({
+    issue: 498, milestone: '', branch: 'feature/498-certificato-testata-righe', base: 'develop',
+    ref: 'origin/feature/498-certificato-testata-righe', planPath: '.phased/active/498-cert/plan.md', forge: null,
+  })
+  expect(wp3.delivery!.phases).toHaveLength(7)
+  expect(wp3.delivery!.summary).toEqual({ done: 3, total: 7, current: 'Phase 4: Signature flow', failed: 1 })
+  expect(wp4.delivery).toMatchObject({ issue: null, milestone: 'v2.5', branch: '', base: '', ref: '', planPath: '', phases: [] })
+  expect(wp4.delivery!.summary).toEqual({ done: 0, total: 0, current: '', failed: 0 })
+  expect(wp5.delivery).toBeNull()
+  expect(project.errors).toContain('WP-04: no branch to read')
 })
 
-test('a project without stages has no delivery line', async () => {
-  const project = buildProject({ path: '/p', project: 'name: P\nstage: { current: 2 }\n', products: [], workPackages: [] }, '2026-11-12')
+test('a project.yaml still carrying stages: is told to move its links to the work packages', async () => {
+  const project = buildProject(
+    { path: '/p', project: 'name: P\nstage: { current: 2 }\nstages:\n  - number: 2\n    issue: 498\n', products: [], workPackages: [] },
+    '2026-11-12',
+  )
 
-  expect(project.stages).toEqual([])
-  expect(project.delivery).toBeNull()
+  expect(project.errors).toContain('.pm/project.yaml: stages: is no longer read — link the work packages with /pm-link (docs/pm-schema.md)')
+  expect(buildProject({ path: '/p', project: PROJECT, products: [], workPackages: [] }, '2026-11-12').errors).toEqual([])
 })

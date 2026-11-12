@@ -14,7 +14,7 @@ committed with the code. The skills write it; the project desk reads it.
   reports/<date>-<kind>.md  highlight, checkpoint, exception, end-stage, end-project reports
   registers/risks.yaml      Risk Register
   registers/issues.yaml     Issue Register
-  registers/commit-notes.yaml  internal notes on the commits of stage branches (/pm-note)
+  registers/commit-notes.yaml  internal notes on the commits of work-package branches (/pm-note)
   registers/quality.yaml    Quality Register          (phase 2)
   registers/lessons.yaml    Lessons Log               (phase 2)
   registers/daily-log.yaml  Daily Log                 (phase 2)
@@ -50,13 +50,6 @@ stage:
   name: Build
   start: 2026-10-01
   planned_end: 2026-12-15
-stages:                         # optional: stages worked as an issue or a milestone on a branch
-  - number: 2
-    name: Build
-    issue: 498                  # forge issue number, or absent
-    milestone: ''               # forge milestone title, or ''
-    branch: feature/498-build   # the branch the stage is worked on
-    base: develop               # '' = the repo's default branch
 tolerances:                     # project-level; a stage may tighten them in its plan
   time:  { limit: 10, used: 3, unit: days }     # used = current forecast deviation
   cost:  { limit: 5000, used: 4200, unit: EUR }
@@ -99,33 +92,44 @@ risk, benefits) may be added the same way.
 `authorize-initiation`, `authorize-project`, `authorize-stage-<n>`, `exception-plan-<n>`,
 `authorize-closure`, or free text. `by` must be the Executive or a Board member named in `roles`.
 
-## Stage delivery
+## Work themes
 
-A stage listed under `stages:` is linked to a forge issue or milestone and worked on `branch`.
-The desk reads that branch with local git only — never a fetch: the ref is `branch`, else
-`origin/<branch>`; on it, the plan is the one `.phased/active/<slug>/plan.md`, else
-`.phased/done/<issue>-*/plan.md`. Its phase lines `- [m] **Phase N**: title` give the stage's
-progress: `x` done, `>` in progress, ` ` to do, `!` failed, `~` blocked. The overview shows
-`phases <done>/<total>` and the current phase of the current stage; a branch that resolves
-neither way is the error `stage <n>: branch <branch> not found`.
+The work themes of a stage run in parallel, each one a work package linked to a forge issue, a
+milestone or a branch by the link keys of its frontmatter (see *Work packages*). `/pm-link` writes
+them. A work package with an `issue`, a `milestone` or a `branch` is *linked*. `project.yaml` no
+longer carries `stages:`: a file that still does gets the error
+`.pm/project.yaml: stages: is no longer read — link the work packages with /pm-link (docs/pm-schema.md)`.
 
-The desk also lists the branch's commits over its base — `git log <base ref>..<stage ref>`, the
+For each linked work package with a `branch` whose status is neither `completed` nor `cancelled`,
+of any stage, the desk reads that branch with local git only — never a fetch: the ref is
+`branch`, else `origin/<branch>`; on it, the plan is the one `.phased/active/<slug>/plan.md`, else
+`.phased/done/<issue>-*/plan.md`. Its phase lines `- [m] **Phase N**: title` give the work
+package's progress: `x` done, `>` in progress, ` ` to do, `!` failed, `~` blocked. The overview
+shows, per linked open work package of the current stage, `WP-<nn> · phases <done>/<total>` and
+its current phase; a branch that resolves neither way is the error
+`WP-<nn>: branch <branch> not found`.
+
+The desk also lists the branch's commits over its base — `git log <base ref>..<branch ref>`, the
 base resolved like the branch (`base`, else `origin/<base>`; `''` →
 `git symbolic-ref --short refs/remotes/origin/HEAD`) — each with its notes from
 `registers/commit-notes.yaml`. A base that does not resolve is the error
-`stage <n>: base <base> not found`. Notes whose `stage` is not linked under `stages:`, or that
-name none, are listed apart, since open blockers are counted over the whole register.
+`WP-<nn>: base <base> not found`. Notes whose `wp` is absent or names no linked work package are
+listed apart, under *Notes without a work theme*, since open blockers are counted over the whole
+register.
 
-For the current stage only, at most every 5 minutes (the Refresh button reads it at once), the desk reads the forge of the repo's `origin`
-(`github.com` → GitHub through `gh api`; any other host → Forgejo REST with the `fj` token of that
-host from `~/Library/Application Support/forgejo-cli.forgejo-cli/keys.json`). GET only — the desk
-never writes to a forge. `issue` → the issue's title and state; `milestone` → the milestone with that
+For the linked work packages of the current stage whose status is neither `completed` nor
+`cancelled`, at most every 5 minutes per work package (the Refresh button and `/pm-desk` read it
+at once), the desk reads the forge of the repo's `origin` (`github.com` → GitHub through `gh api`;
+any other host → Forgejo REST with the `fj` token of that host from
+`~/Library/Application Support/forgejo-cli.forgejo-cli/keys.json`). GET only — the desk never
+writes to a forge. `issue` → the issue's title and state; `milestone` → the milestone with that
 title, shown `<title> <closed>/<open+closed>` with its due day; `branch` → the pull requests whose
 head is the branch, open, merged or closed (GitHub filters by head; Forgejo has no such filter, so
-the 250 most recently updated pull requests are searched). Git and forge calls give up after 30 s. The stage is `ready to close` when at least one is
-merged and none is open; closing the milestone stays a human act. No origin, or an origin that is
-not a repo URL, reads nothing; a forge failure is the error `stage <n>: <forge> <what>: <reason>`,
-and the local data still shows.
+the 250 most recently updated pull requests are searched). Git and forge calls give up after
+30 s. A work package is `ready to close` when at least one pull request is merged and none is
+open; closing the milestone stays a human act. A project with no such work package does not ask
+git for its origin; no origin, or an origin that is not a repo URL, reads nothing; a forge failure
+is the error `WP-<nn>: <forge> <what>: <reason>`, and the local data still shows.
 
 ## Markdown products
 
@@ -153,10 +157,17 @@ stage: 2
 status: in-progress       # draft | authorized | in-progress | completed | cancelled
 team_manager: Luca Verdi
 due: 2026-11-20
+issue: 498                # link keys, optional (/pm-link): forge issue number, or absent
+milestone: ''             # forge milestone title, or absent / ''
+branch: feature/498-pay   # the branch the work package is worked on
+base: develop             # '' = the repo's default branch
 ```
 
 Progress of a stage = WPs of that stage with status `completed` / WPs of that stage that are not
 `cancelled`.
+
+`id` is unique in the project: two files carrying the same one are the error
+`duplicate work package id <id> (<file>, <file>)`.
 
 ## Registers
 
@@ -191,17 +202,21 @@ issues:
 
 ### `registers/commit-notes.yaml`
 
-Internal notes on the commits of a stage branch, written by `/pm-note`; never posted to the forge.
+Internal notes on the commits of a work package's branch, written by `/pm-note`; never posted to
+the forge.
 
 ```yaml
 notes:
-  - { sha: 3f2a9c1, stage: 2, kind: blocker, status: open, text: 'waiting for the print template', date: 2026-11-11 }
+  - { sha: 3f2a9c1, wp: WP-03, kind: blocker, status: open, text: 'waiting for the print template', date: 2026-11-11 }
 ```
+
+- `wp`: the work package the note belongs to. Notes written before work themes carry `stage:`
+  instead; the desk lists them, with any note naming no linked work package, apart.
 
 - `sha`: 7 or more hex characters, short or full; a note belongs to a commit when one sha is a
   prefix of the other, case aside.
 - `kind`: `follow-up` | `blocker` | `remark`; `status`: `open` | `closed`.
-- Notes of a stage matching no commit of its branch (after a squash merge, say) are listed apart.
+- Notes of a work package matching no commit of its branch (after a squash merge, say) are listed apart.
 - The overview counts the open blockers of the whole register: `blockers N`, in red.
 
 ## Next report due
