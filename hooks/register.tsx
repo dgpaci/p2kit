@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { openFile, openSession } from './actions'
 import { renderBoard } from './board'
-import type { Light, Project } from '../types'
+import type { CommitNote, Light, PhaseState, Project, Pull, StageForge } from '../types'
 import { loadProjects } from './project'
 
 const PANE = 'p2kit-desk'
@@ -15,7 +15,7 @@ const BOARD_PATH = '.claude/p2kit/desk.html'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-1' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-3' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 const meta = atom(
   { plugin: 'p2kit', key: 'meta' } as const,
@@ -24,6 +24,8 @@ const meta = atom(
 )
 
 const LIGHT_COLOR: Record<Light, string> = { green: 'green', amber: 'yellow', red: 'red', none: 'gray' }
+const PHASE_COLOR: Record<PhaseState, string> = { done: 'green', 'in-progress': 'cyan', todo: 'gray', failed: 'red', blocked: 'yellow' }
+const PULL_COLOR: Record<Pull['state'], string> = { open: 'cyan', merged: 'green', closed: 'gray' }
 const WP_COLOR: Record<string, string> = { completed: 'green', 'in-progress': 'cyan', authorized: 'white', draft: 'gray', cancelled: 'gray' }
 
 // The automatic refresh; a reload of the module starts a new one.
@@ -35,6 +37,16 @@ async function getBoardPath($: EngineInterface): Promise<string> {
 
 const getStageLabel = (project: Project): string =>
   project.stage.current === null ? 'no stage' : `stage ${project.stage.current}${project.stage.name ? ` ${project.stage.name}` : ''}`
+
+/** The forge's word on a stage in one line: issue and state, milestone closed/total, pull requests. */
+function getForgeLine(forge: StageForge): string {
+  const open = forge.pulls.filter(pull => pull.state === 'open').length
+  return [
+    forge.issue ? `#${forge.issue.number} · ${forge.issue.state}` : '',
+    forge.milestone ? `${forge.milestone.title} ${forge.milestone.closed}/${forge.milestone.open + forge.milestone.closed}` : '',
+    forge.pulls.length ? `PRs ${forge.pulls.length}${open ? ` (${open} open)` : ''}` : '',
+  ].filter(Boolean).join(' · ')
+}
 
 /** `▓▓░░░ 2/5`: completed work packages of the current stage. */
 function getProgressBar({ done, total }: Project['progress']): string {
@@ -56,11 +68,11 @@ async function openBoard($: EngineInterface): Promise<void> {
 }
 
 /** Reads every registered project again. */
-async function reload($: EngineInterface): Promise<{ count: number; errors: string[] }> {
+async function reload($: EngineInterface, isForced = false): Promise<{ count: number; errors: string[] }> {
   if ((await read($, meta)).isLoading) return { count: (await read($, projects)).length, errors: [] }
   await update($, meta, now => ({ ...now, isLoading: true }))
   try {
-    const found = await loadProjects($)
+    const found = await loadProjects($, isForced)
     await update($, projects, () => found.projects)
     const refreshedAt = await $.clock.now()
     await update($, meta, () => ({ refreshedAt, errors: found.errors, isLoading: false }))
@@ -99,7 +111,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'pm-desk' }, async $ => {
     await $.ui.open({ id: PANE, title: TITLE })
-    const { count, errors } = await reload($)
+    const { count, errors } = await reload($, true)
 
     return { text: [`${count} registered projects.`, ...errors].join('\n') }
   })
@@ -111,12 +123,21 @@ export const register: Register = on => {
     const selectedPath = await read($, selected)
     const chosen = all.find(project => project.path === selectedPath)
     const select = (path: string) => void update($, selected, () => path)
+    /** One commit note: kind, status, text; red while an open blocker. */
+    const getNoteLine = (note: CommitNote, withSha = false) => {
+      const isOpenBlocker = note.kind === 'blocker' && note.status === 'open'
+      return (
+        <Text color={isOpenBlocker ? 'red' : undefined} dimColor={note.status === 'closed'} wrap="truncate-end">
+          {`  ${withSha ? `${note.sha} ` : ''}${note.kind} · ${note.status} · ${note.text}`}
+        </Text>
+      )
+    }
 
     const toolbar = (
       <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
         <Box flexDirection="row" columnGap={1}>
           {chosen && <Button key="back" variant="secondary" onPress={() => select('')}>← All projects</Button>}
-          <Button key="refresh" variant="secondary" onPress={() => void reload($)}>{state.isLoading ? 'Refreshing…' : 'Refresh'}</Button>
+          <Button key="refresh" variant="secondary" onPress={() => void reload($, true)}>{state.isLoading ? 'Refreshing…' : 'Refresh'}</Button>
         </Box>
         <Button key="browser" variant="secondary" onPress={() => void openBoard($)}>Open in browser</Button>
       </Box>
@@ -142,6 +163,21 @@ export const register: Register = on => {
               <Text dimColor wrap="truncate-end">
                 {`high risks ${project.highRisks} · open issues ${project.openIssues} · next report ${project.nextReport.due || '—'}`}
               </Text>
+              {project.delivery && (
+                <Box flexDirection="row" columnGap={1}>
+                  <Text wrap="truncate-end">
+                    {[`phases ${project.delivery.done}/${project.delivery.total}`, project.delivery.current].filter(Boolean).join(' · ')}
+                  </Text>
+                  {project.delivery.failed > 0 && <Text color="red">{`${project.delivery.failed} failed`}</Text>}
+                </Box>
+              )}
+              {project.openBlockers > 0 && <Text color="red">{`blockers ${project.openBlockers}`}</Text>}
+              {project.stages.filter(one => one.forge).map(({ forge }) => (
+                <Box flexDirection="row" columnGap={1}>
+                  <Text dimColor wrap="truncate-end">{getForgeLine(forge!)}</Text>
+                  {forge!.isReadyToClose && <Text color="green">ready to close</Text>}
+                </Box>
+              ))}
               {project.nextReport.isOverdue && <Text color="red">highlight report overdue</Text>}
               {project.errors.length > 0 && <Text color="red" wrap="truncate-end">{`⚠ ${project.errors[0]}`}</Text>}
               <Box flexDirection="row" columnGap={2}>
@@ -171,6 +207,53 @@ export const register: Register = on => {
           {p.errors.map(error => <Text color="red" wrap="truncate-end">{error}</Text>)}
           <Button key="session" plain onPress={() => void openSession($, p)}>Open session</Button>
         </Box>
+
+        {p.stages.length === 0 && (
+          <Text dimColor wrap="truncate-end">No stage linked: add `stages:` to .pm/project.yaml (docs/pm-schema.md) to see phases, commits and pull requests.</Text>
+        )}
+        {p.unstagedNotes.length > 0 && (
+          <Box flexDirection="column">
+            <Text bold>Notes without a linked stage</Text>
+            {p.unstagedNotes.map(note => getNoteLine(note, true))}
+          </Box>
+        )}
+        {p.stages.length > 0 && (
+          <Box flexDirection="column">
+            <Text bold>Delivery</Text>
+            {p.stages.map(one => (
+              <Box key={`stage:${one.number}`} flexDirection="column">
+                <Text wrap="truncate-end">
+                  {[`Stage ${one.number ?? '?'}`, one.name, one.issue === null ? '' : `#${one.issue}`, one.milestone && `milestone ${one.milestone}`, one.ref || one.branch]
+                    .filter(Boolean).join(' · ')}
+                </Text>
+                {one.forge?.issue && (
+                  <Text wrap="truncate-end">{`#${one.forge.issue.number} · ${one.forge.issue.state} · ${one.forge.issue.title}`}</Text>
+                )}
+                {one.forge?.milestone && (
+                  <Text wrap="truncate-end">
+                    {[`${one.forge.milestone.title} ${one.forge.milestone.closed}/${one.forge.milestone.open + one.forge.milestone.closed}`, one.forge.milestone.due && `due ${one.forge.milestone.due}`].filter(Boolean).join(' · ')}
+                  </Text>
+                )}
+                {one.forge?.pulls.map(pull => (
+                  <Text color={PULL_COLOR[pull.state]} wrap="truncate-end">{`PR #${pull.number} · ${pull.state} · ${pull.title}`}</Text>
+                ))}
+                {one.forge?.isReadyToClose && <Text color="green">ready to close</Text>}
+                {one.ref && one.phases.length === 0 && <Text dimColor>No phased plan on the branch.</Text>}
+                {one.phases.map(phase => (
+                  <Text color={PHASE_COLOR[phase.state]} wrap="truncate-end">{`Phase ${phase.number}: ${phase.title} · ${phase.state}`}</Text>
+                ))}
+                {one.commits.map(commit => (
+                  <Box key={`commit:${commit.sha}`} flexDirection="column">
+                    <Text mono wrap="truncate-end">{`${commit.short} ${commit.subject}`}</Text>
+                    {commit.notes.map(note => getNoteLine(note))}
+                  </Box>
+                ))}
+                {one.unlinkedNotes.length > 0 && <Text dimColor>Notes on commits not on the branch</Text>}
+                {one.unlinkedNotes.map(note => getNoteLine(note, true))}
+              </Box>
+            ))}
+          </Box>
+        )}
 
         <Box flexDirection="column">
           <Text bold>Roles</Text>
