@@ -104,6 +104,7 @@ export type Meta = { refreshedAt: number; errors: string[]; isLoading: boolean }
 declare module 'claude-code' {
   interface PluginState {
     // `selected` is the path of the project the pane drills into; '' shows the overview.
-    p2kit: { projects: Shaped<Project[]>; selected: Shaped<string>; meta: Shaped<Meta> }
+    // `view` is that project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
+    p2kit: { projects: Shaped<Project[]>; selected: Shaped<string>; view: Shaped<string>; meta: Shaped<Meta> }
   }
 }

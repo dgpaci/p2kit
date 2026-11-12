@@ -38,7 +38,7 @@ allowed.
 - Ask the user whether a new branch should be a worktree or a plain branch.
 - Mod style reference: `~/sviluppo/claude/forge-desk`.
 
-## Mod notes (learned in the stage-delivery workflow)
+## Mod notes (learned in the stage-delivery and desk-redesign workflows)
 
 - `claude plugin test` runs every `*.test.ts(x)` under the folder but skips dot folders, so tests
   under `.phased/` and worktrees under `.claude/` never run by accident.
@@ -51,3 +51,9 @@ allowed.
   the board it writes to `~/.claude/p2kit/desk.html`. Another session loading p2kit rewrites that
   file every 60 s, so wait for content only the new code writes. `/pm-desk` run while the
   session-start reload is in flight returns "0 registered projects".
+- The `claude plugin test` sandbox rejects `new Function` / `eval` (EvalError), so a test cannot
+  compile the board's inline script: extract it and run `node --check` outside the suite.
+- To render the board without the engine (QA against a mockup): `hooks/board.ts` and its imports
+  use `claude-code` for types only, so a scratch `npx tsx` script can `await import()` it (no
+  package.json: a static import fails; take `mod.renderBoard ?? mod.default.renderBoard`) and feed
+  it fixture projects.

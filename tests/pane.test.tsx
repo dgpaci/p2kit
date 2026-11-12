@@ -22,7 +22,7 @@ const PANE = {
   props: { title: 'Project desk', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-test('the overview lists the registered projects and Details drills into one', async ($, on) => {
+test('the overview lists the registered projects and the name opens one: recap, then each tab', async ($, on) => {
   const opened: string[] = []
   mock.store(on)
   mock.clock(on)
@@ -41,15 +41,19 @@ test('the overview lists the registered projects and Details drills into one', a
   expect(ran.text).toStartWith('2 registered projects.')
 
   const ui = await $.ui.mount(PANE)
-  expect(await ui.find({ type: 'Text', text: 'Portal' })).toBeTruthy()
+  expect(await ui.find({ type: 'Button', key: 'open:/src/portal', text: 'Portal' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /▓{10} 1\/1/ })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /\.pm\/project\.yaml not found/ })).toBeTruthy()
 
   await ui.press({ key: 'open:/src/portal' })
-  expect(await ui.find({ type: 'Text', text: 'Executive: Anna' })).toBeTruthy()
-  expect(await ui.find({ type: 'Text', text: /R-1 \[9\] API change/ })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'cost: 12 / 10 EUR' })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /R-1 \[9\] API change/, color: 'red' })).toBeTruthy()
+  await ui.press({ key: 'tab:roles' })
+  expect(await ui.find({ type: 'Text', text: 'Executive: Anna' })).toBeTruthy()
+  await ui.press({ key: 'tab:risks' })
+  expect(await ui.find({ type: 'Text', text: /R-1 \[9\] API change/ })).toBeTruthy()
 
+  await ui.press({ key: 'tab:documents' })
   await ui.press({ key: 'doc:/src/portal/.pm/brief.md' })
   expect(opened).toContain('/src/portal/.pm/brief.md')
 

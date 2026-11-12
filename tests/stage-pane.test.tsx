@@ -30,7 +30,7 @@ test('the desk reads the plan from the branch of each open work package and show
   // wf:contract: the local ref feature/498-x missing and origin/feature/498-x present → the plan is read from origin/feature/498-x.
   // wf:contract: Git is read only for work packages neither completed nor cancelled: no git call names feature/400-old.
   // wf:contract: The overview row shows a Text matching /WP-03 · phases 3\/7/ and one containing "Signature flow".
-  // wf:contract: After pressing the project's Details button the drill-in shows a Text "Work themes" and one line per phase carrying its title and state.
+  // wf:contract: After pressing the project's name button (`open:<path>`) and the theme button (`theme:<WP-id>`) the drill-in shows a Text "Work themes" and one line per phase carrying its title and state.
   // wf:contract: When neither feature/498-x nor origin/feature/498-x resolves, the project shows the error "WP-03: branch feature/498-x not found".
   // wf:contract: The browser board (renderBoard) includes the same phases for the selected project, under a section 'Work themes'.
   let isOriginPresent = true
@@ -68,6 +68,7 @@ test('the desk reads the plan from the branch of each open work package and show
   expect(calls.some(args => args.includes('feature/400-old'))).toBe(false)
 
   await ui.press({ key: 'open:/src/anaci' })
+  await ui.press({ key: 'theme:WP-03' })
   expect(await ui.find({ type: 'Text', text: 'Work themes' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'Phase 1: A · done' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'Phase 4: Signature flow · in-progress' })).toBeTruthy()
@@ -75,9 +76,13 @@ test('the desk reads the plan from the branch of each open work package and show
   expect(await ui.find({ type: 'Text', text: 'Phase 7: Waiting · blocked' })).toBeTruthy()
 
   const board = written['/h/.claude/p2kit/desk.html']
-  expect(board).toContain('Signature flow')
-  expect(board).toContain('Broken one')
-  expect(board).toContain("section('Work themes'")
+  const marker = '<script type="application/json" id="data">'
+  const embedded = JSON.parse(board.slice(board.indexOf(marker) + marker.length, board.indexOf('</script>')))
+  const theme = embedded.projects[0].themes.find((w: { id: string }) => w.id === 'WP-03')
+  expect(theme.delivery.phases.length).toBe(7)
+  expect(theme.delivery.phases.map((ph: { title: string }) => ph.title)).toContain('Signature flow')
+  expect(theme.delivery.phases.map((ph: { title: string }) => ph.title)).toContain('Broken one')
+  expect(board).toContain('Work themes')
 
   isOriginPresent = false
   await $.command.run(RUN)
