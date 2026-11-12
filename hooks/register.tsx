@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { openFile, openSession } from './actions'
 import { getOpenBlockers, renderBoard } from './board'
-import type { CommitNote, Light, Phase, PhaseState, Project, Pull, WorkPackage, WpForge } from '../types'
+import type { CommitNote, Light, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpForge } from '../types'
 import { getWorkThemes, isOpen, loadProjects } from './project'
 
 const PANE = 'p2kit-desk'
@@ -19,6 +19,8 @@ const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 // The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
 const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
+// The people the Team tab shows; none picked shows everyone.
+const members = atom({ plugin: 'p2kit', key: 'members' } as const, [], { shape: 'members-1' })
 const meta = atom(
   { plugin: 'p2kit', key: 'meta' } as const,
   { refreshedAt: 0, errors: [], isLoading: false },
@@ -28,6 +30,7 @@ const meta = atom(
 const LIGHT_COLOR: Record<Light, string> = { green: 'green', amber: 'yellow', red: 'red', none: 'gray' }
 const PHASE_COLOR: Record<PhaseState, string> = { done: 'green', 'in-progress': 'cyan', todo: 'gray', failed: 'red', blocked: 'yellow' }
 const PULL_COLOR: Record<Pull['state'], string> = { open: 'cyan', merged: 'green', closed: 'gray' }
+const STATUS_LABEL: Record<TeamStatus, string> = { review: 'review asked', inprogress: 'in progress', todo: 'to do', waiting: 'waiting for review', stalled: 'stalled' }
 const WP_COLOR: Record<string, string> = { completed: 'green', 'in-progress': 'cyan', authorized: 'white', draft: 'gray', cancelled: 'gray' }
 
 // The automatic refresh; a reload of the module starts a new one.
@@ -56,6 +59,8 @@ function getProgressBar({ done, total }: Project['progress']): string {
   const filled = total ? Math.round((width * done) / total) : 0
   return `${'▓'.repeat(filled)}${'░'.repeat(width - filled)} ${done}/${total}`
 }
+
+const getWipText = (member: TeamMember): string => `WIP ${member.person} ${member.wip}/${member.wipLimit}`
 
 /** Rewrites the browser board from the projects as they stand. */
 async function writeBoard($: EngineInterface): Promise<void> {
@@ -124,16 +129,24 @@ export const register: Register = on => {
     const state = await read($, meta)
     const selectedPath = await read($, selected)
     const chosenView = await read($, view)
+    const pickedMembers = await read($, members)
     const chosen = all.find(project => project.path === selectedPath)
     const select = (path: string) => {
       void update($, view, () => '')
+      void update($, members, () => [])
       void update($, selected, () => path)
     }
     const show = (next: string) => void update($, view, () => next)
     const openTheme = (path: string, id: string) => {
       void update($, selected, () => path)
       void update($, view, () => `theme:${id}`)
+      void update($, members, () => [])
     }
+    const togglePerson = (person: string) =>
+      void update($, members, now => (now.includes(person) ? now.filter(one => one !== person) : [...now, person]))
+    /** One red line per person over the WIP limit. */
+    const getWipLines = (project: Project) =>
+      project.team.filter(member => member.isOverLimit).map(member => <Text color="red">{getWipText(member)}</Text>)
     /** One commit note: kind, status, text; red while an open blocker. */
     const getNoteLine = (note: CommitNote, withSha = false) => {
       const isOpenBlocker = note.kind === 'blocker' && note.status === 'open'
@@ -180,6 +193,7 @@ export const register: Register = on => {
               <Text dimColor wrap="truncate-end">
                 {`high risks ${project.highRisks} · open issues ${project.openIssues} · next report ${project.nextReport.due || '—'}`}
               </Text>
+              {getWipLines(project)}
               {getWorkThemes(project).map(({ id, delivery }) => {
                 const { summary, forge, phases } = delivery!
                 return (
@@ -225,6 +239,29 @@ export const register: Register = on => {
       {
         id: 'roles', label: 'Roles', count: p.roles.length,
         render: () => p.roles.map(role => <Text wrap="truncate-end">{`${role.label}: ${role.people.join(', ') || '—'}`}</Text>),
+      },
+      {
+        id: 'team', label: 'Team', count: p.team.length,
+        render: () => [
+          <Box flexDirection="row" columnGap={1} flexWrap="wrap">
+            {p.team.map(member => (
+              <Button key={`member:${member.person}`} variant={pickedMembers.includes(member.person) ? 'primary' : 'secondary'} onPress={() => togglePerson(member.person)}>
+                {member.person}
+              </Button>
+            ))}
+          </Box>,
+          ...(pickedMembers.length ? p.team.filter(member => pickedMembers.includes(member.person)) : p.team).map(member => (
+            <Box key={`person:${member.person}`} flexDirection="column">
+              {member.login
+                ? <Text color={member.isOverLimit ? 'red' : undefined} bold wrap="truncate-end">{`${member.person} · @${member.login} · ${member.roles.join(', ')} · WIP ${member.wip}/${member.wipLimit}`}</Text>
+                : <Text dimColor wrap="truncate-end">{`${member.person} · no forge login`}</Text>}
+              {member.items.map(item => (
+                <Text wrap="truncate-end">{`  ${item.kind === 'pr' ? 'PR ' : ''}#${item.number} ${item.title} · ${STATUS_LABEL[item.status]}`}</Text>
+              ))}
+              {member.login && member.items.length === 0 && <Text dimColor>{'  No open item.'}</Text>}
+            </Box>
+          )),
+        ],
       },
       {
         id: 'documents', label: 'Documents', count: p.documents.length,
@@ -282,6 +319,7 @@ export const register: Register = on => {
         ...blockers.map(([wp, sha, text]) => <Text color="red" wrap="truncate-end">{`${wp} ${sha} ${text}`}</Text>),
         ...openRisks.filter(risk => risk.score >= 6).map(risk => <Text color="red" wrap="truncate-end">{`${risk.id} [${risk.score}] ${risk.title}`}</Text>),
         ...(p.nextReport.isOverdue ? [<Text color="red">{`highlight report overdue (${p.nextReport.due})`}</Text>] : []),
+        ...getWipLines(p),
       ]
       return lines.length ? lines : [<Text dimColor>Nothing.</Text>]
     }

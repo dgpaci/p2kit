@@ -48,7 +48,7 @@ test('the drill-in shows the forge state of each open work package of the curren
   // wf:contract: and a Text "ready to close" when isReadyToClose holds for them; a milestone-linked work package shows "<title> <closed>/<open+closed>".
   // wf:contract: A forge failure (HTTP error, gh exit code ≠ 0, missing token) becomes a project error naming the work package; the local data still shows.
   // wf:contract: Only work packages of the current stage, neither completed nor cancelled, are read from the forge;
-  // wf:contract: a project with no linked work package makes no forge request and does not even ask git for its origin.
+  // wf:contract: a project with no linked work package and no team login makes no forge request and does not even ask git for its origin.
   const fetched: { url: string; init: { method?: string; headers?: Record<string, string> } }[] = []
   const gh: string[][] = []
   const origins: string[] = []

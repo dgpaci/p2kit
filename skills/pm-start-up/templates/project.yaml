@@ -20,6 +20,10 @@ roles:
   team_manager: []
   assurance: []
   support: []
+# team:                       # optional: forge logins and WIP limits of the people of the roles
+#   wip_limit: 3
+#   people:
+#     <name>: { login: <forge login>, wip_limit: 3 }
 reporting:
   highlight_every_days: 14
   last_highlight: null
