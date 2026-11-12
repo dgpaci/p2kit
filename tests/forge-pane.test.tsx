@@ -93,6 +93,7 @@ test('the drill-in shows the forge state of each open work package of the curren
   expect(await ui.find({ type: 'Text', text: 'ready to close', color: 'green' })).toBeTruthy()
 
   await ui.press({ key: 'open:/src/anaci' })
+  await ui.press({ key: 'theme:WP-03' })
   expect(await ui.find({ type: 'Text', text: /^#498 · open/ })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /PR #512 · merged/ })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /PR #600/ })).toBeFalsy()
@@ -100,12 +101,14 @@ test('the drill-in shows the forge state of each open work package of the curren
 
   await ui.press({ key: 'back' })
   await ui.press({ key: 'open:/src/kit' })
+  await ui.press({ key: 'theme:WP-01' })
   expect(await ui.find({ type: 'Text', text: /^v2\.5 7\/10/ })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'ready to close' })).toBeFalsy()
 
   await ui.press({ key: 'back' })
   await ui.press({ key: 'open:/src/other' })
   expect(await ui.find({ type: 'Text', text: 'WP-01: forgejo issue: no fj token for other.host' })).toBeTruthy()
+  await ui.press({ key: 'theme:WP-01' })
   expect(await ui.find({ type: 'Text', text: /^WP-01 Pilot · #7/ })).toBeTruthy()
 
   for (const one of fetched) {

@@ -9,9 +9,11 @@ written from scratch.
 - **Data in your repo.** Everything lives in `.pm/` in the project's own repository, versioned with
   git: `project.yaml`, Markdown products with frontmatter, YAML registers. Stage baselines are git
   tags `pm/stage-<n>-approved`. Schema: [docs/pm-schema.md](docs/pm-schema.md).
-- **Project desk.** A side pane in the Claude Desktop Code tab with every registered project:
-  stage, progress, tolerance status, open high risks, next report due — and a drill-in with roles,
-  documents, registers and work packages. Also available as a local browser page.
+- **Project desk.** A side pane in the Claude Desktop Code tab with every registered project as a
+  card — stage, progress, open high risks, next report due — with its work themes beneath. A
+  project opens on a form: a header, a bar of its work themes and the tabs Recap, Roles,
+  Documents, Work packages, Risks, Issues and Approvals; picking a theme shows its phases, issue
+  and pull requests, commits with notes. The same desk is a local browser page.
 - **Work themes.** The work packages of a stage run in parallel; one linked with `/pm-link` to an
   issue, a milestone or a branch shows the phases of the phased-workflow plan found on its branch
   and its commits, read with local git, with internal notes on them kept in

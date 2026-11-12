@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { openFile, openSession } from './actions'
-import { renderBoard } from './board'
-import type { CommitNote, Light, PhaseState, Project, Pull, WpForge } from '../types'
+import { getOpenBlockers, renderBoard } from './board'
+import type { CommitNote, Light, Phase, PhaseState, Project, Pull, WorkPackage, WpForge } from '../types'
 import { getWorkThemes, isOpen, loadProjects } from './project'
 
 const PANE = 'p2kit-desk'
@@ -17,6 +17,8 @@ const BOARD_PATH = '.claude/p2kit/desk.html'
 // version stored, which outlives a reload.
 const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-4' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
+// The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
+const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
 const meta = atom(
   { plugin: 'p2kit', key: 'meta' } as const,
   { refreshedAt: 0, errors: [], isLoading: false },
@@ -121,8 +123,17 @@ export const register: Register = on => {
     const all = await read($, projects)
     const state = await read($, meta)
     const selectedPath = await read($, selected)
+    const chosenView = await read($, view)
     const chosen = all.find(project => project.path === selectedPath)
-    const select = (path: string) => void update($, selected, () => path)
+    const select = (path: string) => {
+      void update($, view, () => '')
+      void update($, selected, () => path)
+    }
+    const show = (next: string) => void update($, view, () => next)
+    const openTheme = (path: string, id: string) => {
+      void update($, selected, () => path)
+      void update($, view, () => `theme:${id}`)
+    }
     /** One commit note: kind, status, text; red while an open blocker. */
     const getNoteLine = (note: CommitNote, withSha = false) => {
       const isOpenBlocker = note.kind === 'blocker' && note.status === 'open'
@@ -132,6 +143,12 @@ export const register: Register = on => {
         </Text>
       )
     }
+    /** One coloured square per phase. */
+    const getPhaseBar = (phases: Phase[]) => (
+      <Box flexDirection="row">
+        {phases.map(phase => <Text color={PHASE_COLOR[phase.state]}>■</Text>)}
+      </Box>
+    )
 
     const toolbar = (
       <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
@@ -156,7 +173,7 @@ export const register: Register = on => {
             <Box key={project.path} flexDirection="column">
               <Box flexDirection="row" columnGap={1}>
                 <Text color={LIGHT_COLOR[project.light]}>●</Text>
-                <Text bold>{project.name}</Text>
+                <Button key={`open:${project.path}`} plain onPress={() => select(project.path)}>{project.name || project.path}</Button>
                 <Text dimColor>{[project.code, getStageLabel(project), project.status].filter(Boolean).join(' · ')}</Text>
               </Box>
               <Text mono>{getProgressBar(project.progress)}</Text>
@@ -164,14 +181,16 @@ export const register: Register = on => {
                 {`high risks ${project.highRisks} · open issues ${project.openIssues} · next report ${project.nextReport.due || '—'}`}
               </Text>
               {getWorkThemes(project).map(({ id, delivery }) => {
-                const { summary, forge } = delivery!
+                const { summary, forge, phases } = delivery!
                 return (
                   <Box key={`theme:${id}`} flexDirection="column">
                     <Box flexDirection="row" columnGap={1}>
+                      {getPhaseBar(phases)}
                       <Text wrap="truncate-end">
                         {[id, summary.total ? `phases ${summary.done}/${summary.total}` : '', summary.current].filter(Boolean).join(' · ')}
                       </Text>
                       {summary.failed > 0 && <Text color="red">{`${summary.failed} failed`}</Text>}
+                      <Button key={`go:${project.path}:${id}`} plain onPress={() => openTheme(project.path, id)}>Open</Button>
                     </Box>
                     {forge && (
                       <Box flexDirection="row" columnGap={1}>
@@ -185,10 +204,7 @@ export const register: Register = on => {
               {project.openBlockers > 0 && <Text color="red">{`blockers ${project.openBlockers}`}</Text>}
               {project.nextReport.isOverdue && <Text color="red">highlight report overdue</Text>}
               {project.errors.length > 0 && <Text color="red" wrap="truncate-end">{`⚠ ${project.errors[0]}`}</Text>}
-              <Box flexDirection="row" columnGap={2}>
-                <Button key={`open:${project.path}`} plain onPress={() => select(project.path)}>Details</Button>
-                <Button key={`session:${project.path}`} plain onPress={() => void openSession($, project)}>Open session</Button>
-              </Box>
+              <Button key={`session:${project.path}`} plain onPress={() => void openSession($, project)}>Open session</Button>
             </Box>
           ))}
         </Box>
@@ -196,10 +212,152 @@ export const register: Register = on => {
     }
 
     const p = chosen
+    const themes = getWorkThemes(p)
     const openRisks = p.risks.filter(risk => risk.status === 'open').sort((a, b) => b.score - a.score)
     const openIssues = p.issues.filter(issue => issue.status === 'open')
-    const linked = p.workPackages.filter(pkg => pkg.delivery)
-    linked.sort((a, b) => Number(b.stage === p.stage.current) - Number(a.stage === p.stage.current))
+    // Risks and issues list every entry, the open ones first; a closed one is dimmed.
+    const allRisks = [...openRisks, ...p.risks.filter(risk => risk.status !== 'open')]
+    const allIssues = [...openIssues, ...p.issues.filter(issue => issue.status !== 'open')]
+    const themeId = chosenView.startsWith('theme:') ? chosenView.slice('theme:'.length) : ''
+    const theme = p.workPackages.find(wp => wp.id === themeId && wp.delivery)
+
+    const tabs: { id: string; label: string; count: number; render: () => unknown }[] = [
+      {
+        id: 'roles', label: 'Roles', count: p.roles.length,
+        render: () => p.roles.map(role => <Text wrap="truncate-end">{`${role.label}: ${role.people.join(', ') || '—'}`}</Text>),
+      },
+      {
+        id: 'documents', label: 'Documents', count: p.documents.length,
+        render: () => p.documents.length === 0 ? <Text dimColor>None yet.</Text> : p.documents.map(doc => (
+          <Button key={`doc:${doc.path}`} plain onPress={() => void openFile($, doc.path)}>
+            {`${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
+          </Button>
+        )),
+      },
+      {
+        id: 'wps', label: 'Work packages', count: p.workPackages.length,
+        render: () => [
+          <Text mono>{getProgressBar(p.progress)}</Text>,
+          ...(p.workPackages.length === 0 ? [<Text dimColor>None yet.</Text>] : p.workPackages.map(wp => (
+            <Box key={`wp:${wp.path}`} flexDirection="row" columnGap={1}>
+              <Text color={WP_COLOR[wp.status] ?? 'white'} mono>{wp.status.padEnd(11)}</Text>
+              <Button plain onPress={() => void openFile($, wp.path)}>{`${wp.id} ${wp.title}`}</Button>
+              <Text dimColor>{[wp.stage === null ? '' : `stage ${wp.stage}`, wp.due && `due ${wp.due}`].filter(Boolean).join(' · ')}</Text>
+              {wp.delivery && !themes.some(one => one.id === wp.id) && (
+                <Button key={`theme:${wp.id}`} plain onPress={() => show(`theme:${wp.id}`)}>work theme</Button>
+              )}
+            </Box>
+          ))),
+        ],
+      },
+      {
+        id: 'risks', label: 'Risks', count: openRisks.length,
+        render: () => allRisks.length === 0 ? <Text dimColor>None.</Text> : allRisks.map(risk => (
+          <Text color={risk.status === 'open' && risk.score >= 6 ? 'red' : undefined} dimColor={risk.status !== 'open'} wrap="truncate-end">
+            {`${risk.id} [${risk.score}] ${risk.title}${risk.status === 'open' ? '' : ` · ${risk.status}`}`}
+          </Text>
+        )),
+      },
+      {
+        id: 'issues', label: 'Issues', count: openIssues.length,
+        render: () => allIssues.length === 0 ? <Text dimColor>None.</Text>
+          : allIssues.map(issue => (
+            <Text dimColor={issue.status !== 'open'} wrap="truncate-end">
+              {`${issue.id} ${issue.priority} · ${issue.title}${issue.status === 'open' ? '' : ` · ${issue.status}`}`}
+            </Text>
+          )),
+      },
+      {
+        id: 'approvals', label: 'Approvals', count: p.approvals.length,
+        render: () => p.approvals.length === 0 ? <Text dimColor>None recorded.</Text>
+          : p.approvals.map(one => <Text wrap="truncate-end">{`${one.date} ${one.decision} — ${one.by}`}</Text>),
+      },
+    ]
+    const tab = chosenView.startsWith('tab:') ? tabs.find(one => `tab:${one.id}` === chosenView) : undefined
+
+    /** Open blocker notes with WP id and short sha, high open risks, an overdue report. */
+    const getAttention = () => {
+      const blockers = getOpenBlockers(p).map(({ wp, sha, text }) => [wp, sha, text])
+      const lines = [
+        ...blockers.map(([wp, sha, text]) => <Text color="red" wrap="truncate-end">{`${wp} ${sha} ${text}`}</Text>),
+        ...openRisks.filter(risk => risk.score >= 6).map(risk => <Text color="red" wrap="truncate-end">{`${risk.id} [${risk.score}] ${risk.title}`}</Text>),
+        ...(p.nextReport.isOverdue ? [<Text color="red">{`highlight report overdue (${p.nextReport.due})`}</Text>] : []),
+      ]
+      return lines.length ? lines : [<Text dimColor>Nothing.</Text>]
+    }
+
+    const recap = (
+      <Box flexDirection="column" gap={1}>
+        <Box flexDirection="column">
+          <Text>{`Stage ${p.stage.current === null ? '—' : `${p.stage.current}${p.stage.name ? ` · ${p.stage.name}` : ''}`} · ${p.stage.start || '—'} → ${p.stage.plannedEnd || '—'}`}</Text>
+          <Text mono>{`${getProgressBar(p.progress)} · ${themes.length} active work themes`}</Text>
+          <Text color={p.openBlockers ? 'red' : undefined}>{`Blockers ${p.openBlockers}`}</Text>
+          <Text color={p.nextReport.isOverdue ? 'red' : undefined}>{`Next report ${p.nextReport.due || '—'}${p.nextReport.isOverdue ? ' · overdue' : ''}`}</Text>
+        </Box>
+        <Box flexDirection="column">
+          <Text bold>Tolerances</Text>
+          {p.tolerances.length === 0 && <Text dimColor>None set.</Text>}
+          {p.tolerances.map(t => (
+            <Box flexDirection="row" columnGap={1}>
+              <Text color={LIGHT_COLOR[t.light]}>●</Text>
+              <Text>{`${t.area}: ${t.used} / ${t.limit} ${t.unit}`}</Text>
+            </Box>
+          ))}
+        </Box>
+        <Box flexDirection="column">
+          <Text bold>Needs attention</Text>
+          {getAttention()}
+        </Box>
+        {p.unthemedNotes.length > 0 && (
+          <Box flexDirection="column">
+            <Text bold>Notes without a work theme</Text>
+            {p.unthemedNotes.map(note => getNoteLine(note, true))}
+          </Box>
+        )}
+      </Box>
+    )
+
+    const getThemePanel = ({ id, title, status, delivery }: WorkPackage) => {
+      const one = delivery!
+      return (
+        <Box flexDirection="column">
+          <Text bold wrap="truncate-end">
+            {[`${id} ${title}`.trim(), one.issue === null ? '' : `#${one.issue}`, one.milestone && `milestone ${one.milestone}`, one.ref || one.branch, one.base && `over ${one.base}`]
+              .filter(Boolean).join(' · ')}
+          </Text>
+          <Text dimColor>{status}</Text>
+          {one.forge?.issue && (
+            <Text wrap="truncate-end">{`#${one.forge.issue.number} · ${one.forge.issue.state} · ${one.forge.issue.title}`}</Text>
+          )}
+          {one.forge?.milestone && (
+            <Text wrap="truncate-end">
+              {[`${one.forge.milestone.title} ${one.forge.milestone.closed}/${one.forge.milestone.open + one.forge.milestone.closed}`, one.forge.milestone.due && `due ${one.forge.milestone.due}`].filter(Boolean).join(' · ')}
+            </Text>
+          )}
+          {one.forge?.pulls.map(pull => (
+            <Text color={PULL_COLOR[pull.state]} wrap="truncate-end">{`PR #${pull.number} · ${pull.state} · ${pull.title}`}</Text>
+          ))}
+          {one.forge?.isReadyToClose && <Text color="green">ready to close</Text>}
+          <Text bold>Phases</Text>
+          {one.phases.length === 0 && <Text dimColor>{one.ref ? 'No phased plan on the branch.' : 'No branch linked.'}</Text>}
+          {one.phases.map(phase => (
+            <Text color={PHASE_COLOR[phase.state]} wrap="truncate-end">{`Phase ${phase.number}: ${phase.title} · ${phase.state}`}</Text>
+          ))}
+          <Text bold>Commits and notes</Text>
+          {one.commits.length === 0 && <Text dimColor>None.</Text>}
+          {one.commits.map(commit => (
+            <Box key={`commit:${commit.sha}`} flexDirection="column">
+              <Text mono wrap="truncate-end">{`${commit.short} ${commit.subject}`}</Text>
+              {commit.notes.map(note => getNoteLine(note))}
+            </Box>
+          ))}
+          {one.unlinkedNotes.length > 0 && (
+            <Text dimColor>{isOpen({ status }) ? 'Notes on commits not on the branch' : 'Branch not read: the work package is closed'}</Text>
+          )}
+          {one.unlinkedNotes.map(note => getNoteLine(note, true))}
+        </Box>
+      )
+    }
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -215,115 +373,30 @@ export const register: Register = on => {
           <Button key="session" plain onPress={() => void openSession($, p)}>Open session</Button>
         </Box>
 
-        {linked.length === 0 && (
-          <Text dimColor wrap="truncate-end">No work package linked: run /pm-link in the project's repo to see phases, commits and pull requests.</Text>
-        )}
-        {p.unthemedNotes.length > 0 && (
-          <Box flexDirection="column">
-            <Text bold>Notes without a work theme</Text>
-            {p.unthemedNotes.map(note => getNoteLine(note, true))}
-          </Box>
-        )}
-        {linked.length > 0 && (
-          <Box flexDirection="column">
-            <Text bold>Work themes</Text>
-            {linked.map(({ id, title, status, delivery }) => {
-              const one = delivery!
-              return (
-                <Box key={`theme:${id}`} flexDirection="column">
-                  <Text wrap="truncate-end">
-                    {[`${id} ${title}`.trim(), one.issue === null ? '' : `#${one.issue}`, one.milestone && `milestone ${one.milestone}`, one.ref || one.branch]
-                      .filter(Boolean).join(' · ')}
-                  </Text>
-                  {one.forge?.issue && (
-                    <Text wrap="truncate-end">{`#${one.forge.issue.number} · ${one.forge.issue.state} · ${one.forge.issue.title}`}</Text>
-                  )}
-                  {one.forge?.milestone && (
-                    <Text wrap="truncate-end">
-                      {[`${one.forge.milestone.title} ${one.forge.milestone.closed}/${one.forge.milestone.open + one.forge.milestone.closed}`, one.forge.milestone.due && `due ${one.forge.milestone.due}`].filter(Boolean).join(' · ')}
-                    </Text>
-                  )}
-                  {one.forge?.pulls.map(pull => (
-                    <Text color={PULL_COLOR[pull.state]} wrap="truncate-end">{`PR #${pull.number} · ${pull.state} · ${pull.title}`}</Text>
-                  ))}
-                  {one.forge?.isReadyToClose && <Text color="green">ready to close</Text>}
-                  {one.ref && one.phases.length === 0 && <Text dimColor>No phased plan on the branch.</Text>}
-                  {one.phases.map(phase => (
-                    <Text color={PHASE_COLOR[phase.state]} wrap="truncate-end">{`Phase ${phase.number}: ${phase.title} · ${phase.state}`}</Text>
-                  ))}
-                  {one.commits.map(commit => (
-                    <Box key={`commit:${commit.sha}`} flexDirection="column">
-                      <Text mono wrap="truncate-end">{`${commit.short} ${commit.subject}`}</Text>
-                      {commit.notes.map(note => getNoteLine(note))}
-                    </Box>
-                  ))}
-                  {one.unlinkedNotes.length > 0 && (
-                    <Text dimColor>{isOpen({ status }) ? 'Notes on commits not on the branch' : 'Branch not read: the work package is closed'}</Text>
-                  )}
-                  {one.unlinkedNotes.map(note => getNoteLine(note, true))}
-                </Box>
-              )
-            })}
-          </Box>
-        )}
-
         <Box flexDirection="column">
-          <Text bold>Roles</Text>
-          {p.roles.map(role => <Text wrap="truncate-end">{`${role.label}: ${role.people.join(', ') || '—'}`}</Text>)}
+          <Text bold>Work themes</Text>
+          {themes.length === 0 && (
+            <Text dimColor wrap="truncate-end">No work package linked: run /pm-link in the project's repo to see phases, commits and pull requests.</Text>
+          )}
+          <Box flexDirection="row" columnGap={1} flexWrap="wrap">
+            {themes.map(({ id, delivery }) => (
+              <Button key={`theme:${id}`} variant={themeId === id ? 'primary' : 'secondary'} onPress={() => show(`theme:${id}`)}>
+                {`${id} ${delivery!.summary.done}/${delivery!.summary.total}`}
+              </Button>
+            ))}
+          </Box>
         </Box>
 
-        <Box flexDirection="column">
-          <Text bold>Tolerances</Text>
-          {p.tolerances.length === 0 && <Text dimColor>None set.</Text>}
-          {p.tolerances.map(t => (
-            <Box flexDirection="row" columnGap={1}>
-              <Text color={LIGHT_COLOR[t.light]}>●</Text>
-              <Text>{`${t.area}: ${t.used} / ${t.limit} ${t.unit}`}</Text>
-            </Box>
-          ))}
-        </Box>
-
-        <Box flexDirection="column">
-          <Text bold>Documents</Text>
-          {p.documents.length === 0 && <Text dimColor>None yet.</Text>}
-          {p.documents.map(doc => (
-            <Button key={`doc:${doc.path}`} plain onPress={() => void openFile($, doc.path)}>
-              {`${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
+        <Box flexDirection="row" columnGap={1} flexWrap="wrap">
+          <Button key="tab:recap" variant={!tab && !theme ? 'primary' : 'secondary'} onPress={() => show('')}>Recap</Button>
+          {tabs.map(one => (
+            <Button key={`tab:${one.id}`} variant={tab === one ? 'primary' : 'secondary'} onPress={() => show(`tab:${one.id}`)}>
+              {`${one.label} ${one.count}`}
             </Button>
           ))}
         </Box>
 
-        <Box flexDirection="column">
-          <Text bold>{`Work packages · ${getProgressBar(p.progress)}`}</Text>
-          {p.workPackages.length === 0 && <Text dimColor>None yet.</Text>}
-          {p.workPackages.map(wp => (
-            <Box key={`wp:${wp.path}`} flexDirection="row" columnGap={1}>
-              <Text color={WP_COLOR[wp.status] ?? 'white'} mono>{wp.status.padEnd(11)}</Text>
-              <Button plain onPress={() => void openFile($, wp.path)}>{`${wp.id} ${wp.title}`}</Button>
-              <Text dimColor>{[wp.stage === null ? '' : `stage ${wp.stage}`, wp.due && `due ${wp.due}`].filter(Boolean).join(' · ')}</Text>
-            </Box>
-          ))}
-        </Box>
-
-        <Box flexDirection="column">
-          <Text bold>{`Risks · ${openRisks.length} open`}</Text>
-          {openRisks.map(risk => (
-            <Text color={risk.score >= 6 ? 'red' : undefined} wrap="truncate-end">
-              {`${risk.id} [${risk.score}] ${risk.title}`}
-            </Text>
-          ))}
-        </Box>
-
-        <Box flexDirection="column">
-          <Text bold>{`Issues · ${openIssues.length} open`}</Text>
-          {openIssues.map(issue => <Text wrap="truncate-end">{`${issue.id} ${issue.priority} · ${issue.title}`}</Text>)}
-        </Box>
-
-        <Box flexDirection="column">
-          <Text bold>Board approvals</Text>
-          {p.approvals.length === 0 && <Text dimColor>None recorded.</Text>}
-          {p.approvals.map(one => <Text wrap="truncate-end">{`${one.date} ${one.decision} — ${one.by}`}</Text>)}
-        </Box>
+        {theme ? getThemePanel(theme) : tab ? <Box flexDirection="column">{tab.render()}</Box> : recap}
       </Box>
     )
   })
