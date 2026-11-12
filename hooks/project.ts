@@ -356,10 +356,12 @@ export async function readProjectFiles($: EngineInterface, path: string): Promis
 }
 
 type PullList = Parameters<typeof toPulls>[0]
+// The Forgejo pull list of one project read, with the reason it stopped short, if it did.
+type SharedPulls = { list: PullList; failure?: string }
 
 /** Reads, GET only, the issue or milestone of a work package and the pull requests of its branch; failures go to `errors`. */
 async function readWpForge(
-  $: EngineInterface, target: ForgeTarget, id: string, link: WpDelivery, errors: string[], shared: { pulls?: Promise<PullList> },
+  $: EngineInterface, target: ForgeTarget, id: string, link: WpDelivery, errors: string[], shared: { pulls?: Promise<SharedPulls> },
 ): Promise<WpForge> {
   const page = target.forge === 'github' ? 'per_page=100' : `limit=${FORGEJO_PAGE}`
   const get = async <T>(what: string, path: string): Promise<T | undefined> => {
@@ -386,16 +388,22 @@ async function readWpForge(
   } else if (link.branch) {
     // Forgejo has no head filter: the repo's pull list is paged once per read of the project and shared by its work packages.
     shared.pulls ??= (async () => {
-      const all: PullList = []
-      for (let n = 1; n <= FORGEJO_PULL_PAGES; n++) {
-        const list = await get<PullList>('pulls', `pulls?state=all&sort=recentupdate&limit=${FORGEJO_PAGE}&page=${n}`)
-        if (!list) break
-        all.push(...list)
-        if (list.length < FORGEJO_PAGE) break
+      const list: PullList = []
+      try {
+        for (let n = 1; n <= FORGEJO_PULL_PAGES; n++) {
+          const batch = (await getForgeJson($, target, `repos/${target.repo}/pulls?state=all&sort=recentupdate&limit=${FORGEJO_PAGE}&page=${n}`)) as PullList
+          list.push(...batch)
+          if (batch.length < FORGEJO_PAGE) break
+        }
+        return { list }
+      } catch (error) {
+        return { list, failure: error instanceof Error ? error.message : String(error) }
       }
-      return all
     })()
-    forge.pulls = toPulls(await shared.pulls, link.branch)
+    const { list, failure } = await shared.pulls
+    // Every work package reading the shared list reports its failure, not only the first.
+    if (failure) errors.push(`${id}: forgejo pulls: ${failure}`)
+    forge.pulls = toPulls(list, link.branch)
   }
   forge.isReadyToClose = isReadyToClose(forge.pulls)
   return forge
@@ -418,7 +426,7 @@ async function addForgeState($: EngineInterface, project: Project, isForced: boo
   const now = await $.clock.now()
   const allErrors: string[] = []
   const forges = new Map<string, WpForge>()
-  const shared: { pulls?: Promise<PullList> } = {}
+  const shared: { pulls?: Promise<SharedPulls> } = {}
   for (const { id, delivery } of themes) {
     const key = [project.path, id, delivery.issue, delivery.milestone, delivery.branch].join('|')
     const cached = forgeCache.get(key)
