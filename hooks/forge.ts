@@ -32,7 +32,7 @@ export function toPulls(list: RestPull[], branch: string): Pull[] {
     }))
 }
 
-type RestMilestone = { title: string; open_issues: number; closed_issues: number; due_on?: string | null }
+export type RestMilestone = { title: string; open_issues: number; closed_issues: number; due_on?: string | null }
 
 /** The milestone titled `title`, with its due date as an ISO day ('' when none). */
 export function toMilestone(list: RestMilestone[], title: string): Milestone | undefined {

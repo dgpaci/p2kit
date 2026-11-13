@@ -4,17 +4,24 @@ import type { Value } from './yaml'
 
 export const DEFAULT_WIP_LIMIT = 3
 // A pull request waiting for review longer than this, untouched, is stalled.
-const STALLED_MS = 7 * 24 * 60 * 60 * 1000
+export const STALLED_MS = 7 * 24 * 60 * 60 * 1000
 const STATUS_ORDER: TeamStatus[] = ['review', 'inprogress', 'todo', 'waiting', 'stalled']
 
 type RestUser = { login: string }
-export type RestIssue = { number: number; title: string; html_url: string; updated_at: string; assignees?: RestUser[] | null; pull_request?: unknown }
+type RestMilestoneRef = { title: string } | null
+export type RestIssue = {
+  number: number; title: string; html_url: string; updated_at: string; assignees?: RestUser[] | null; pull_request?: unknown
+  milestone?: RestMilestoneRef; body?: string | null
+}
 export type RestPull = {
   number: number; title: string; html_url: string; updated_at: string; draft?: boolean
   user?: RestUser | null; assignees?: RestUser[] | null; requested_reviewers?: RestUser[] | null
+  milestone?: RestMilestoneRef; body?: string | null
 }
 
 const logins = (users: RestUser[] | null | undefined): string[] => (users ?? []).map(user => user.login)
+/** An issue, not a pull request: GitHub omits `pull_request` on issues, Forgejo sends it as null. */
+export const isPlainIssue = (issue: RestIssue): boolean => issue.pull_request == null
 const limitOf = (value: Value | undefined): number | null => (typeof value === 'number' ? value : null)
 
 /** The people of the roles, once each in role order, with the login and WIP limit `team.people` gives them; items empty. */
@@ -48,8 +55,7 @@ export function toTeamItems(login: string, issues: RestIssue[], pulls: RestPull[
   const add = (kind: TeamItem['kind'], one: RestIssue | RestPull, status: TeamStatus) =>
     found.push({ item: { kind, number: one.number, title: one.title, status, url: one.html_url, updatedAt: one.updated_at.slice(0, 10) }, at: one.updated_at })
   for (const issue of issues) {
-    // GitHub lists pull requests among issues with `pull_request` set; Forgejo sends `pull_request: null` on plain issues.
-    if (issue.pull_request == null && logins(issue.assignees).includes(login)) add('issue', issue, 'todo')
+    if (isPlainIssue(issue) && logins(issue.assignees).includes(login)) add('issue', issue, 'todo')
   }
   for (const pull of pulls) {
     const author = pull.user?.login ?? ''

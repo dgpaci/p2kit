@@ -48,7 +48,7 @@ test('the drill-in shows the forge state of each open work package of the curren
   // wf:contract: and a Text "ready to close" when isReadyToClose holds for them; a milestone-linked work package shows "<title> <closed>/<open+closed>".
   // wf:contract: A forge failure (HTTP error, gh exit code ≠ 0, missing token) becomes a project error naming the work package; the local data still shows.
   // wf:contract: Only work packages of the current stage, neither completed nor cancelled, are read from the forge;
-  // wf:contract: a project with no linked work package and no team login makes no forge request and does not even ask git for its origin.
+  // wf:contract: a project with no linked work package makes no work-package forge request; its repo is still read, for team, milestones and readiness (Macro 4).
   const fetched: { url: string; init: { method?: string; headers?: Record<string, string> } }[] = []
   const gh: string[][] = []
   const origins: string[] = []
@@ -115,8 +115,10 @@ test('the drill-in shows the forge state of each open work package of the curren
     expect(one.init.method ?? 'GET').toBe('GET')
     expect(one.init.headers?.Authorization).toBe('token tok')
   }
-  expect(fetched.map(one => one.url).some(url => url.includes('milestones') || url.includes('issues/497'))).toBe(false)
-  expect(gh).toEqual([['gh', 'api', 'repos/dgpaci/p2kit/milestones?state=all&per_page=100']])
-  expect(origins).not.toContain('/src/plain')
+  // The work-package reads only: WP-02 (other stage) and WP-04 (completed) are not read; the repo reads (state=open) are Macro 4's.
+  expect(fetched.map(one => one.url).some(url => url.includes('milestones?state=all') || url.includes('issues/497'))).toBe(false)
+  expect(gh.filter(argv => argv[2]!.includes('state=all'))).toEqual([['gh', 'api', 'repos/dgpaci/p2kit/milestones?state=all&per_page=100']])
+  expect(gh.every(argv => argv.length === 3 && argv[1] === 'api')).toBe(true)
+  expect(origins).toContain('/src/plain')
   await ui.unmount()
 })

@@ -51,7 +51,8 @@ stage:
   current: 2                    # 0 = start-up, 1 = initiation stage, 2.. = delivery stages
   name: Build
   start: 2026-10-01
-  planned_end: 2026-12-15
+  planned_end: 2026-12-15        # empty or absent on a continuous stage
+  continuous: false             # optional; true = a stage with no end (ongoing delivery)
 tolerances:                     # project-level; a stage may tighten them in its plan
   time:  { limit: 10, used: 3, unit: days }     # used = current forecast deviation
   cost:  { limit: 5000, used: 4200, unit: EUR }
@@ -69,6 +70,8 @@ team:                           # optional: forge logins and WIP limits of the p
   people:
     Davide Paci: { login: dgpaci, wip_limit: 4 }
     Marco Bianchi: { login: mbianchi }
+readiness:                      # optional: headings an open forge issue must carry to be ready
+  headings: [Why, What changes, Done when]      # the default when absent
 reporting:
   highlight_every_days: 14
   last_highlight: 2026-10-20    # date of the last highlight report, or null
@@ -78,6 +81,17 @@ approvals:                      # Board decisions, written only after the human 
     date: 2026-09-15
     note: mandate accepted, brief approved
 ```
+
+### Continuous stage
+
+A project with no fixed end (ongoing delivery) runs one stage with `continuous: true` and no
+`planned_end`: `stage: { current: 1, name: Delivery, start: 2026-01-10, continuous: true }`. The
+desk shows it without a percentage and without an end: `since <start> · continuous` for the stage,
+`<open> open · <completed> completed` for its work packages (cancelled ones excluded, counted over
+all time) in the overview, the recap and the Work packages tab. Tolerances still show as set.
+`continuous` absent is `false`; any value but `true` or `false` gives the error
+`stage.continuous: expected true or false`. `/pm-start-up` and `/pm-initiate` offer it only when the
+user says the project has no fixed end; they never infer it.
 
 ### Tolerances and the traffic light
 
@@ -102,10 +116,12 @@ optional `wip_limit` (else `team.wip_limit`, else 3). A `team.people` key naming
 roles is not added and gives the error `team.people: <name> is in no role`; an entry that is not a
 flow map (`Davide Paci: dgpaci`) gives `team.people: <name>: expected { login, wip_limit }`.
 
-When at least one person has a login and the origin is a forge, the desk reads the repo's open
-issues and open pull requests once per project (GET only, up to 5 pages each, again after 5
-minutes) and gives each person with a login the items that are theirs, with the status from their
-point of view:
+When the origin is a forge — whether or not anyone has a login — the desk reads the repo once per
+project, GET only, again after 5 minutes (at once on Refresh and `/pm-desk`): the open issues and
+open pull requests, up to 5 pages each, and the open milestones, one page
+(`milestones?state=open&per_page=100` on GitHub, `&limit=50` on Forgejo). An origin that is not a
+forge reads nothing. Each person with a login gets the items that are theirs, with the status from
+their point of view:
 
 | status | item |
 |---|---|
@@ -118,6 +134,47 @@ point of view:
 Items are listed in that order, most recently updated first within one status. The WIP of a
 person counts every item but `review`; over `wip_limit` the desk flags them. A forge failure is
 the project error `team: <forge> issues|pulls: <reason>`; the team still shows, with no item.
+
+### Activity
+
+The same read fills the Activity tab — its count the open issues and pull requests — in three
+blocks, open items only:
+
+- **Milestones**: each open milestone, ordered by due day (none last), then title, with
+  `closed/total` as the forge counts them (GitHub counts pull requests too, Forgejo only issues),
+  its due day (`overdue` when past with open items), `stalled` — its open issues and pull requests
+  untouched for more than 7 days — and `in review` — its open non-draft pull requests with a
+  reviewer requested. Then its work package: the one whose frontmatter `milestone:` is the
+  milestone's title, cancelled ones left out, the lowest id when several; a link to its work
+  theme, or `no work package`.
+- **Pull requests**: the open pull requests, most recently updated first, marked `draft` or
+  `in review`.
+- **Issues**: the open issues grouped by milestone — the open milestones in their order, then any
+  other title (`closed`), then *No milestone*.
+
+A failure to read the milestones is the project error `milestones: <forge> milestones: <reason>`;
+the issues and pull requests still show.
+
+The browser page can also start a package; it never writes. Checking issues and pull requests shows
+a bar with **Create package**, a link that opens a new Claude Desktop session in the project's folder
+asking for the pm-package skill on the picked references (`#12 #15 PR #18`); on a milestone with no
+work package, **Create work package** opens one on `--milestone '<title>'`. The linked prompt is plain
+text naming the skill, not `/p2kit:pm-package`: Claude Desktop turns the leading `/` of a linked
+prompt into `／`, so a link never runs a command. The session needs p2kit loaded. The pane shows the
+same blocks, without the selection: there `/pm-package` is typed in a session. `/pm-package` shows its plan and writes to
+the forge — the milestone and the milestone of each item — and the work package file only after
+the user's OK.
+
+### Readiness
+
+An open issue is ready when its body carries every heading of `readiness.headings` (default
+`[Why, What changes, Done when]`) as a Markdown heading line — `#` to `######`, a space, the text;
+level, case, a trailing `:` and closing `#`s do not matter. An issue missing one is `notready`: a
+pill naming what is missing in the Activity and Team tabs, a "Not ready only" filter on the
+issues of the Activity tab, `notready <N>` on the project and `<N> issues not ready` in the recap. Pull requests
+are not checked, and nothing is written to the forge. A `readiness` that is not a map, or
+`headings` that is not a non-empty list, is the project error
+`readiness.headings: expected a list of headings` and the default applies.
 
 ### Approval decisions
 
@@ -189,8 +246,8 @@ stage: 2
 status: in-progress       # draft | authorized | in-progress | completed | cancelled
 team_manager: Luca Verdi
 due: 2026-11-20
-issue: 498                # link keys, optional (/pm-link): forge issue number, or absent
-milestone: ''             # forge milestone title, or absent / ''
+issue: 498                # link keys, optional (/pm-link or /pm-issue): forge issue number, or absent
+milestone: ''             # forge milestone title, or absent / '' (/pm-link or /pm-package)
 branch: feature/498-pay   # the branch the work package is worked on
 base: develop             # '' = the repo's default branch
 ```

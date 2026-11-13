@@ -4,6 +4,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import { openFile, openSession } from './actions'
 import { getOpenBlockers, renderBoard } from './board'
 import type { CommitNote, Light, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpForge } from '../types'
+import { getMilestonePackage } from './milestones'
 import { getWorkThemes, isOpen, loadProjects } from './project'
 
 const PANE = 'p2kit-desk'
@@ -15,12 +16,14 @@ const BOARD_PATH = '.claude/p2kit/desk.html'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-4' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-8' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 // The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
 const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
 // The people the Team tab shows; none picked shows everyone.
 const members = atom({ plugin: 'p2kit', key: 'members' } as const, [], { shape: 'members-1' })
+// The Activity tab shows only the issues missing a readiness heading.
+const notReadyOnly = atom({ plugin: 'p2kit', key: 'notReadyOnly' } as const, false, { shape: 'not-ready-only-1' })
 const meta = atom(
   { plugin: 'p2kit', key: 'meta' } as const,
   { refreshedAt: 0, errors: [], isLoading: false },
@@ -43,6 +46,10 @@ async function getBoardPath($: EngineInterface): Promise<string> {
 const getStageLabel = (project: Project): string =>
   project.stage.current === null ? 'no stage' : `stage ${project.stage.current}${project.stage.name ? ` ${project.stage.name}` : ''}`
 
+/** `<start> → <end>`; a continuous stage has no end: `since <start> · continuous`. */
+const getStageSpan = ({ stage }: Project): string =>
+  stage.isContinuous ? `since ${stage.start || '—'} · continuous` : `${stage.start || '—'} → ${stage.plannedEnd || '—'}`
+
 /** The forge's word on a work package in one line: issue and state, milestone closed/total, pull requests. */
 function getForgeLine(forge: WpForge): string {
   const open = forge.pulls.filter(pull => pull.state === 'open').length
@@ -53,8 +60,9 @@ function getForgeLine(forge: WpForge): string {
   ].filter(Boolean).join(' · ')
 }
 
-/** `▓▓░░░ 2/5`: completed work packages of the current stage. */
-function getProgressBar({ done, total }: Project['progress']): string {
+/** `▓▓░░░ 2/5`: completed work packages of the current stage; a continuous stage, which has no end, counts them: `3 open · 12 completed`. */
+function getProgressBar({ progress: { done, total }, stage }: Project): string {
+  if (stage.isContinuous) return `${total - done} open · ${done} completed`
   const width = 10
   const filled = total ? Math.round((width * done) / total) : 0
   return `${'▓'.repeat(filled)}${'░'.repeat(width - filled)} ${done}/${total}`
@@ -130,10 +138,12 @@ export const register: Register = on => {
     const selectedPath = await read($, selected)
     const chosenView = await read($, view)
     const pickedMembers = await read($, members)
+    const isNotReadyOnly = await read($, notReadyOnly)
     const chosen = all.find(project => project.path === selectedPath)
     const select = (path: string) => {
       void update($, view, () => '')
       void update($, members, () => [])
+      void update($, notReadyOnly, () => false)
       void update($, selected, () => path)
     }
     const show = (next: string) => void update($, view, () => next)
@@ -141,12 +151,15 @@ export const register: Register = on => {
       void update($, selected, () => path)
       void update($, view, () => `theme:${id}`)
       void update($, members, () => [])
+      void update($, notReadyOnly, () => false)
     }
     const togglePerson = (person: string) =>
       void update($, members, now => (now.includes(person) ? now.filter(one => one !== person) : [...now, person]))
     /** One red line per person over the WIP limit. */
     const getWipLines = (project: Project) =>
       project.team.filter(member => member.isOverLimit).map(member => <Text color="red">{getWipText(member)}</Text>)
+    /** "notready <N>" in yellow when some open issue lacks a readiness heading. */
+    const getNotReadyLine = (project: Project) => project.notReady > 0 && <Text color="yellow">{`notready ${project.notReady}`}</Text>
     /** One commit note: kind, status, text; red while an open blocker. */
     const getNoteLine = (note: CommitNote, withSha = false) => {
       const isOpenBlocker = note.kind === 'blocker' && note.status === 'open'
@@ -189,11 +202,12 @@ export const register: Register = on => {
                 <Button key={`open:${project.path}`} plain onPress={() => select(project.path)}>{project.name || project.path}</Button>
                 <Text dimColor>{[project.code, getStageLabel(project), project.status].filter(Boolean).join(' · ')}</Text>
               </Box>
-              <Text mono>{getProgressBar(project.progress)}</Text>
+              <Text mono>{getProgressBar(project)}</Text>
               <Text dimColor wrap="truncate-end">
                 {`high risks ${project.highRisks} · open issues ${project.openIssues} · next report ${project.nextReport.due || '—'}`}
               </Text>
               {getWipLines(project)}
+              {getNotReadyLine(project)}
               {getWorkThemes(project).map(({ id, delivery }) => {
                 const { summary, forge, phases } = delivery!
                 return (
@@ -235,6 +249,9 @@ export const register: Register = on => {
     const themeId = chosenView.startsWith('theme:') ? chosenView.slice('theme:'.length) : ''
     const theme = p.workPackages.find(wp => wp.id === themeId && wp.delivery)
 
+    const notReady = new Set(p.forgeIssues.filter(issue => issue.missing.length > 0).map(issue => issue.number))
+    const notReadySuffix = (number: number) => (notReady.has(number) ? ' · notready' : '')
+
     const tabs: { id: string; label: string; count: number; render: () => unknown }[] = [
       {
         id: 'roles', label: 'Roles', count: p.roles.length,
@@ -256,12 +273,59 @@ export const register: Register = on => {
                 ? <Text color={member.isOverLimit ? 'red' : undefined} bold wrap="truncate-end">{`${member.person} · @${member.login} · ${member.roles.join(', ')} · WIP ${member.wip}/${member.wipLimit}`}</Text>
                 : <Text dimColor wrap="truncate-end">{`${member.person} · no forge login`}</Text>}
               {member.items.map(item => (
-                <Text wrap="truncate-end">{`  ${item.kind === 'pr' ? 'PR ' : ''}#${item.number} ${item.title} · ${STATUS_LABEL[item.status]}`}</Text>
+                <Text wrap="truncate-end">{`  ${item.kind === 'pr' ? 'PR ' : ''}#${item.number} ${item.title} · ${STATUS_LABEL[item.status]}${item.kind === 'issue' ? notReadySuffix(item.number) : ''}`}</Text>
               ))}
               {member.login && member.items.length === 0 && <Text dimColor>{'  No open item.'}</Text>}
             </Box>
           )),
         ],
+      },
+      {
+        // Activity: the open milestones with their work package, the open pull requests, the open issues grouped by milestone.
+        id: 'activity', label: 'Activity', count: p.forgeIssues.length + p.forgePulls.length,
+        render: () => {
+          const shown = isNotReadyOnly ? p.forgeIssues.filter(issue => notReady.has(issue.number)) : p.forgeIssues
+          // Open issues of a milestone that is not open (closed, or past the one-page read): one group per title, after the open ones.
+          const openTitles = new Set(p.milestones.map(m => m.title))
+          const others = [...new Set(shown.map(issue => issue.milestone).filter(title => title && !openTitles.has(title)))]
+          const today = new Date(state.refreshedAt).toISOString().slice(0, 10)
+          const groups: [string, string][] = [
+            ...p.milestones.map(m => [m.title, m.title] as [string, string]),
+            ...others.map(title => [title, `${title} · closed`] as [string, string]),
+            ['', 'No milestone'],
+          ]
+          const issueGroups = groups
+            .map(([milestone, head]) => [head, shown.filter(issue => issue.milestone === milestone)] as const)
+            .filter(([, list]) => list.length > 0)
+          return [
+            <Text bold>Milestones</Text>,
+            ...(p.milestones.length === 0 ? [<Text dimColor>No open milestone.</Text>] : p.milestones.map(m => {
+              const wp = getMilestonePackage(p.workPackages, m.title)
+              return (
+                <Box key={`milestone:${m.title}`} flexDirection="column">
+                  <Text wrap="truncate-end">{`${m.title} · ${m.closed}/${m.open + m.closed}${m.due ? ` · due ${m.due}` : ''} · stalled ${m.stalled} · in review ${m.inReview}${m.due && m.due < today && m.open > 0 ? ' · overdue' : ''}`}</Text>
+                  {wp
+                    ? <Box flexDirection="row"><Text>{'  '}</Text><Button key={`milestone-wp:${m.title}`} plain onPress={() => show(`theme:${wp.id}`)}>{`${wp.id} ${wp.title}`}</Button></Box>
+                    : <Text dimColor>{'  no work package'}</Text>}
+                </Box>
+              )
+            })),
+            <Text bold>Pull requests</Text>,
+            ...(p.forgePulls.length === 0 ? [<Text dimColor>No open pull request.</Text>] : p.forgePulls.map(pull => (
+              <Text wrap="truncate-end">{`  PR #${pull.number} ${pull.title}${pull.draft ? ' · draft' : pull.inReview ? ' · in review' : ''}`}</Text>
+            ))),
+            <Box flexDirection="row" columnGap={1}>
+              <Text bold>Issues</Text>
+              <Button key="filter:notready" variant={isNotReadyOnly ? 'primary' : 'secondary'} onPress={() => void update($, notReadyOnly, now => !now)}>Not ready only</Button>
+            </Box>,
+            ...(issueGroups.length === 0 ? [<Text dimColor>No open issue.</Text>] : issueGroups.map(([head, list]) => (
+              <Box key={`issues:${head}`} flexDirection="column">
+                <Text bold wrap="truncate-end">{head}</Text>
+                {list.map(issue => <Text wrap="truncate-end">{`  #${issue.number} ${issue.title}${notReadySuffix(issue.number)}`}</Text>)}
+              </Box>
+            ))),
+          ]
+        },
       },
       {
         id: 'documents', label: 'Documents', count: p.documents.length,
@@ -274,7 +338,7 @@ export const register: Register = on => {
       {
         id: 'wps', label: 'Work packages', count: p.workPackages.length,
         render: () => [
-          <Text mono>{getProgressBar(p.progress)}</Text>,
+          <Text mono>{getProgressBar(p)}</Text>,
           ...(p.workPackages.length === 0 ? [<Text dimColor>None yet.</Text>] : p.workPackages.map(wp => (
             <Box key={`wp:${wp.path}`} flexDirection="row" columnGap={1}>
               <Text color={WP_COLOR[wp.status] ?? 'white'} mono>{wp.status.padEnd(11)}</Text>
@@ -327,10 +391,11 @@ export const register: Register = on => {
     const recap = (
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="column">
-          <Text>{`Stage ${p.stage.current === null ? '—' : `${p.stage.current}${p.stage.name ? ` · ${p.stage.name}` : ''}`} · ${p.stage.start || '—'} → ${p.stage.plannedEnd || '—'}`}</Text>
-          <Text mono>{`${getProgressBar(p.progress)} · ${themes.length} active work themes`}</Text>
+          <Text>{`Stage ${p.stage.current === null ? '—' : `${p.stage.current}${p.stage.name ? ` · ${p.stage.name}` : ''}`} · ${getStageSpan(p)}`}</Text>
+          <Text mono>{`${getProgressBar(p)} · ${themes.length} active work themes`}</Text>
           <Text color={p.openBlockers ? 'red' : undefined}>{`Blockers ${p.openBlockers}`}</Text>
           <Text color={p.nextReport.isOverdue ? 'red' : undefined}>{`Next report ${p.nextReport.due || '—'}${p.nextReport.isOverdue ? ' · overdue' : ''}`}</Text>
+          {getNotReadyLine(p)}
         </Box>
         <Box flexDirection="column">
           <Text bold>Tolerances</Text>
