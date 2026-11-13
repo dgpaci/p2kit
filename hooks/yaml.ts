@@ -6,6 +6,10 @@ export type Doc = { [key: string]: Value }
 
 type Line = { indent: number; text: string; number: number }
 
+/** A quote at `i` opens a quoted scalar only where a scalar starts: `D'Alessandro` stays plain. */
+const opensQuote = (text: string, i: number): boolean =>
+  (text[i] === '"' || text[i] === "'") && (i === 0 || ' [{,'.includes(text[i - 1] ?? ''))
+
 /** Drops a `#` comment that is not inside quotes. */
 function stripComment(text: string): string {
   let quote = ''
@@ -13,7 +17,7 @@ function stripComment(text: string): string {
     const char = text[i]
     if (quote) {
       if (char === quote) quote = ''
-    } else if (char === '"' || char === "'") {
+    } else if (opensQuote(text, i)) {
       quote = char
     } else if (char === '#' && (i === 0 || text[i - 1] === ' ')) {
       return text.slice(0, i).trimEnd()
@@ -32,7 +36,7 @@ function splitFlow(text: string): string[] {
     const char = text[i]
     if (quote) {
       if (char === quote) quote = ''
-    } else if (char === '"' || char === "'") quote = char
+    } else if (opensQuote(text, i)) quote = char
     else if (char === '[' || char === '{') depth++
     else if (char === ']' || char === '}') depth--
     else if (char === ',' && depth === 0) {
