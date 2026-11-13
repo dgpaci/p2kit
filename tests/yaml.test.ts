@@ -45,3 +45,17 @@ test('a product splits into frontmatter and body', async () => {
   expect(data).toEqual({ title: 'Project Brief', version: 0.1 })
   expect(body).toBe('# Brief\n')
 })
+
+test('an apostrophe inside a plain scalar is not a quote', async () => {
+  const doc = parseYaml(`
+support: [Daniela D'Alessandro, Chiara Rapido, Christopher R. Gabriel]  # three people
+quoted: ['Anna, Rossi', "Eva D'Neri", Marco]
+lead: { name: Daniela D'Alessandro, login: ddalessandro }
+`)
+
+  expect(doc).toEqual({
+    support: ["Daniela D'Alessandro", 'Chiara Rapido', 'Christopher R. Gabriel'],
+    quoted: ['Anna, Rossi', "Eva D'Neri", 'Marco'],
+    lead: { name: "Daniela D'Alessandro", login: 'ddalessandro' },
+  })
+})

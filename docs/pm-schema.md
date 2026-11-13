@@ -32,6 +32,8 @@ reader (`hooks/yaml.ts`). Stay within:
 - scalars: plain, `'single'` or `"double"` quoted; `true`/`false`, `null`/`~`, numbers; dates
   stay strings (`2026-11-03`), and so does a number that would not print back the same (`1.0`,
   `007`);
+- a quote opens a quoted scalar only where the scalar starts, so a plain scalar may contain an
+  apostrophe (`[Daniela D'Alessandro, Eva Neri]`); quote an item that holds a comma;
 - `#` comments.
 
 No anchors, tags, multi-document streams or multi-line scalars: long text belongs in a Markdown
