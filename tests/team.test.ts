@@ -109,3 +109,8 @@ test('the project carries its team, with no item before the forge is read', asyn
     { person: 'Davide Paci', login: 'dgpaci', items: [], wip: 0 },
   ])
 })
+
+test('a Forgejo issue, which carries pull_request: null, is an item of the person it is assigned to', async () => {
+  const items = toTeamItems('dgpaci', [issue(30, ['dgpaci'], { pull_request: null })], [], NOW)
+  expect(items.map(item => [item.kind, item.number, item.status])).toEqual([['issue', 30, 'todo']])
+})

@@ -48,7 +48,8 @@ export function toTeamItems(login: string, issues: RestIssue[], pulls: RestPull[
   const add = (kind: TeamItem['kind'], one: RestIssue | RestPull, status: TeamStatus) =>
     found.push({ item: { kind, number: one.number, title: one.title, status, url: one.html_url, updatedAt: one.updated_at.slice(0, 10) }, at: one.updated_at })
   for (const issue of issues) {
-    if (issue.pull_request === undefined && logins(issue.assignees).includes(login)) add('issue', issue, 'todo')
+    // GitHub lists pull requests among issues with `pull_request` set; Forgejo sends `pull_request: null` on plain issues.
+    if (issue.pull_request == null && logins(issue.assignees).includes(login)) add('issue', issue, 'todo')
   }
   for (const pull of pulls) {
     const author = pull.user?.login ?? ''
