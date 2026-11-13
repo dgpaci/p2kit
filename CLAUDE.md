@@ -10,7 +10,7 @@ dgpaci (Davide Paci) — owns the repo and reviews its PRs.
 
 ## Target branch for PRs
 
-`main`.
+`main`, merged with **squash** (`gh pr merge <n> --squash`).
 
 ## Language
 
