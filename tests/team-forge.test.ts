@@ -33,7 +33,7 @@ test('the team items are read once per project from the open issues and pull req
   // wf:contract: http.fetch GETs of repos/<repo>/issues?state=open&type=issues and repos/<repo>/pulls?state=open, each paged up to 5 pages;
   // wf:contract: never -X, -f or --method, never a write. The same lists serve every person of the project: the requests do not grow with the team.
   // wf:contract: Each person with a login gets the items toTeamItems gives for their login, then withItems sets wip and isOverLimit.
-  // wf:contract: A project where nobody has a login reads nothing for the team and does not ask git for its origin.
+  // wf:contract: A project where nobody has a login gets no team items; its repo is still read, for milestones and readiness (Macro 4).
   // wf:contract: The team lists are read again only after 5 minutes, unless the refresh is forced, as the work-package forge state.
   // wf:contract: A forge failure becomes the project error `team: <forge> <issues|pulls>: <reason>`; the team still shows, with no item.
   const fetched: { url: string; method: string }[] = []
@@ -62,6 +62,7 @@ test('the team items are read once per project from the open issues and pull req
     if (e.url === `${api}issues?state=open&type=issues&limit=50&page=1`) return reply(ISSUES)
     if (e.url === `${api}pulls?state=open&limit=50&page=1`) return reply(FORGEJO_PAGE_1)
     if (e.url === `${api}pulls?state=open&limit=50&page=2`) return reply(PULLS)
+    if (e.url === `${api}milestones?state=open&limit=50`) return reply([])
     return { value: { status: 404, ok: false, headers: {}, text: '' } }
   })
   on('process.run', (_, e) => {
@@ -71,6 +72,7 @@ test('the team items are read once per project from the open issues and pull req
       gh.push([...e.argv])
       if (e.argv[2] === 'repos/acme/gh/issues?state=open&per_page=100&page=1') return answer(0, JSON.stringify(ISSUES))
       if (e.argv[2] === 'repos/acme/gh/pulls?state=open&per_page=100&page=1') return answer(0, JSON.stringify(PULLS))
+      if (e.argv[2] === 'repos/acme/gh/milestones?state=open&per_page=100') return answer(0, '[]')
       return answer(1, '', 'HTTP 404: Not Found\n')
     }
     const path = e.argv[2] ?? ''
@@ -96,29 +98,38 @@ test('the team items are read once per project from the open issues and pull req
       ['Luca Verdi', [[2, 'review']], 0, false],
     ])
   }
-  expect(gh).toEqual([
+  expect(gh.filter(argv => argv[2]!.startsWith('repos/acme/gh/')).sort()).toEqual([
     ['gh', 'api', 'repos/acme/gh/issues?state=open&per_page=100&page=1'],
+    ['gh', 'api', 'repos/acme/gh/milestones?state=open&per_page=100'],
     ['gh', 'api', 'repos/acme/gh/pulls?state=open&per_page=100&page=1'],
   ])
+  expect(gh.every(argv => argv.length === 3 && argv[1] === 'api')).toBe(true)
   const fjFetches = fetched.filter(one => one.url.includes('/acme/fj/')).map(one => one.url.split('/acme/fj/')[1])
-  expect(fjFetches).toEqual(['issues?state=open&type=issues&limit=50&page=1', 'pulls?state=open&limit=50&page=1', 'pulls?state=open&limit=50&page=2'])
+  expect(fjFetches.sort()).toEqual(['issues?state=open&type=issues&limit=50&page=1', 'milestones?state=open&limit=50', 'pulls?state=open&limit=50&page=1', 'pulls?state=open&limit=50&page=2'])
   expect(fetched.every(one => one.method === 'GET')).toBe(true)
 
   expect(named('NoLogin').team.map(member => member.person)).toEqual(['Anna Rossi', 'Davide Paci', 'Luca Verdi'])
-  expect(origins).not.toContain('/t/nologin')
+  // Nobody has a login, yet its repo is read (Macro 4): same three GETs as Gh.
+  expect(origins).toContain('/t/nologin')
+  expect(gh.filter(argv => argv[2]!.startsWith('repos/acme/nologin/')).length).toBe(3)
 
-  expect(named('Broken').errors).toEqual(['team: forgejo issues: no fj token for other.host', 'team: forgejo pulls: no fj token for other.host'])
+  expect(named('Broken').errors).toEqual([
+    'team: forgejo issues: no fj token for other.host',
+    'team: forgejo pulls: no fj token for other.host',
+    'milestones: forgejo milestones: no fj token for other.host',
+  ])
   expect(named('Broken').team.map(member => member.items.length)).toEqual([0, 0, 0])
 
   const before = reads()
   await clock.advance(60 * 1000)
   expect(reads()).toBe(before)
   expect(named('Gh').team[1]!.items.length).toBe(2)
-  expect(named('Broken').errors.length).toBe(2)
+  expect(named('Broken').errors.length).toBe(3)
 
   // /pm-desk forces the read; past 5 minutes the timer reads again.
   await $.command.run(RUN)
-  expect(reads()).toBe(before + 5)
-  await clock.advance(5 * 60 * 1000)
+  // Each read: Gh 3, NoLogin 3, Fj 4 (two pull pages); Broken has no token and sends nothing.
   expect(reads()).toBe(before + 10)
+  await clock.advance(5 * 60 * 1000)
+  expect(reads()).toBe(before + 20)
 })

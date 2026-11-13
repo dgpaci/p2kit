@@ -1,4 +1,5 @@
-import { getSessionLink } from './actions'
+import { getPackageLink, getSessionLink } from './actions'
+import { getMilestonePackage } from './milestones'
 import { getWorkThemes } from './project'
 import type { Project } from '../types'
 
@@ -18,6 +19,14 @@ export function getOpenBlockers(project: Project): { wp: string; sha: string; te
   return found
 }
 
+/** Per open milestone title, its work package `{ id, title }`, or null when none carries it. */
+export function getMilestonePackages(project: Project): Record<string, { id: string; title: string } | null> {
+  return Object.fromEntries(project.milestones.map(({ title }) => {
+    const wp = getMilestonePackage(project.workPackages, title)
+    return [title, wp ? { id: wp.id, title: wp.title } : null]
+  }))
+}
+
 export type BoardInput = { projects: Project[]; refreshedAt: number; errors: string[] }
 
 // JSON inside a <script> element: nothing in it may close the element.
@@ -26,7 +35,10 @@ const embed = (value: unknown): string => JSON.stringify(value).replaceAll('<', 
 /** The whole desk as one self-contained HTML page: the overview of projects and their work themes, and a project's form. */
 export function renderBoard(input: BoardInput): string {
   const data = {
-    projects: input.projects.map(project => ({ ...project, sessionLink: getSessionLink(project), themes: getWorkThemes(project), blockers: getOpenBlockers(project) })),
+    projects: input.projects.map(project => ({
+      ...project, sessionLink: getSessionLink(project), themes: getWorkThemes(project), blockers: getOpenBlockers(project),
+      packageLink: getPackageLink(project, []), milestonePackages: getMilestonePackages(project),
+    })),
     refreshedAt: new Date(input.refreshedAt).toISOString(),
     errors: input.errors,
     reloadMs: RELOAD_MS,
@@ -77,6 +89,7 @@ th { color: var(--dim); font-weight: 500; font-size: 13px; }
 .pill.red { color: var(--red); border-color: var(--red); }
 .pill.review { color: var(--amber); border-color: var(--amber); } .pill.inprogress { color: var(--on); border-color: var(--on); }
 .pill.waiting { color: var(--dim); } .pill.stalled { color: var(--red); border-color: var(--red); } .pill.todo { color: var(--fg); }
+.pill.notready { color: var(--amber); border-color: var(--amber); }
 .pill.wip-over { color: #fff; background: var(--red); border-color: var(--red); }
 .forge { display: flex; flex-wrap: wrap; gap: 6px; }
 button { border: 1px solid var(--line); background: var(--chip); color: var(--fg); border-radius: 999px; padding: 3px 10px; font: inherit; cursor: pointer; }
@@ -117,9 +130,34 @@ button { border: 1px solid var(--line); background: var(--chip); color: var(--fg
 .person-head .who small { color: var(--dim); margin-left: 6px; }
 .person table td, .person table th { padding: 5px 12px; }
 .person .empty { padding: 7px 12px; }
+a.btn { display: inline-block; border: 1px solid var(--line); background: var(--chip); color: var(--fg); border-radius: 999px; padding: 3px 10px; }
+a.btn:hover { text-decoration: none; filter: brightness(0.97); }
+a.btn-primary { background: var(--on); border-color: var(--on); color: #fff; font-weight: 600; }
+/* One line whatever is picked: the bar never grows, so checking an item never moves the list under the pointer. */
+.activity-bar { position: sticky; top: 0; z-index: 2; display: flex; gap: 10px; align-items: center; flex-wrap: nowrap; white-space: nowrap; min-height: 42px; padding: 8px 12px; margin: 10px 0 0; border: 1px solid var(--on); border-radius: 8px; background: var(--bg); box-shadow: 0 2px 6px rgba(0,0,0,.08); }
+.activity-bar.idle { position: static; border-style: dashed; border-color: var(--line); box-shadow: none; font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+.activity-bar .refs { font-family: ui-monospace, monospace; font-size: 13px; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.activity-bar .hint { margin-left: auto; font-size: 12px; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 0; text-align: right; }
+.block-title { display: flex; align-items: baseline; gap: 8px; margin: 22px 0 4px; }
+.block-title h3 { margin: 0; }
+.block-title .n { font-size: 12px; color: var(--dim); }
+/* Fixed layout: the ref, pill and date columns line up across the separate group tables. */
+table.rows { table-layout: fixed; }
+.sel-col { width: 28px; padding-right: 0 !important; }
+.sel-col input { margin: 0; cursor: pointer; }
+tr.checked td { background: color-mix(in srgb, var(--on) 8%, transparent); }
+.ms-row { display: grid; grid-template-columns: minmax(180px, 1.3fr) 150px 1fr minmax(220px, 1fr); gap: 10px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); }
+.ms-row:first-child { border-top: 0; }
+.ms-row .pills { display: flex; gap: 4px; flex-wrap: wrap; }
+.ms-row .wp { text-align: right; }
+.wp-link { font-weight: 500; }
+.nowp { color: var(--dim); font-style: italic; margin-right: 8px; }
+.group-head { padding: 6px 12px; background: var(--chip); font-size: 13px; border-top: 1px solid var(--line); }
+.group-head:first-child { border-top: 0; }
 @media (max-width: 720px) {
   .theme-row { grid-template-columns: 18px 1fr; } .theme-row .forge { grid-column: 2; justify-content: flex-start; }
   .theme-row > :nth-child(3) { grid-column: 2; }
+  .ms-row { grid-template-columns: 1fr; } .ms-row .wp { text-align: left; }
 }
 `
 
@@ -132,6 +170,9 @@ const fileLink = (path, label) => el('a', { href: 'file://' + encodeURI(path), t
 const sessionLink = p => el('a', { href: p.sessionLink, textContent: 'Open session', onclick: e => e.stopPropagation() })
 const bar = (done, total) => el('span', {}, el('span', { className: 'bar' }, el('i', { style: 'width:' + (total ? Math.round(100 * done / total) : 0) + '%' })), done + '/' + total)
 const phaseBar = d => d.phases.length ? el('span', { className: 'phases', title: d.summary.current }, ...d.phases.map(ph => el('i', { className: ph.state, title: 'Phase ' + ph.number + ': ' + ph.title + ' · ' + ph.state }))) : el('span', { className: 'dim', textContent: 'no plan' })
+// A continuous stage has no end and no percentage: open and completed work packages, and the day it started.
+const progressOf = p => p.stage.isContinuous ? el('span', { textContent: (p.progress.total - p.progress.done) + ' open · ' + p.progress.done + ' completed' }) : bar(p.progress.done, p.progress.total)
+const stageSpan = p => p.stage.isContinuous ? 'since ' + (p.stage.start || '—') + ' · continuous' : (p.stage.start || '—') + ' → ' + (p.stage.plannedEnd || '—')
 const pill = (text, cls = '') => el('span', { className: 'pill ' + cls, textContent: text })
 const stageOf = p => p.stage.current === null ? 'no stage' : 'stage ' + p.stage.current + (p.stage.name ? ' ' + p.stage.name : '')
 const isOpen = s => s === 'open'
@@ -139,6 +180,9 @@ const isOpen = s => s === 'open'
 const overLimit = p => p.team.filter(m => m.isOverLimit)
 const wipText = m => 'WIP ' + m.person + ' ' + m.wip + '/' + m.wipLimit
 const wipBadges = p => overLimit(p).map(m => pill(wipText(m), 'wip-over'))
+// Readiness: an open issue lacking a heading of project.yaml readiness.headings carries a notready pill naming what is missing.
+const missingOf = (p, number) => (p.forgeIssues.find(i => i.number === number) || {}).missing || []
+const notReadyPill = missing => missing.length ? Object.assign(pill('notready', 'notready'), { title: 'missing: ' + missing.join(', ') }) : null
 
 let route = decodeURIComponent(location.hash.slice(1))
 const go = r => { route = r; history.replaceState(null, '', r ? '#' + encodeURIComponent(r) : location.pathname); draw() }
@@ -184,12 +228,13 @@ function overview() {
         el('div', {}, el('strong', { textContent: p.name }), ' ', el('span', { className: 'dim', textContent: p.code }),
           el('div', { className: 'facts' },
             el('span', { textContent: stageOf(p) }),
-            el('span', {}, 'WPs ', bar(p.progress.done, p.progress.total)),
+            el('span', {}, 'WPs ', progressOf(p)),
             el('span', { className: p.highRisks ? 'err' : '', textContent: 'high risks ' + p.highRisks }),
             el('span', { className: p.openBlockers ? 'err' : '', textContent: 'blockers ' + p.openBlockers }),
             el('span', { textContent: 'open issues ' + p.openIssues }),
             el('span', { className: p.nextReport.isOverdue ? 'err' : '', textContent: 'next report ' + (p.nextReport.due || '—') + (p.nextReport.isOverdue ? ' overdue' : '') }),
             p.errors.length ? el('span', { className: 'err', textContent: '⚠ ' + p.errors.length + ' errors' }) : null,
+            p.notReady ? pill('notready ' + p.notReady, 'notready') : null,
             ...wipBadges(p))),
         el('span', {}, sessionLink(p))),
       ...(p.themes.length ? p.themes.map(w => el('div', { className: 'theme-row', onclick: () => go(p.path + '/theme/' + w.id) },
@@ -209,6 +254,7 @@ function attention(p) {
     ...risks.map(r => el('div', { className: 'err', textContent: r.id + ' [' + r.score + '] ' + r.title })),
     p.nextReport.isOverdue ? el('div', { className: 'err', textContent: 'Highlight report overdue since ' + p.nextReport.due }) : null,
     ...overLimit(p).map(m => el('div', { className: 'err', textContent: wipText(m) })),
+    p.notReady ? el('div', { textContent: p.notReady + ' issues not ready' }) : null,
   ].filter(Boolean)
   return lines.length ? lines : [el('p', { className: 'dim', textContent: 'Nothing.' })]
 }
@@ -220,8 +266,8 @@ function card(key, value, sub, className = '') {
 function recap(p) {
   return [
     el('div', { className: 'cards' },
-      card('Stage', p.stage.current === null ? '—' : p.stage.current + (p.stage.name ? ' · ' + p.stage.name : ''), (p.stage.start || '—') + ' → ' + (p.stage.plannedEnd || '—')),
-      card('Work packages', bar(p.progress.done, p.progress.total), p.themes.length + ' work themes active'),
+      card('Stage', p.stage.current === null ? '—' : p.stage.current + (p.stage.name ? ' · ' + p.stage.name : ''), stageSpan(p)),
+      card('Work packages', progressOf(p), p.themes.length + ' work themes active'),
       card('Blockers', String(p.openBlockers), 'open blocker notes', p.openBlockers ? 'err' : ''),
       card('Next report', p.nextReport.due || '—', p.nextReport.isOverdue ? 'overdue' : 'highlight report', p.nextReport.isOverdue ? 'err' : '')),
     el('div', { className: 'grid2' },
@@ -279,8 +325,86 @@ function team(p) {
             el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: (i.kind === 'pr' ? 'PR #' : '#') + i.number })),
             el('td', { textContent: i.title }),
             el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
-            el('td', { style: 'width:150px; text-align:right' }, pill(STATUS_LABEL[i.status], i.status))))))
+            el('td', { style: 'width:150px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status))))))
         : el('div', { className: 'empty dim', textContent: 'No open item.' }))))
+}
+
+// Activity tab: the open milestones with their work package, the open pull requests, the open issues grouped by milestone.
+// The "Not ready only" toggle filters the issues and the picked issues and pull requests are page-local, like the member filter;
+// another project starts unfiltered, with nothing picked. The page never writes: Create package only opens a session.
+let notReadyOnly = false
+const pickedItems = new Map()
+let activityFor = ''
+// The package link carries the prompt last: the picked references are appended to it (hooks/actions.ts getPackageLink).
+const packageLink = (p, refs) => p.packageLink + encodeURIComponent(' ' + refs.join(' '))
+const blockTitle = (title, sub) => el('div', { className: 'block-title' }, el('h3', { textContent: title }), el('span', { className: 'n', textContent: sub }))
+function activity(p) {
+  if (activityFor !== p.path) { notReadyOnly = false; pickedItems.clear(); activityFor = p.path }
+  const today = data.refreshedAt.slice(0, 10)
+  const pick = (key, ref) => el('td', { className: 'sel-col' }, el('input', { type: 'checkbox', checked: pickedItems.has(key),
+    onchange: () => { pickedItems.has(key) ? pickedItems.delete(key) : pickedItems.set(key, ref); draw() } }))
+  const rowClass = key => pickedItems.has(key) ? 'checked' : ''
+  const refs = [...pickedItems.values()]
+  const selectionBar = refs.length
+    ? el('div', { className: 'activity-bar' }, el('strong', { textContent: refs.length + ' selected' }), el('span', { className: 'refs', textContent: refs.join(' ') }),
+        el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: 'Create package' }),
+        el('a', { href: '#', textContent: 'clear', onclick: e => { e.preventDefault(); pickedItems.clear(); draw() } }),
+        el('span', { className: 'dim hint', textContent: 'opens a Claude session on ' + p.name + ' with the pm-package skill: ' + refs.join(' ') }))
+    : el('div', { className: 'activity-bar idle dim', textContent: 'Check issues or pull requests to group them into a work package.' })
+
+  const milestoneRow = m => {
+    const wp = p.milestonePackages[m.title]
+    return el('div', { className: 'ms-row' },
+      el('div', {}, el('strong', { textContent: m.title })),
+      el('div', {}, bar(m.closed, m.open + m.closed)),
+      el('div', { className: 'pills' },
+        m.due ? pill('due ' + m.due) : null,
+        m.due && m.due < today && m.open > 0 ? pill('overdue', 'red') : null,
+        pill('stalled ' + m.stalled, m.stalled ? 'stalled' : ''),
+        pill('in review ' + m.inReview, m.inReview ? 'review' : '')),
+      el('div', { className: 'wp' }, wp
+        ? el('a', { href: '#', className: 'wp-link', onclick: e => { e.preventDefault(); go(p.path + '/theme/' + wp.id) } }, el('span', { className: 'mono', textContent: wp.id + ' ' }), wp.title)
+        : el('span', {}, el('span', { className: 'nowp', textContent: 'no work package' }),
+            el('a', { className: 'btn', href: packageLink(p, ['--milestone', "'" + m.title + "'"]), textContent: 'Create work package' }))))
+  }
+
+  const pullRow = pr => el('tr', { className: rowClass('p' + pr.number) }, pick('p' + pr.number, 'PR #' + pr.number),
+    el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: pr.url, className: 'mono', textContent: 'PR #' + pr.number })),
+    el('td', { textContent: pr.title }),
+    el('td', { style: 'width:220px; text-align:right' }, pr.milestone ? pill(pr.milestone) : null, ' ', pr.draft ? pill('draft') : pr.inReview ? pill('in review', 'review') : null),
+    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: pr.updatedAt }))
+
+  const issueRow = i => el('tr', { className: rowClass('i' + i.number) }, pick('i' + i.number, '#' + i.number),
+    el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: '#' + i.number })),
+    el('td', { textContent: i.title }),
+    el('td', { style: 'width:100px; text-align:right' }, notReadyPill(i.missing || [])),
+    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }))
+
+  // Issues by milestone: the open ones in their order, then any other title (closed, or past the one-page read), then "No milestone".
+  const shown = notReadyOnly ? p.forgeIssues.filter(i => (i.missing || []).length) : p.forgeIssues
+  const openTitles = new Set(p.milestones.map(m => m.title))
+  const others = [...new Set(shown.map(i => i.milestone).filter(t => t && !openTitles.has(t)))]
+  const groups = [
+    ...p.milestones.map(m => [m.title, '', shown.filter(i => i.milestone === m.title)]),
+    ...others.map(t => [t, 'closed', shown.filter(i => i.milestone === t)]),
+    ['No milestone', '', shown.filter(i => !i.milestone)],
+  ].filter(g => g[2].length)
+  const notReadyCount = p.forgeIssues.filter(i => (i.missing || []).length).length
+
+  return el('div', {},
+    selectionBar,
+    blockTitle('Milestones', p.milestones.length + ' open'),
+    p.milestones.length ? el('div', { className: 'person' }, ...p.milestones.map(milestoneRow)) : el('div', { className: 'empty dim', textContent: 'No open milestone.' }),
+    blockTitle('Pull requests', p.forgePulls.length + ' open'),
+    p.forgePulls.length ? el('div', { className: 'person' }, el('table', { className: 'rows' }, el('tbody', {}, ...p.forgePulls.map(pullRow)))) : el('div', { className: 'empty dim', textContent: 'No open pull request.' }),
+    blockTitle('Issues', p.forgeIssues.length + ' open' + (notReadyCount ? ' · ' + notReadyCount + ' not ready' : '')),
+    el('div', { className: 'members' },
+      el('button', { className: 'member-chip' + (notReadyOnly ? ' sel' : ''), onclick: () => { notReadyOnly = !notReadyOnly; draw() } }, 'Not ready only')),
+    groups.length
+      ? el('div', { className: 'person' }, ...groups.flatMap(([title, note, list]) => [
+          el('div', { className: 'group-head' }, el('strong', { textContent: title }), el('span', { className: 'dim', textContent: ' · ' + (note || list.length) })),
+          el('table', { className: 'rows' }, el('tbody', {}, ...list.map(issueRow)))]))
+      : el('div', { className: 'empty dim', textContent: 'No open issue.' }))
 }
 
 // One entry per tab: [id, label, count(p), render(p)].
@@ -290,6 +414,7 @@ const dimUnlessOpen = (status, cells) => isOpen(status) ? cells : cells.map(c =>
 const TABS = [
   ['roles', 'Roles', p => p.roles.length, p => tableOf(['Role', 'People'], p.roles.map(r => [r.label, r.people.join(', ') || '—']))],
   ['team', 'Team', p => p.team.length, team],
+  ['activity', 'Activity', p => p.forgeIssues.length + p.forgePulls.length, activity],
   ['documents', 'Documents', p => p.documents.length, p => tableOf(['Document', 'Status', 'Version'], p.documents.map(d => [fileLink(d.path, d.title), d.status, d.version]))],
   ['wps', 'Work packages', p => p.workPackages.length, p => tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Link'],
     p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.teamManager, w.due, wpLink(p, w)]))],
@@ -330,5 +455,6 @@ function draw() {
 }
 
 draw()
-setInterval(() => location.reload(), data.reloadMs)
+// A reload would drop the picked issues and pull requests: it waits until nothing is picked.
+setInterval(() => { if (!pickedItems.size) location.reload() }, data.reloadMs)
 `

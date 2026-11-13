@@ -35,9 +35,19 @@ plugin root (two levels up from this skill's folder); keep the YAML inside its s
 
 Only when the user states the Board's decision in chat, append `authorize-project` and
 `authorize-stage-2` to `approvals` (by, date, note), set `status: delivery`, `stage.current: 2`,
-`stage.name`, `stage.start`, `stage.planned_end` from the stage plan, the PID and stage plan
+`stage.name`, `stage.start`, `stage.planned_end` from the stage plan — or, for a project with no
+fixed end, `continuous: true` and no `planned_end` (see below) — the PID and stage plan
 `status: approved`, and the stage's work packages `status: authorized`. Then propose the stage
 baseline tag — `git tag pm/stage-2-approved` — and create it only on the user's yes, after the
 `.pm/` changes are committed.
+
+## A project with no fixed end
+
+When the user says the project has no fixed end ("ongoing", "continuous delivery", or the brief
+records it), offer a **continuous** delivery stage instead of a dated one: the stage plan has no end
+date, and on the Board's decision `project.yaml` gets
+`stage: { current: 2, name: Delivery, start: <today>, continuous: true }` with no `planned_end`.
+The desk then shows open and completed work packages instead of a percentage. Offer it only on the
+user's word; never infer it, and write it only with their yes.
 
 Do not commit unless the user asks; when they do, one commit `docs(pm): initiation documentation`.

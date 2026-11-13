@@ -31,6 +31,28 @@ the current one.
    or relative ones.
 5. Tell the user in one line, with the project's `name` from `project.yaml`, and that `/pm-desk`
    opens the pane (it refreshes by itself within a minute).
+6. Optional — the issue template. Read the host of `git remote get-url origin`. If the repo has no
+   `work-item` template — `.github/ISSUE_TEMPLATE/work-item.md` on `github.com`,
+   `.forgejo/issue_template/work-item.md` on any other host — offer it. Only on the user's yes,
+   write it as:
+
+   ```markdown
+   ---
+   name: Work item
+   about: Why / What changes / Done when
+   ---
+
+   ## Why
+
+   ## What changes
+
+   ## Done when
+   ```
+
+   with the headings of `readiness.headings` in `project.yaml` when set — both in the sections and
+   in `about:` (the headings joined by ` / `). Never commit it; say it
+   is committed with the code, when the user decides. `/pm-issue` drafts its issues on the same
+   headings.
 
 **Unregistering**: on request, remove the entry with that `path` and nothing else; the project's
 `.pm/` folder is never touched.

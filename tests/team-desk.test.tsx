@@ -8,7 +8,7 @@ const member = (person: string, login: string, wip: number, wipLimit: number, it
 const project = (path: string, name: string, team: TeamMember[]): Project => ({
   path, name, code: name.toUpperCase(), profile: 'standard', status: 'delivery',
   stage: { current: 1, name: '', start: '', plannedEnd: '' },
-  roles: [{ role: 'team_manager', label: 'Team manager', people: team.map(one => one.person) }], team, tolerances: [], light: 'green',
+  roles: [{ role: 'team_manager', label: 'Team manager', people: team.map(one => one.person) }], team, milestones: [], forgeIssues: [], forgePulls: [], readiness: [], notReady: 0, tolerances: [], light: 'green',
   progress: { done: 0, total: 0 }, highRisks: 0, openIssues: 0, nextReport: { due: '', isOverdue: false }, documents: [],
   workPackages: [], risks: [], issues: [], approvals: [], openBlockers: 0, unthemedNotes: [], errors: [],
 })
@@ -20,7 +20,7 @@ const FILES: Record<string, string> = {
   '/t/calm/.pm/project.yaml': `name: Calm\n${ROLES}`,
 }
 const user = (login: string) => ({ login })
-const ISSUES = [{ number: 1, title: 'Issue 1', html_url: 'https://h/issues/1', updated_at: '2026-11-11T09:00:00Z', assignees: [user('dgpaci')] }]
+const ISSUES = [{ number: 1, title: 'Issue 1', html_url: 'https://h/issues/1', updated_at: '2026-11-11T09:00:00Z', assignees: [user('dgpaci')], body: '## Why\nx\n## What changes\ny\n## Done when\n- [ ] z\n' }]
 const PULLS = [
   { number: 2, title: 'Pull 2', html_url: 'https://h/pulls/2', updated_at: '2026-11-11T10:00:00Z', draft: false, user: user('dgpaci'), assignees: [], requested_reviewers: [user('lverdi')] },
 ]

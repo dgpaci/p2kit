@@ -23,6 +23,9 @@ writing, and keep the YAML inside its subset.
    - the **tailoring profile**: `light` (default) or `full`;
    - time and cost **tolerances** for the project, if the mandate has a budget or a deadline.
    Anything still unknown goes in the brief as an open point, not as a guess.
+   If the user says the project has **no fixed end** ("ongoing", "continuous delivery"), say that
+   `/pm-initiate` will offer a continuous delivery stage, and note it in the brief's approach. Never
+   infer it from the mandate.
 4. **Write `.pm/project.yaml`** from `templates/project.yaml` in this skill's folder: `status: start-up`,
    `stage.current: 0`, `stage.name: Start-up`, `stage.start` today. Leave `approvals: []`.
 5. **Write `.pm/brief.md`** from `templates/brief.md`: fill every section from the mandate in short,

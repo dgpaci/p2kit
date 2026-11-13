@@ -38,7 +38,7 @@ allowed.
 - Ask the user whether a new branch should be a worktree or a plain branch.
 - Mod style reference: `~/sviluppo/claude/forge-desk`.
 
-## Mod notes (learned in the stage-delivery, desk-redesign and team-wip workflows)
+## Mod notes (learned in the stage-delivery, desk-redesign, team-wip and planning-signals workflows)
 
 - `claude plugin test` runs every `*.test.ts(x)` under the folder but skips dot folders, so tests
   under `.phased/` and worktrees under `.claude/` never run by accident.
@@ -59,7 +59,16 @@ allowed.
   it fixture projects.
 - Forgejo's `issues/search?assigned=true|created=true|review_requested=true` answers only for the
   token's own user. A per-person view reads the repo's open issues and pulls once and partitions
-  them locally (`hooks/project.ts:addTeamState`, `hooks/team.ts:toTeamItems`).
+  them locally (`hooks/project.ts:addRepoState`, `hooks/team.ts:toTeamItems`).
 - In `claude plugin test` the test `$` has no `env`/`fs`, so `loadProjects` cannot be called
   directly: drive the plugin (session start, forced `/pm-desk`) and read the `projects` atom through
   a `state.set` pass-through hook (`tests/team-forge.test.ts`).
+- A `claude://code/new?q=…` link can never run a slash command: Claude Desktop turns the leading `/`
+  of the linked prompt into `／`. A link that needs a skill names it in plain text
+  (`[p2kit] Use the p2kit:pm-package skill with: …`, `hooks/actions.ts:getPackageLink`).
+- A session opened from Desktop (a deep link, a new chat) loads only the plugins in
+  `CLAUDE_CODE_PLUGIN_DIRS` (`~/.claude/settings.json` → `env`): to try a skill that exists only in a
+  worktree, add the worktree's path there, and put the repo's path back after the merge.
+- The browser page reloads itself every 60 s (`RELOAD_MS`), dropping any page-local state. State the
+  user builds over time (the Activity selection) holds the reload while it is set
+  (`if (!pickedItems.size) location.reload()`); a plain filter may reset.
