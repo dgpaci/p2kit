@@ -25,6 +25,8 @@ const ISSUES = [
 const PULLS = [
   { number: 3, title: 'Pull 3', html_url: 'https://h/pulls/3', updated_at: '2026-11-12T10:00:00Z', draft: false, user: { login: 'a' }, assignees: [], requested_reviewers: [{ login: 'b' }], milestone: { title: 'v1' } },
 ]
+// The closed-item reads of the flow metrics answer empty and are left out of the counts: tests/flow-forge.test.ts covers them.
+const isFlowRead = (path: string): boolean => path.includes('state=closed') || path.includes('/reviews')
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 
 test('the repo of every forge project is read once, GET only, into its milestones and open issues', async ($, on) => {
@@ -53,6 +55,7 @@ test('the repo of every forge project is read once, GET only, into its milestone
   on('fs.list', () => ({ value: [] }))
   on('fs.write', () => ({ value: undefined }))
   on('http.fetch', (_, e) => {
+    if (isFlowRead(e.url)) return { value: { status: 200, ok: true, headers: {}, text: '[]' } }
     fetched.push({ url: e.url, method: e.init?.method ?? 'GET' })
     const reply = (body: unknown) => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } })
     const api = 'https://hub.genro.com/api/v1/repos/acme/fj/'
@@ -64,6 +67,7 @@ test('the repo of every forge project is read once, GET only, into its milestone
   on('process.run', (_, e) => {
     const answer = (exitCode: number, stdout = '', stderr = '') =>
       ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } })
+    if (e.argv[0] === 'gh' && isFlowRead(e.argv[2] ?? '')) return answer(0, '[]')
     if (e.argv[0] === 'gh') {
       gh.push([...e.argv])
       const path = e.argv[2] ?? ''

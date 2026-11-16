@@ -4,8 +4,10 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import { openFile, openSession } from './actions'
 import { getOpenBlockers, renderBoard } from './board'
 import type { CommitNote, Light, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpForge } from '../types'
+import { getFlowCell } from './flow'
 import { getMilestonePackage } from './milestones'
 import { getWorkThemes, isOpen, loadProjects } from './project'
+import { toSnapshot } from './snapshot'
 
 const PANE = 'p2kit-desk'
 const TITLE = 'Project desk'
@@ -13,10 +15,11 @@ const TITLE = 'Project desk'
 const REFRESH_MS = 60 * 1000
 // The browser board, under the home folder.
 const BOARD_PATH = '.claude/p2kit/desk.html'
+const SNAPSHOT_PATH = '.claude/p2kit/desk.json'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-8' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-9' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 // The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
 const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
@@ -34,6 +37,9 @@ const LIGHT_COLOR: Record<Light, string> = { green: 'green', amber: 'yellow', re
 const PHASE_COLOR: Record<PhaseState, string> = { done: 'green', 'in-progress': 'cyan', todo: 'gray', failed: 'red', blocked: 'yellow' }
 const PULL_COLOR: Record<Pull['state'], string> = { open: 'cyan', merged: 'green', closed: 'gray' }
 const STATUS_LABEL: Record<TeamStatus, string> = { review: 'review asked', inprogress: 'in progress', todo: 'to do', waiting: 'waiting for review', stalled: 'stalled' }
+const FLOW_ROWS: [string, 'leadTime' | 'firstReview' | 'merge'][] = [['Lead time', 'leadTime'], ['Review (opened → first review)', 'firstReview'], ['Merge (opened → merged)', 'merge']]
+// The longest weekly bar of the Metrics tab, in characters.
+const METRICS_BAR = 20
 const WP_COLOR: Record<string, string> = { completed: 'green', 'in-progress': 'cyan', authorized: 'white', draft: 'gray', cancelled: 'gray' }
 
 // The automatic refresh; a reload of the module starts a new one.
@@ -70,10 +76,15 @@ function getProgressBar({ progress: { done, total }, stage }: Project): string {
 
 const getWipText = (member: TeamMember): string => `WIP ${member.person} ${member.wip}/${member.wipLimit}`
 
-/** Rewrites the browser board from the projects as they stand. */
+/** Rewrites the browser board from the projects as they stand, and the JSON snapshot beside it; a failed snapshot is only logged. */
 async function writeBoard($: EngineInterface): Promise<void> {
   const state = await read($, meta)
-  await $.fs.write(await getBoardPath($), renderBoard({ projects: await read($, projects), refreshedAt: state.refreshedAt, errors: state.errors }))
+  const input = { projects: await read($, projects), refreshedAt: state.refreshedAt, errors: state.errors }
+  await $.fs.write(await getBoardPath($), renderBoard(input))
+  // Before the first read there is nothing to snapshot: a skill would take the empty list for an unregistered repo.
+  if (!state.refreshedAt && !input.projects.length) return
+  await $.fs.write(`${await $.env.get('HOME')}/${SNAPSHOT_PATH}`, toSnapshot(input))
+    .catch(error => $.ui.log(`p2kit: snapshot not written: ${String(error)}`, { to: 'debug' }))
 }
 
 /** Opens the browser board, written afresh first. */
@@ -324,6 +335,24 @@ export const register: Register = on => {
                 {list.map(issue => <Text wrap="truncate-end">{`  #${issue.number} ${issue.title}${notReadySuffix(issue.number)}`}</Text>)}
               </Box>
             ))),
+          ]
+        },
+      },
+      {
+        // Metrics: lead, review and merge time over 30 and 90 days, then one line per week of the 90 days.
+        id: 'metrics', label: 'Metrics', count: p.flow?.windows[0]?.merge.count ?? 0,
+        render: () => {
+          if (!p.flow) return <Text dimColor>No forge data.</Text>
+          const [w30, w90] = p.flow.windows
+          const top = Math.max(1, ...w90.throughput.map(week => week.issues + week.pulls))
+          const width = Math.min(top, METRICS_BAR)
+          return [
+            <Text dimColor>Days: median · p90 (count), 30 days | 90 days</Text>,
+            ...FLOW_ROWS.map(([label, key]) => <Text wrap="truncate-end">{`${label}: ${getFlowCell(w30[key])} | ${getFlowCell(w90[key])}`}</Text>),
+            <Text bold>Weekly throughput, 90 days</Text>,
+            ...w90.throughput.map(week => (
+              <Text mono wrap="truncate-end">{`${week.week} ${'▇'.repeat(Math.round((week.issues + week.pulls) * width / top)).padEnd(width)} ${week.issues} issues · ${week.pulls} PRs`}</Text>
+            )),
           ]
         },
       },
