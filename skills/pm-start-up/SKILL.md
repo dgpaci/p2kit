@@ -20,7 +20,8 @@ writing, and keep the YAML inside its subset.
    - who is the **Executive** (the one person accountable, who decides), and the Senior User(s) and
      Senior Supplier(s) if known;
    - who is the **Project Manager** (default: the user);
-   - the **tailoring profile**: `light` (default) or `full`;
+   - the **tailoring profile**: `light` (default), `full`, or `agile` (the light products plus
+     timeboxed iterations, `/pm-iterate`);
    - time and cost **tolerances** for the project, if the mandate has a budget or a deadline.
    Anything still unknown goes in the brief as an open point, not as a guess.
    If the user says the project has **no fixed end** ("ongoing", "continuous delivery"), say that

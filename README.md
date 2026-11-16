@@ -47,6 +47,8 @@ Status: phase 1 skeleton, under development.
 | `/pm-link` | links a work package to a forge issue, a milestone or a branch (`.pm/work-packages/`) |
 | `/pm-issue` | drafts a work package's forge issue with the readiness headings, creates it after your OK and records `issue:` |
 | `/pm-package` | groups issues and pull requests into a work package: a forge milestone they join, after your OK, and `WP-<nn>.md` linked to it |
+| `/pm-iterate` | opens or closes a timeboxed iteration of the stage — goal, dates, work packages, result — after your OK (`.pm/registers/iterations.yaml`) |
+| `/pm-retro` | runs a retrospective: lessons and actions in the Lessons Log after your OK, each action opened as a forge issue after its own OK (`.pm/registers/lessons.yaml`) |
 | `/pm-note` | adds or closes an internal note on a commit of a work package's branch (`.pm/registers/commit-notes.yaml`) |
 | `/pm-digest` | writes the weekly digest for the alignment meeting from the desk's data (`.pm/digests/`, clipboard on request) |
 | `/pm-report` | drafts the Highlight Report for the Board and, after your OK, saves it and moves the next report date |

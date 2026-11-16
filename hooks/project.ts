@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import type { Approval, CommitNote, Issue, Light, Product, Project, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
+import type { Approval, CommitNote, Issue, Iteration, Lesson, Light, Product, Project, RetroAction, Retrospective, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
 import { FLOW_WINDOWS, getFirstReviewAt, toFlow } from './flow'
 import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from './forge'
 import type { ForgeTarget, RestMilestone } from './forge'
@@ -63,6 +63,8 @@ export type ProjectFiles = {
   // `git log` of each linked work package's branch over its base, in LOG_FORMAT.
   wpLogs?: { wp: string; text: string }[]
   commitNotes?: string
+  iterations?: string
+  lessons?: string
   gitErrors?: string[]
   // The files of the project.yaml `documents:` folders, with their title; `folder` is relative to the project.
   sharedDocs?: { folder: string; path: string; title: string }[]
@@ -150,6 +152,51 @@ function readRegister(name: string, raw: string | undefined, key: string, errors
   } catch (error) {
     errors.push(`${name}: ${String(error)}`)
     return []
+  }
+}
+
+/** The iterations register, ascending number; an open entry or a work package unknown goes to `errors`. */
+function readIterations(raw: string | undefined, workPackages: WorkPackage[], errors: string[]): Iteration[] {
+  const iterations: Iteration[] = readRegister('iterations.yaml', raw, 'iterations', errors).map(one => ({
+    number: num(one.number) ?? 0, goal: text(one.goal), start: text(one.start), end: text(one.end), stage: num(one.stage),
+    status: text(one.status) || 'open', workPackages: list(one.work_packages).map(text), delivered: list(one.delivered).map(text),
+    result: text(one.result),
+  }))
+  iterations.sort((a, b) => a.number - b.number)
+  const open = iterations.filter(one => one.status === 'open')
+  if (open.length > 1) errors.push(`iterations: more than one open (${open.map(one => one.number).join(', ')})`)
+  for (const one of iterations) {
+    for (const id of one.workPackages) if (!workPackages.some(wp => wp.id === id)) errors.push(`iterations: ${one.number}: unknown work package ${id}`)
+  }
+  return iterations
+}
+
+/** The Lessons Log, parsed once: a broken file is one error and three empty lists. */
+function readLessons(raw: string | undefined, errors: string[]): Pick<Project, 'retrospectives' | 'lessons' | 'actions' | 'lastRetro'> {
+  let data: Doc = {}
+  try {
+    const parsed = raw === undefined ? {} : parseYaml(raw)
+    if (isDoc(parsed)) data = parsed
+  } catch (error) {
+    errors.push(`lessons.yaml: ${String(error)}`)
+  }
+  const retrospectives: Retrospective[] = docs(data.retrospectives).map(one => ({ date: text(one.date), iteration: num(one.iteration), stage: num(one.stage) }))
+  const lessons: Lesson[] = docs(data.lessons).map(one => ({ id: text(one.id), date: text(one.date), iteration: num(one.iteration), kind: text(one.kind), text: text(one.text) }))
+  const actions: RetroAction[] = docs(data.actions).map(one => ({
+    id: text(one.id), date: text(one.date), text: text(one.text), issue: num(one.issue), status: text(one.status) || 'open',
+  }))
+  const lastRetro = retrospectives.map(one => one.date).reduce((last, date) => (date > last ? date : last), '')
+  return { retrospectives, lessons, actions, lastRetro }
+}
+
+/** The open iteration with the highest number, with its progress; null when none is open. */
+function getCurrentIteration(iterations: Iteration[], workPackages: WorkPackage[], today: string): Project['iteration'] {
+  const current = iterations.filter(one => one.status === 'open').pop()
+  if (!current) return null
+  const own = workPackages.filter(wp => current.workPackages.includes(wp.id) && wp.status !== 'cancelled')
+  return {
+    ...current, done: own.filter(wp => wp.status === 'completed').length, planned: own.length,
+    isOverdue: Boolean(current.end) && current.end < today,
   }
 }
 
@@ -251,6 +298,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
   workPackages.sort((a, b) => a.id.localeCompare(b.id))
   errors.push(...(files.gitErrors ?? []))
 
+  const iterations = readIterations(files.iterations, workPackages, errors)
   const inStage = workPackages.filter(wp => wp.stage === stage.current && wp.status !== 'cancelled')
   const tolerances = getTolerances(data.tolerances)
   const reporting = isDoc(data.reporting) ? data.reporting : {}
@@ -288,6 +336,9 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     risks,
     issues,
     approvals,
+    iterations,
+    iteration: getCurrentIteration(iterations, workPackages, today),
+    ...readLessons(files.lessons, errors),
     openBlockers: notes.filter(note => note.kind === 'blocker' && note.status === 'open').length,
     unthemedNotes: notes.filter(note => !workPackages.some(pkg => pkg.delivery && pkg.id === note.wp)),
     errors,
@@ -439,6 +490,8 @@ export async function readProjectFiles($: EngineInterface, path: string): Promis
     risks: await readIfExists($, `${pm}/registers/risks.yaml`),
     issues: await readIfExists($, `${pm}/registers/issues.yaml`),
     commitNotes: await readIfExists($, `${pm}/registers/commit-notes.yaml`),
+    iterations: await readIfExists($, `${pm}/registers/iterations.yaml`),
+    lessons: await readIfExists($, `${pm}/registers/lessons.yaml`),
   }
 }
 

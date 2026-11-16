@@ -2,7 +2,7 @@
 schema: 1
 name: <Project name>
 code: <SHORT>
-profile: light
+profile: light                  # light | full | agile
 status: start-up
 stage:
   current: 0

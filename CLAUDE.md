@@ -79,3 +79,6 @@ allowed.
   a test of its own — and say in the plan that those mocks may change, or the phase records it as a deviation.
 - The test clock of `mock.clock` starts at 0: a guard such as "never read yet" on `refreshedAt === 0`
   also fires in tests, so pair it with another signal (no project held) or `await clock.set(...)` first.
+- The `.pm/` YAML subset (`hooks/yaml.ts`) has no `''` escape: `'it''s'` reads as `it''s`, and inside
+  a flow map `{ … }` it breaks the entry. A skill writing a text that may hold `'` puts it in double
+  quotes (`skills/pm-retro/SKILL.md` step 5).
