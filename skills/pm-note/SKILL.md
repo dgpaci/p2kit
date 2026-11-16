@@ -23,8 +23,8 @@ Internal notes stay in the project's `.pm/`, never on the forge. This skill writ
      - { sha: <short sha>, wp: WP-<nn>, kind: blocker, status: open, text: '<text>', date: <YYYY-MM-DD> }
    ```
 
-   Create the file with `notes:` when missing. Quote the text in single quotes (double any `'`
-   inside it): a comma or a colon would otherwise break the flow map. One line per note.
+   Create the file with `notes:` when missing. Quote the text in single quotes, or in double quotes when it holds
+   a `'` (the subset has no escapes): a comma or a colon would otherwise break the flow map. One line per note.
 4. **Closing**: list the open notes of the work package, ask which one, and change its `status` to `closed`.
    Change nothing else; never delete a note.
 5. Tell the user in one line what was written, and that it is not committed: `.pm/` is committed

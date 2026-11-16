@@ -59,3 +59,16 @@ lead: { name: Daniela D'Alessandro, login: ddalessandro }
     lead: { name: "Daniela D'Alessandro", login: 'ddalessandro' },
   })
 })
+
+test('a double-quoted value holds an apostrophe, also inside a flow map', async () => {
+  const doc = parseYaml(`
+title: "Fix l'ordine: urgente"
+notes:
+  - { sha: abc1234, text: "l'ordine, poi il resto", kind: blocker }
+`)
+
+  expect(doc).toEqual({
+    title: "Fix l'ordine: urgente",
+    notes: [{ sha: 'abc1234', text: "l'ordine, poi il resto", kind: 'blocker' }],
+  })
+})

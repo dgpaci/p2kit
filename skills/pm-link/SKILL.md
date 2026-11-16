@@ -33,7 +33,8 @@ A work theme is a work package carrying link keys in its frontmatter: `issue`, `
 
    Keep the frontmatter within the YAML subset (docs/pm-schema.md → *YAML subset*): one
    `key: value` per line; any value holding a `:` or a `#` — an issue title often does, a
-   milestone title may — in single quotes, with every `'` inside it doubled.
+   milestone title may — in single quotes, or in double quotes when it holds a `'` (the subset
+   has no escapes).
    Change no other key and leave the body as it is.
 5. Tell the user in one line which work package now carries which link, and that nothing is
    committed: `.pm/` is committed with the code, when the user decides. The desk shows it at its

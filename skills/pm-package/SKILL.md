@@ -60,8 +60,8 @@ picked issues and pull requests — then writes one work package file. It commit
    (`l'anagrafica` → `'l'\''anagrafica'`); the JSON body is built by `jq --arg`, never by hand.
 8. **Write the work package** `.pm/work-packages/WP-<nn>.md` when a new one was planned, within the
    YAML subset (docs/pm-schema.md → *YAML subset*): one `key: value` per line; a title holding a `:`
-   or a `#` — the `title:` and the `milestone:` value alike — in single quotes, with every `'` inside
-   it doubled.
+   or a `#` — the `title:` and the `milestone:` value alike — in single quotes, or in double quotes when it
+   holds a `'` (the subset has no escapes).
 9. **Tell the user** in a few lines the milestone (created or reused) and its URL, the items assigned
    and the ones left where they were, and the work package written. Nothing is committed: `.pm/` is
    committed with the code, when the user decides. The desk shows the milestone with its work
