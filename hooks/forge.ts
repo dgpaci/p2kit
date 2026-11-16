@@ -32,7 +32,8 @@ export function toPulls(list: RestPull[], branch: string): Pull[] {
     }))
 }
 
-export type RestMilestone = { title: string; open_issues: number; closed_issues: number; due_on?: string | null }
+// `number` is GitHub's milestone id in URLs, `id` Forgejo's.
+export type RestMilestone = { title: string; open_issues: number; closed_issues: number; due_on?: string | null; number?: number; id?: number }
 
 /** The milestone titled `title`, with its due date as an ISO day ('' when none). */
 export function toMilestone(list: RestMilestone[], title: string): Milestone | undefined {

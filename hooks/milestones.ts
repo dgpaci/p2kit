@@ -1,4 +1,4 @@
-import type { ForgeIssue, ForgePull, MilestoneProgress, WorkPackage } from '../types'
+import type { ForgeIssue, ForgePull, MilestoneItem, MilestoneProgress, WorkPackage } from '../types'
 import { toMilestone } from './forge'
 import { DEFAULT_HEADINGS, getMissingHeadings } from './readiness'
 import type { RestMilestone } from './forge'
@@ -45,4 +45,18 @@ export function getMilestonePackage(workPackages: WorkPackage[], title: string):
   return workPackages
     .filter(wp => wp.delivery?.milestone === title && wp.status !== 'cancelled')
     .sort((a, b) => a.id.localeCompare(b.id))[0]
+}
+
+// An issue of a milestone as both forges list it: a pull request carries `pull_request`, with `merged_at` once merged.
+export type RestMilestoneItem = { number: number; title: string; html_url: string; state: string; pull_request?: { merged_at?: string | null } | null }
+
+/** The issues and pull requests of a milestone, open ones first, then by number, newest first; a merged pull is `merged`. */
+export function toMilestoneItems(list: RestMilestoneItem[]): MilestoneItem[] {
+  return list
+    .map(item => ({
+      kind: item.pull_request ? 'pr' as const : 'issue' as const,
+      number: item.number, title: item.title, url: item.html_url,
+      state: item.pull_request?.merged_at ? 'merged' as const : item.state === 'open' ? 'open' as const : 'closed' as const,
+    }))
+    .sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open') || b.number - a.number)
 }

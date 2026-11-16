@@ -4,7 +4,8 @@ import type { Approval, CommitNote, Issue, Light, Product, Project, Risk, RoleLi
 import { FLOW_WINDOWS, getFirstReviewAt, toFlow } from './flow'
 import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from './forge'
 import type { ForgeTarget, RestMilestone } from './forge'
-import { toForgeIssues, toForgePulls, toMilestoneProgress } from './milestones'
+import { toForgeIssues, toForgePulls, toMilestoneItems, toMilestoneProgress } from './milestones'
+import type { RestMilestoneItem } from './milestones'
 import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
 import { findPlanPath, getPhaseSummary, parsePhases } from './stage'
 import { readReadiness } from './readiness'
@@ -43,6 +44,8 @@ const GITHUB_PAGE = 100
 // The closed issues and pull requests of a repo are read again only past this age, unless the refresh is forced; up to this many pages each.
 const FLOW_TTL_MS = 60 * 60 * 1000
 const FLOW_PAGES = 10
+// The items of a work package's milestone are paged up to this many pages.
+const MILESTONE_PAGES = 5
 // The reviews of at most this many merged pulls are read per read of the closed lists, this many at a time.
 const REVIEWS_PER_READ = 100
 const REVIEW_BATCH = 10
@@ -61,6 +64,9 @@ export type ProjectFiles = {
   wpLogs?: { wp: string; text: string }[]
   commitNotes?: string
   gitErrors?: string[]
+  // The files of the project.yaml `documents:` folders, with their title; `folder` is relative to the project.
+  sharedDocs?: { folder: string; path: string; title: string }[]
+  docErrors?: string[]
 }
 
 type WpLink = Pick<WpDelivery, 'issue' | 'milestone' | 'branch' | 'base'>
@@ -182,11 +188,15 @@ export function buildProject(files: ProjectFiles, today: string): Project {
         product: text(front.product),
         status: text(front.status) || 'draft',
         version: text(front.version),
+        folder: '',
       })
     } catch (error) {
       errors.push(`${basename(file.path)}: ${String(error)}`)
     }
   }
+
+  for (const doc of files.sharedDocs ?? []) documents.push({ path: doc.path, title: doc.title, product: 'shared', status: '', version: '', folder: doc.folder })
+  errors.push(...(files.docErrors ?? []))
 
   if (data.stages !== undefined) errors.push(STAGES_ERROR)
 
@@ -359,6 +369,52 @@ async function readWpPlans($: EngineInterface, path: string, files: ProjectFiles
   return { wpPlans, wpLogs, gitErrors }
 }
 
+// The files of a shared documents folder the desk lists; images and the rest stay out.
+const SHARED_DOC = /\.(html?|md|pdf)$/i
+const SHARED_DEPTH = 3
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–', hellip: '…', egrave: 'è', eacute: 'é', agrave: 'à', ograve: 'ò', ugrave: 'ù', igrave: 'ì', rsquo: '’', lsquo: '‘', laquo: '«', raquo: '»' }
+
+/** The title a shared document shows: an HTML `<title>`, a Markdown `title:` or first `# ` heading, else the file name. */
+export function getDocumentTitle(name: string, text: string): string {
+  const html = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(text)?.[1]
+  const markdown = /^title:\s*['"]?(.+?)['"]?\s*$/m.exec(text)?.[1] ?? /^# (.+)$/m.exec(text)?.[1]
+  const found = (name.toLowerCase().endsWith('.md') ? markdown : html)?.trim()
+  if (!found) return name.replace(/\.[^.]+$/, '')
+  return found.replace(/&(#\d+|[a-z]+);/gi, (entity, code: string) =>
+    code.startsWith('#') ? String.fromCodePoint(Number(code.slice(1))) : ENTITIES[code.toLowerCase()] ?? entity)
+}
+
+/** The documents of the project.yaml `documents:` folders, subfolders included, sorted by folder then name. */
+async function readSharedDocs($: EngineInterface, path: string, project: string | undefined): Promise<Pick<ProjectFiles, 'sharedDocs' | 'docErrors'>> {
+  let folders: Value | undefined
+  try {
+    const data = project ? parseYaml(project) : undefined
+    folders = isDoc(data) ? data.documents : undefined
+  } catch {
+    return {} // buildProject reports the parse error.
+  }
+  if (folders === undefined) return {}
+  if (!Array.isArray(folders)) return { docErrors: ['.pm/project.yaml: documents: must be a list of folders'] }
+  const sharedDocs: NonNullable<ProjectFiles['sharedDocs']> = []
+  const docErrors: string[] = []
+  const walk = async (folder: string, depth: number): Promise<void> => {
+    const entries = await $.fs.list(`${path}/${folder}`)
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    // The files of a folder come before its subfolders, so each folder's group is whole.
+    for (const entry of entries.filter(one => one.kind === 'file' && SHARED_DOC.test(one.name))) {
+      const text = entry.name.toLowerCase().endsWith('.pdf') ? '' : await $.fs.read(`${path}/${folder}/${entry.name}`)
+      sharedDocs.push({ folder, path: `${path}/${folder}/${entry.name}`, title: getDocumentTitle(entry.name, text) })
+    }
+    if (depth < SHARED_DEPTH) for (const entry of entries.filter(one => one.kind === 'dir')) await walk(`${folder}/${entry.name}`, depth + 1)
+  }
+  for (const one of folders) {
+    const folder = String(one).replace(/^\/+|\/+$/g, '')
+    if (!(await $.fs.exists(`${path}/${folder}`))) docErrors.push(`documents: folder ${folder} not found`)
+    else await walk(folder, 1)
+  }
+  return { sharedDocs, docErrors }
+}
+
 /** Reads the .pm/ folder of the project at `path`. */
 export async function readProjectFiles($: EngineInterface, path: string): Promise<ProjectFiles> {
   const pm = `${path}/.pm`
@@ -369,11 +425,14 @@ export async function readProjectFiles($: EngineInterface, path: string): Promis
     for (const stage of stages) products.push(...(await listMarkdown($, `${pm}/stages/${stage.name}`)))
   }
   products.push(...(await listMarkdown($, `${pm}/reports`)))
+  products.push(...(await listMarkdown($, `${pm}/digests`)))
   const workPackages = await listMarkdown($, `${pm}/work-packages`)
+  const project = await readIfExists($, `${pm}/project.yaml`)
 
   return {
     path,
-    project: await readIfExists($, `${pm}/project.yaml`),
+    project,
+    ...(await readSharedDocs($, path, project)),
     ...(await readWpPlans($, path, workPackages)),
     products,
     workPackages,
@@ -408,6 +467,21 @@ async function readWpForge(
   if (link.milestone) {
     const list = await get<Parameters<typeof toMilestone>[0]>('milestones', `milestones?state=all&${page}`)
     if (list) forge.milestone = toMilestone(list, link.milestone)
+    const found = list?.find(one => one.title === link.milestone)
+    const ref = target.forge === 'github' ? found?.number : found?.id
+    if (ref !== undefined) {
+      // Every issue and pull request of the milestone, any state: the issues list carries both on either forge.
+      const query = target.forge === 'github' ? `issues?milestone=${ref}&state=all&per_page=100` : `issues?state=all&milestones=${ref}&limit=${FORGEJO_PAGE}`
+      const size = target.forge === 'github' ? 100 : FORGEJO_PAGE
+      const items: RestMilestoneItem[] = []
+      for (let n = 1; n <= MILESTONE_PAGES; n++) {
+        const batch = await get<RestMilestoneItem[]>('milestone items', `${query}&page=${n}`)
+        if (!batch) break
+        items.push(...batch)
+        if (batch.length < size) break
+      }
+      forge.milestoneItems = toMilestoneItems(items)
+    }
   }
   if (link.branch && target.forge === 'github') {
     const owner = target.repo.split('/')[0]

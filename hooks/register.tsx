@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { openFile, openSession } from './actions'
 import { getOpenBlockers, renderBoard } from './board'
-import type { CommitNote, Light, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpForge } from '../types'
+import type { CommitNote, Light, MilestoneItem, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpForge } from '../types'
 import { getFlowCell } from './flow'
 import { getMilestonePackage } from './milestones'
 import { getWorkThemes, isOpen, loadProjects } from './project'
@@ -36,6 +36,7 @@ const meta = atom(
 const LIGHT_COLOR: Record<Light, string> = { green: 'green', amber: 'yellow', red: 'red', none: 'gray' }
 const PHASE_COLOR: Record<PhaseState, string> = { done: 'green', 'in-progress': 'cyan', todo: 'gray', failed: 'red', blocked: 'yellow' }
 const PULL_COLOR: Record<Pull['state'], string> = { open: 'cyan', merged: 'green', closed: 'gray' }
+const ITEM_COLOR: Record<MilestoneItem['state'], string> = { open: 'yellow', merged: 'green', closed: 'gray' }
 const STATUS_LABEL: Record<TeamStatus, string> = { review: 'review asked', inprogress: 'in progress', todo: 'to do', waiting: 'waiting for review', stalled: 'stalled' }
 const FLOW_ROWS: [string, 'leadTime' | 'firstReview' | 'merge'][] = [['Lead time', 'leadTime'], ['Review (opened → first review)', 'firstReview'], ['Merge (opened → merged)', 'merge']]
 // The longest weekly bar of the Metrics tab, in characters.
@@ -360,7 +361,7 @@ export const register: Register = on => {
         id: 'documents', label: 'Documents', count: p.documents.length,
         render: () => p.documents.length === 0 ? <Text dimColor>None yet.</Text> : p.documents.map(doc => (
           <Button key={`doc:${doc.path}`} plain onPress={() => void openFile($, doc.path)}>
-            {`${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
+            {doc.folder ? `${doc.folder} · ${doc.title}` : `${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
           </Button>
         )),
       },
@@ -466,6 +467,17 @@ export const register: Register = on => {
               {[`${one.forge.milestone.title} ${one.forge.milestone.closed}/${one.forge.milestone.open + one.forge.milestone.closed}`, one.forge.milestone.due && `due ${one.forge.milestone.due}`].filter(Boolean).join(' · ')}
             </Text>
           )}
+          {one.forge?.milestoneItems && (() => {
+            const items = one.forge.milestoneItems
+            const open = items.filter(item => item.state === 'open')
+            const name = (item: (typeof items)[number]) => `${item.kind === 'pr' ? 'PR ' : ''}#${item.number}`
+            return [
+              <Text bold wrap="truncate-end">{`${items.length - open.length} of ${items.length} closed${open.length ? ` · still open: ${open.map(name).join(', ')}` : ' · nothing left open'}`}</Text>,
+              ...items.map(item => (
+                <Text color={ITEM_COLOR[item.state]} wrap="truncate-end">{`${name(item)} · ${item.state} · ${item.title}`}</Text>
+              )),
+            ]
+          })()}
           {one.forge?.pulls.map(pull => (
             <Text color={PULL_COLOR[pull.state]} wrap="truncate-end">{`PR #${pull.number} · ${pull.state} · ${pull.title}`}</Text>
           ))}

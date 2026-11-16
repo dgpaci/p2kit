@@ -5,7 +5,8 @@ export type Tolerance = { area: string; limit: number; used: number; unit: strin
 export type RoleLine = { role: string; label: string; people: string[] }
 
 // A Markdown product: brief, PID, stage plan, report.
-export type Product = { path: string; title: string; product: string; status: string; version: string }
+// `folder` is '' for a product of .pm/, else the project.yaml `documents:` folder the file was found in, with its subfolder.
+export type Product = { path: string; title: string; product: string; status: string; version: string; folder: string }
 
 export type WorkPackage = {
   path: string
@@ -49,10 +50,14 @@ export type ForgeIssue = { number: number; title: string; url: string; updatedAt
 // An open pull request of the repo; `inReview` when it is not a draft and waits on a requested reviewer.
 export type ForgePull = { number: number; title: string; url: string; updatedAt: string; milestone: string; draft: boolean; inReview: boolean }
 
-// What the forge says about a work package: its issue or milestone, the pull requests of its branch.
+// An issue or a pull request of a work package's milestone, any state.
+export type MilestoneItem = { kind: 'issue' | 'pr'; number: number; title: string; url: string; state: 'open' | 'closed' | 'merged' }
+
+// What the forge says about a work package: its issue or milestone with every item in it, the pull requests of its branch.
 export type WpForge = {
   issue?: { number: number; title: string; state: string }
   milestone?: Milestone
+  milestoneItems?: MilestoneItem[]
   pulls: Pull[]
   isReadyToClose: boolean
 }
