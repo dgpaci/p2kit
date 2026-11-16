@@ -16,8 +16,9 @@ committed with the code. The skills write it; the project desk reads it.
   registers/risks.yaml      Risk Register
   registers/issues.yaml     Issue Register
   registers/commit-notes.yaml  internal notes on the commits of work-package branches (/pm-note)
+  registers/iterations.yaml timeboxed iterations of the stage (/pm-iterate)
   registers/quality.yaml    Quality Register          (phase 2)
-  registers/lessons.yaml    Lessons Log               (phase 2)
+  registers/lessons.yaml    Lessons Log: retrospectives, lessons, actions (/pm-retro)
   registers/daily-log.yaml  Daily Log                 (phase 2)
 ```
 
@@ -48,7 +49,7 @@ product, not in YAML.
 schema: 1
 name: Customer portal
 code: PORTAL                    # short identifier, used in report names
-profile: light                  # light | full
+profile: light                  # light | full | agile — agile: the light products plus iterations
 status: delivery                # start-up | initiation | delivery | closing | closed
 stage:
   current: 2                    # 0 = start-up, 1 = initiation stage, 2.. = delivery stages
@@ -347,6 +348,69 @@ notes:
 - `kind`: `follow-up` | `blocker` | `remark`; `status`: `open` | `closed`.
 - Notes of a work package matching no commit of its branch (after a squash merge, say) are listed apart.
 - The overview counts the open blockers of the whole register: `blockers N`, in red.
+
+### `registers/iterations.yaml`
+
+Timeboxed iterations inside a stage, opened and closed by `/pm-iterate`; never on the forge. The
+`agile` profile documents the practice, but the desk reads the register whatever the profile.
+
+```yaml
+iterations:
+  - number: 2
+    goal: Checkout end to end
+    start: 2026-11-10
+    end: 2026-11-21
+    stage: 2
+    status: open                  # open | closed; absent = open
+    work_packages: [WP-01, WP-02]
+  - number: 1
+    goal: Login
+    start: 2026-10-27
+    end: 2026-11-07
+    stage: 2
+    status: closed
+    work_packages: [WP-04]
+    delivered: [WP-04]            # written at close
+    result: login shipped to staging
+```
+
+- `number` (int), `start` / `end` ISO days, `stage` the stage number; `delivered` and `result` are
+  written when the iteration closes.
+- The **current iteration** is the open one, the highest number when several are open. Its progress
+  is `done/planned`: its work packages with status `completed` over those that exist and are not
+  `cancelled`. Past its `end` it is overdue.
+- Errors: a parse failure `iterations.yaml: <reason>`; several open `iterations: more than one open
+  (3, 4)`; a `work_packages` id naming no work package `iterations: <number>: unknown work package
+  <id>`.
+- The desk: `iteration <n> · <done>/<planned> WPs · ends <end>` in the overview row after the WPs
+  fact (red and `overdue` past its end), an Iteration card in the recap, `Iteration <n> past its
+  end (<end>)` in Needs attention, and an Iterations tab after Work packages, newest first.
+
+### `registers/lessons.yaml`
+
+The Lessons Log, written by `/pm-retro`: the retrospectives held, what they taught, and the actions
+they decided. Three lists, each entry a flow map:
+
+```yaml
+retrospectives:
+  - { date: 2026-11-21, iteration: 2, stage: 2 }
+lessons:
+  - { id: L-001, date: 2026-11-21, iteration: 2, kind: keep, text: 'short daily sync' }
+  - { id: L-002, date: 2026-11-21, iteration: 2, kind: change, text: 'review pull requests within a day' }
+actions:
+  - { id: A-001, date: 2026-11-21, text: 'add a review reminder', issue: 512, status: open }
+```
+
+- `kind` is `keep` or `change`; `iteration` and `stage` are numbers, absent when the retrospective
+  covered a stage without iterations. An action's `issue` is the forge issue `/pm-retro` opened for
+  it, after the user's OK; `status` is `open` or `done`, absent = `open`.
+- The **last retrospective** is the latest `retrospectives[].date`.
+- Errors: the file is parsed once, a parse failure is one error `lessons.yaml: <reason>` and the
+  three lists stay empty.
+- The desk: `last retro <date>` (or `—`) in the overview row after the next report fact, one line
+  per open action in Needs attention (`<id> <text> #<issue>`), and a Lessons tab after Iterations,
+  its count the open actions: the last retrospective, the actions open first, the lessons newest
+  first. On the page an action's issue links to the forge.
 
 ## Next report due
 

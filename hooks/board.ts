@@ -190,6 +190,8 @@ const isOpen = s => s === 'open'
 const overLimit = p => p.team.filter(m => m.isOverLimit)
 const wipText = m => 'WIP ' + m.person + ' ' + m.wip + '/' + m.wipLimit
 const wipBadges = p => overLimit(p).map(m => pill(wipText(m), 'wip-over'))
+// The open iteration: "iteration <n> · <done>/<planned> WPs · ends <end>", red and " overdue" past its end.
+const iterationFact = it => el('span', { className: it.isOverdue ? 'err' : '', textContent: 'iteration ' + it.number + ' · ' + it.done + '/' + it.planned + ' WPs · ends ' + (it.end || '—') + (it.isOverdue ? ' overdue' : '') })
 // Readiness: an open issue lacking a heading of project.yaml readiness.headings carries a notready pill naming what is missing.
 const missingOf = (p, number) => (p.forgeIssues.find(i => i.number === number) || {}).missing || []
 const notReadyPill = missing => missing.length ? Object.assign(pill('notready', 'notready'), { title: 'missing: ' + missing.join(', ') }) : null
@@ -239,10 +241,12 @@ function overview() {
           el('div', { className: 'facts' },
             el('span', { textContent: stageOf(p) }),
             el('span', {}, 'WPs ', progressOf(p)),
+            p.iteration ? iterationFact(p.iteration) : null,
             el('span', { className: p.highRisks ? 'err' : '', textContent: 'high risks ' + p.highRisks }),
             el('span', { className: p.openBlockers ? 'err' : '', textContent: 'blockers ' + p.openBlockers }),
             el('span', { textContent: 'open issues ' + p.openIssues }),
             el('span', { className: p.nextReport.isOverdue ? 'err' : '', textContent: 'next report ' + (p.nextReport.due || '—') + (p.nextReport.isOverdue ? ' overdue' : '') }),
+            el('span', { textContent: 'last retro ' + (p.lastRetro || '—') }),
             p.errors.length ? el('span', { className: 'err', textContent: '⚠ ' + p.errors.length + ' errors' }) : null,
             p.notReady ? pill('notready ' + p.notReady, 'notready') : null,
             ...wipBadges(p))),
@@ -263,6 +267,8 @@ function attention(p) {
     ...blockers.map(([wp, sha, text]) => el('div', { className: 'err' }, el('span', { className: 'mono', textContent: wp + ' ' + sha + ' ' }), text)),
     ...risks.map(r => el('div', { className: 'err', textContent: r.id + ' [' + r.score + '] ' + r.title })),
     p.nextReport.isOverdue ? el('div', { className: 'err', textContent: 'Highlight report overdue since ' + p.nextReport.due }) : null,
+    p.iteration && p.iteration.isOverdue ? el('div', { className: 'err', textContent: 'Iteration ' + p.iteration.number + ' past its end (' + p.iteration.end + ')' }) : null,
+    ...openActions(p).map(a => el('div', { textContent: actionText(a) })),
     ...overLimit(p).map(m => el('div', { className: 'err', textContent: wipText(m) })),
     p.notReady ? el('div', { textContent: p.notReady + ' issues not ready' }) : null,
   ].filter(Boolean)
@@ -278,6 +284,7 @@ function recap(p) {
     el('div', { className: 'cards' },
       card('Stage', p.stage.current === null ? '—' : p.stage.current + (p.stage.name ? ' · ' + p.stage.name : ''), stageSpan(p)),
       card('Work packages', progressOf(p), p.themes.length + ' work themes active'),
+      p.iteration ? card('Iteration', p.iteration.number + ' · ' + p.iteration.done + '/' + p.iteration.planned, p.iteration.goal + ' · ends ' + (p.iteration.end || '—'), p.iteration.isOverdue ? 'err' : '') : null,
       card('Blockers', String(p.openBlockers), 'open blocker notes', p.openBlockers ? 'err' : ''),
       card('Next report', p.nextReport.due || '—', p.nextReport.isOverdue ? 'overdue' : 'highlight report', p.nextReport.isOverdue ? 'err' : '')),
     el('div', { className: 'grid2' },
@@ -463,6 +470,33 @@ function documents(p) {
       tableOf(['Document', 'File'], p.documents.filter(d => d.folder === f).map(d => [fileLink(d.path, d.title), el('span', { className: 'dim mono', textContent: d.path.split('/').pop() })])))))
 }
 
+// The Lessons Log: the last retrospective, the actions open first, the lessons newest first.
+const openActions = p => p.actions.filter(a => a.status === 'open')
+const actionText = a => a.id + ' ' + a.text + (a.issue === null ? '' : ' #' + a.issue)
+// The forge issue of an action: its own url when the desk read it, else the url of any item of the repo with the number swapped.
+function issueLink(p, number) {
+  const known = p.forgeIssues.concat(p.flow ? p.flow.closedIssues : [])
+  const own = known.find(i => i.number === number)
+  const any = own || known.concat(p.forgePulls)[0]
+  const url = own ? own.url : any ? any.url.slice(0, any.url.lastIndexOf('/', any.url.lastIndexOf('/') - 1)) + '/issues/' + number : ''
+  return url ? el('a', { href: url, textContent: '#' + number }) : el('span', { textContent: '#' + number })
+}
+function lessons(p) {
+  const actions = openActions(p).concat(p.actions.filter(a => a.status !== 'open'))
+  const newest = p.lessons.slice().reverse().sort((a, b) => b.date.localeCompare(a.date))
+  return el('div', {},
+    el('p', { className: p.lastRetro ? '' : 'dim', textContent: p.lastRetro ? 'Last retrospective ' + p.lastRetro : 'No retrospective yet.' }),
+    actions.length ? tableOf(['', 'Action', 'Issue', 'Status'], actions.map(a => dimUnlessOpen(a.status, [a.id, a.text, a.issue === null ? '—' : issueLink(p, a.issue), a.status]))) : null,
+    newest.length ? tableOf(['Date', 'Iteration', 'Kind', 'Lesson'], newest.map(l => [l.date, l.iteration === null ? '—' : String(l.iteration), l.kind, l.text])) : null)
+}
+
+// Newest first; WPs is done/planned for the open iteration, the delivered count for a closed one.
+function iterations(p) {
+  if (!p.iterations.length) return el('p', { className: 'dim', textContent: 'No iteration.' })
+  const wps = it => p.iteration && it.number === p.iteration.number ? p.iteration.done + '/' + p.iteration.planned : String(it.delivered.length)
+  return tableOf(['#', 'Goal', 'Dates', 'WPs', 'Status', 'Result'], p.iterations.slice().reverse().map(it => [String(it.number), it.goal, (it.start || '—') + ' → ' + (it.end || '—'), wps(it), it.status, it.result]))
+}
+
 // One entry per tab: [id, label, count(p), render(p)].
 // Risks and issues list every entry, the open ones first; a closed one is dimmed.
 const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
@@ -475,6 +509,8 @@ const TABS = [
   ['documents', 'Documents', p => p.documents.length, documents],
   ['wps', 'Work packages', p => p.workPackages.length, p => tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Link'],
     p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.teamManager, w.due, wpLink(p, w)]))],
+  ['iterations', 'Iterations', p => p.iterations.length, iterations],
+  ['lessons', 'Lessons', p => openActions(p).length, lessons],
   ['risks', 'Risks', p => p.risks.filter(r => isOpen(r.status)).length, p => tableOf(['', 'Risk', 'P × I', 'Status'], openFirst(p.risks).map(r => dimUnlessOpen(r.status, [r.id, r.title, r.probability + ' × ' + r.impact + ' = ' + r.score, r.status])))],
   ['issues', 'Issues', p => p.issues.filter(i => isOpen(i.status)).length, p => tableOf(['', 'Issue', 'Type', 'Priority', 'Status'], openFirst(p.issues).map(i => dimUnlessOpen(i.status, [i.id, i.title, i.type, i.priority, i.status])))],
   ['approvals', 'Approvals', p => p.approvals.length, p => tableOf(['Date', 'Decision', 'By', 'Note'], p.approvals.map(a => [a.date, a.decision, a.by, a.note]))],

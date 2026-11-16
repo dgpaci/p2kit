@@ -19,7 +19,7 @@ const SNAPSHOT_PATH = '.claude/p2kit/desk.json'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-9' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-11' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 // The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
 const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
@@ -170,6 +170,12 @@ export const register: Register = on => {
     /** One red line per person over the WIP limit. */
     const getWipLines = (project: Project) =>
       project.team.filter(member => member.isOverLimit).map(member => <Text color="red">{getWipText(member)}</Text>)
+    /** The open iteration in the overview row, red and " overdue" past its end. */
+    const getIterationFact = ({ iteration }: Project) => iteration && (
+      <Text color={iteration.isOverdue ? 'red' : undefined} dimColor={!iteration.isOverdue}>
+        {`iteration ${iteration.number} · ${iteration.done}/${iteration.planned} WPs · ends ${iteration.end || '—'}${iteration.isOverdue ? ' overdue' : ''}`}
+      </Text>
+    )
     /** "notready <N>" in yellow when some open issue lacks a readiness heading. */
     const getNotReadyLine = (project: Project) => project.notReady > 0 && <Text color="yellow">{`notready ${project.notReady}`}</Text>
     /** One commit note: kind, status, text; red while an open blocker. */
@@ -215,8 +221,9 @@ export const register: Register = on => {
                 <Text dimColor>{[project.code, getStageLabel(project), project.status].filter(Boolean).join(' · ')}</Text>
               </Box>
               <Text mono>{getProgressBar(project)}</Text>
+              {getIterationFact(project)}
               <Text dimColor wrap="truncate-end">
-                {`high risks ${project.highRisks} · open issues ${project.openIssues} · next report ${project.nextReport.due || '—'}`}
+                {`high risks ${project.highRisks} · open issues ${project.openIssues} · next report ${project.nextReport.due || '—'} · last retro ${project.lastRetro || '—'}`}
               </Text>
               {getWipLines(project)}
               {getNotReadyLine(project)}
@@ -254,6 +261,7 @@ export const register: Register = on => {
     const p = chosen
     const themes = getWorkThemes(p)
     const openRisks = p.risks.filter(risk => risk.status === 'open').sort((a, b) => b.score - a.score)
+    const openActions = p.actions.filter(one => one.status === 'open')
     const openIssues = p.issues.filter(issue => issue.status === 'open')
     // Risks and issues list every entry, the open ones first; a closed one is dimmed.
     const allRisks = [...openRisks, ...p.risks.filter(risk => risk.status !== 'open')]
@@ -382,6 +390,33 @@ export const register: Register = on => {
         ],
       },
       {
+        id: 'iterations', label: 'Iterations', count: p.iterations.length,
+        render: () => p.iterations.length === 0 ? <Text dimColor>No iteration.</Text> : p.iterations.slice().reverse().map(one => {
+          const wps = p.iteration?.number === one.number ? `${p.iteration.done}/${p.iteration.planned}` : String(one.delivered.length)
+          return (
+            <Text dimColor={one.status !== 'open'} wrap="truncate-end">
+              {[`#${one.number}`, one.goal, `${one.start || '—'} → ${one.end || '—'}`, `WPs ${wps}`, one.status, one.result].filter(Boolean).join(' · ')}
+            </Text>
+          )
+        }),
+      },
+      {
+        id: 'lessons', label: 'Lessons', count: openActions.length,
+        render: () => [
+          <Text dimColor={!p.lastRetro}>{p.lastRetro ? `Last retrospective ${p.lastRetro}` : 'No retrospective yet.'}</Text>,
+          ...openActions.concat(p.actions.filter(one => one.status !== 'open')).map(one => (
+            <Text dimColor={one.status !== 'open'} wrap="truncate-end">
+              {[one.id, one.text, one.issue === null ? '' : `#${one.issue}`, one.status].filter(Boolean).join(' · ')}
+            </Text>
+          )),
+          ...p.lessons.slice().reverse().sort((a, b) => b.date.localeCompare(a.date)).map(one => (
+            <Text wrap="truncate-end">
+              {[one.date, one.iteration === null ? '' : `iteration ${one.iteration}`, one.kind, one.text].filter(Boolean).join(' · ')}
+            </Text>
+          )),
+        ],
+      },
+      {
         id: 'risks', label: 'Risks', count: openRisks.length,
         render: () => allRisks.length === 0 ? <Text dimColor>None.</Text> : allRisks.map(risk => (
           <Text color={risk.status === 'open' && risk.score >= 6 ? 'red' : undefined} dimColor={risk.status !== 'open'} wrap="truncate-end">
@@ -413,6 +448,8 @@ export const register: Register = on => {
         ...blockers.map(([wp, sha, text]) => <Text color="red" wrap="truncate-end">{`${wp} ${sha} ${text}`}</Text>),
         ...openRisks.filter(risk => risk.score >= 6).map(risk => <Text color="red" wrap="truncate-end">{`${risk.id} [${risk.score}] ${risk.title}`}</Text>),
         ...(p.nextReport.isOverdue ? [<Text color="red">{`highlight report overdue (${p.nextReport.due})`}</Text>] : []),
+        ...(p.iteration?.isOverdue ? [<Text color="red">{`Iteration ${p.iteration.number} past its end (${p.iteration.end})`}</Text>] : []),
+        ...openActions.map(one => <Text wrap="truncate-end">{`${one.id} ${one.text}${one.issue === null ? '' : ` #${one.issue}`}`}</Text>),
         ...getWipLines(p),
       ]
       return lines.length ? lines : [<Text dimColor>Nothing.</Text>]
@@ -423,6 +460,11 @@ export const register: Register = on => {
         <Box flexDirection="column">
           <Text>{`Stage ${p.stage.current === null ? '—' : `${p.stage.current}${p.stage.name ? ` · ${p.stage.name}` : ''}`} · ${getStageSpan(p)}`}</Text>
           <Text mono>{`${getProgressBar(p)} · ${themes.length} active work themes`}</Text>
+          {p.iteration && (
+            <Text color={p.iteration.isOverdue ? 'red' : undefined} wrap="truncate-end">
+              {`Iteration ${p.iteration.number} · ${p.iteration.done}/${p.iteration.planned} WPs · ends ${p.iteration.end || '—'} · ${p.iteration.goal}`}
+            </Text>
+          )}
           <Text color={p.openBlockers ? 'red' : undefined}>{`Blockers ${p.openBlockers}`}</Text>
           <Text color={p.nextReport.isOverdue ? 'red' : undefined}>{`Next report ${p.nextReport.due || '—'}${p.nextReport.isOverdue ? ' · overdue' : ''}`}</Text>
           {getNotReadyLine(p)}

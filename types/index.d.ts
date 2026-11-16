@@ -26,6 +26,24 @@ export type Issue = { id: string; title: string; type: string; priority: string;
 
 export type Approval = { decision: string; by: string; date: string; note: string }
 
+// A timebox of the stage, from `.pm/registers/iterations.yaml`; `status` is 'open' or 'closed'.
+export type Iteration = {
+  number: number
+  goal: string
+  start: string
+  end: string
+  stage: number | null
+  status: string
+  workPackages: string[]
+  delivered: string[]
+  result: string
+}
+
+// The Lessons Log, `.pm/registers/lessons.yaml`: retrospectives held, lessons (`kind` 'keep' or 'change'), actions ('open' or 'done').
+export type Retrospective = { date: string; iteration: number | null; stage: number | null }
+export type Lesson = { id: string; date: string; iteration: number | null; kind: string; text: string }
+export type RetroAction = { id: string; date: string; text: string; issue: number | null; status: string }
+
 export type PhaseState = 'done' | 'in-progress' | 'todo' | 'failed' | 'blocked'
 
 // One phase of the phased-workflow plan found on a work package's branch.
@@ -130,6 +148,14 @@ export type Project = {
   risks: Risk[]
   issues: Issue[]
   approvals: Approval[]
+  // Every iteration, ascending number; the open one (the highest when several) with its completed and not cancelled work packages.
+  iterations: Iteration[]
+  iteration: (Iteration & { done: number; planned: number; isOverdue: boolean }) | null
+  // The Lessons Log in file order; `lastRetro` the latest retrospective date, '' when none.
+  retrospectives: Retrospective[]
+  lessons: Lesson[]
+  actions: RetroAction[]
+  lastRetro: string
   // Open blocker notes over the whole commit-notes register.
   openBlockers: number
   // Notes naming no linked work package: counted, so shown too.
