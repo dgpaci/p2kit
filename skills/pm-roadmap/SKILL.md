@@ -13,7 +13,7 @@ user's OK; it never touches the forge and commits nothing.
 1. Read `.pm/project.yaml` (`name`, `stage`, `tolerances`), the work packages of
    `.pm/work-packages/` (id, title, stage, status, due, estimate, actual, horizon, rank),
    `.pm/registers/risks.yaml` and `.pm/registers/issues.yaml` when they exist. Open work packages
-   are those whose status is neither `completed` nor `cancelled`; no open one → say so and stop.
+   are those whose status is neither `completed`, `archived` nor `cancelled`; no open one → say so and stop.
 2. Propose a horizon and a rank for every open work package:
    - one that already has a valid `horizon` keeps it, and its `rank`, as the starting point;
    - the others: `in-progress` or `authorized` of the current stage → **Now**; the other open ones
@@ -27,7 +27,7 @@ user's OK; it never touches the forge and commits nothing.
 5. On the OK, in each open work package's frontmatter set `horizon:` and `rank:` — `rank`
    renumbered 1..n inside each horizon — adding the keys after the last frontmatter line when they
    are absent, and changing only those two lines: every other line of the file stays as it is.
-   Completed and cancelled work packages are not touched.
+   Completed, archived and cancelled work packages are not touched.
 6. Generate both documents with the products frontmatter (`product: roadmap`, `version: 0.1`,
    `status: draft`, `updated: <today>`), replacing any earlier version of the same file:
    - `.pm/roadmap.md`, `title: Roadmap` — a section per horizon, a table with id, title, stage,

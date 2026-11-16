@@ -3,10 +3,10 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { openFile, openSession } from './actions'
 import { getOpenBlockers, renderBoard } from './board'
-import type { CommitNote, Light, MilestoneItem, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpForge } from '../types'
+import type { CommitNote, Light, MilestoneItem, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpDelivery, WpForge } from '../types'
 import { getFlowCell } from './flow'
-import { getMilestonePackage } from './milestones'
-import { getWorkThemes, isOpen, loadProjects } from './project'
+import { getItemProgress, getMilestonePackage } from './milestones'
+import { getWorkThemes, loadProjects } from './project'
 import { toSnapshot } from './snapshot'
 
 const PANE = 'p2kit-desk'
@@ -19,7 +19,7 @@ const SNAPSHOT_PATH = '.claude/p2kit/desk.json'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-13' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-14' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 // The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
 const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
@@ -41,7 +41,7 @@ const STATUS_LABEL: Record<TeamStatus, string> = { review: 'review asked', inpro
 const FLOW_ROWS: [string, 'leadTime' | 'firstReview' | 'merge'][] = [['Lead time', 'leadTime'], ['Review (opened → first review)', 'firstReview'], ['Merge (opened → merged)', 'merge']]
 // The longest weekly bar of the Metrics tab, in characters.
 const METRICS_BAR = 20
-const WP_COLOR: Record<string, string> = { completed: 'green', 'in-progress': 'cyan', authorized: 'white', draft: 'gray', cancelled: 'gray' }
+const WP_COLOR: Record<string, string> = { completed: 'green', 'in-progress': 'cyan', authorized: 'white', draft: 'gray', cancelled: 'gray', archived: 'gray' }
 
 // The automatic refresh; a reload of the module starts a new one.
 let timer: Timer | undefined
@@ -65,6 +65,12 @@ function getForgeLine(forge: WpForge): string {
     forge.milestone ? `${forge.milestone.title} ${forge.milestone.closed}/${forge.milestone.open + forge.milestone.closed}` : '',
     forge.pulls.length ? `PRs ${forge.pulls.length}${open ? ` (${open} open)` : ''}` : '',
   ].filter(Boolean).join(' · ')
+}
+
+/** `phases 2/5` from the plan; with no plan, `items 18/19 closed` from the milestone; '' with neither. */
+function getThemeProgress(delivery: WpDelivery): string {
+  const items = getItemProgress(delivery.forge)
+  return delivery.summary.total ? `phases ${delivery.summary.done}/${delivery.summary.total}` : items ? `items ${items.done}/${items.total} closed` : ''
 }
 
 /** `▓▓░░░ 2/5`: completed work packages of the current stage; a continuous stage, which has no end, counts them: `3 open · 12 completed`. */
@@ -257,7 +263,7 @@ export const register: Register = on => {
                     <Box flexDirection="row" columnGap={1}>
                       {getPhaseBar(phases)}
                       <Text wrap="truncate-end">
-                        {[id, summary.total ? `phases ${summary.done}/${summary.total}` : '', summary.current].filter(Boolean).join(' · ')}
+                        {[id, getThemeProgress(delivery!), summary.current].filter(Boolean).join(' · ')}
                       </Text>
                       {summary.failed > 0 && <Text color="red">{`${summary.failed} failed`}</Text>}
                       <Button key={`go:${project.path}:${id}`} plain onPress={() => openTheme(project.path, id)}>Open</Button>
@@ -565,9 +571,13 @@ export const register: Register = on => {
           ))}
           {one.forge?.isReadyToClose && <Text color="green">ready to close</Text>}
           <Text bold>Phases</Text>
-          {one.phases.length === 0 && <Text dimColor>{one.ref ? 'No phased plan on the branch.' : 'No branch linked.'}</Text>}
+          {one.phases.length === 0 && <Text dimColor>{one.ref ? 'No phased plan on the branch.' : one.branch ? 'Branch not read.' : 'No branch linked.'}</Text>}
+          {one.objective && <Text wrap="wrap">{one.objective}</Text>}
           {one.phases.map(phase => (
-            <Text color={PHASE_COLOR[phase.state]} wrap="truncate-end">{`Phase ${phase.number}: ${phase.title} · ${phase.state}`}</Text>
+            <Box key={`phase:${phase.number}`} flexDirection="column">
+              <Text color={PHASE_COLOR[phase.state]} wrap="truncate-end">{`Phase ${phase.number}: ${phase.title} · ${phase.state}`}</Text>
+              {phase.outcome && <Text dimColor wrap="wrap">{`  ${phase.outcome}`}</Text>}
+            </Box>
           ))}
           <Text bold>Commits and notes</Text>
           {one.commits.length === 0 && <Text dimColor>None.</Text>}
@@ -578,7 +588,7 @@ export const register: Register = on => {
             </Box>
           ))}
           {one.unlinkedNotes.length > 0 && (
-            <Text dimColor>{isOpen({ status }) ? 'Notes on commits not on the branch' : 'Branch not read: the work package is closed'}</Text>
+            <Text dimColor>{one.ref ? 'Notes on commits not on the branch' : 'Branch not read'}</Text>
           )}
           {one.unlinkedNotes.map(note => getNoteLine(note, true))}
         </Box>
@@ -607,7 +617,7 @@ export const register: Register = on => {
           <Box flexDirection="row" columnGap={1} flexWrap="wrap">
             {themes.map(({ id, delivery }) => (
               <Button key={`theme:${id}`} variant={themeId === id ? 'primary' : 'secondary'} onPress={() => show(`theme:${id}`)}>
-                {`${id} ${delivery!.summary.done}/${delivery!.summary.total}`}
+                {[id, getThemeProgress(delivery!)].filter(Boolean).join(' ')}
               </Button>
             ))}
           </Box>

@@ -58,6 +58,9 @@ export type PhaseState = 'done' | 'in-progress' | 'todo' | 'failed' | 'blocked'
 // One phase of the phased-workflow plan found on a work package's branch.
 export type Phase = { number: number; title: string; state: PhaseState }
 
+// A phase as the desk shows it: what it adds, its `> Done:` summary or else its `- Done:` criterion ('' when none).
+export type PlanPhase = Phase & { outcome: string }
+
 // A commit of a work package's branch, from local git.
 export type Commit = { sha: string; short: string; date: string; subject: string }
 
@@ -97,7 +100,9 @@ export type WpDelivery = {
   base: string
   ref: string
   planPath: string
-  phases: Phase[]
+  // The plan's `## Objective`, '' when none.
+  objective: string
+  phases: PlanPhase[]
   // `current` is 'Phase N: title', '' when every phase is done.
   summary: { done: number; total: number; current: string; failed: number }
   // The commits of the branch over its base, newest first, each with its notes.

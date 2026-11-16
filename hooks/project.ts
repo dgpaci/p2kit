@@ -7,7 +7,7 @@ import type { ForgeTarget, RestMilestone } from './forge'
 import { toForgeIssues, toForgePulls, toMilestoneItems, toMilestoneProgress } from './milestones'
 import type { RestMilestoneItem } from './milestones'
 import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
-import { findPlanPath, getPhaseSummary, parsePhases } from './stage'
+import { findPlanPath, getPhaseSummary, parseObjective, parsePhaseOutcomes, parsePhases } from './stage'
 import { readReadiness } from './readiness'
 import { readTeam, toTeamItems, withItems } from './team'
 import type { RestIssue, RestPull } from './team'
@@ -130,11 +130,11 @@ export function addDays(date: string, days: number): string {
 /** Hours rounded to two decimals, so sums of decimal figures print clean (2.2 + 1.1 = 3.3). */
 const getRoundedHours = (hours: number): number => Math.round(hours * 100) / 100
 
-/** Actual − estimate when completed, the overrun only while open; null when cancelled or a figure is missing. */
+/** Actual − estimate when completed or archived, the overrun only while open; null when cancelled or a figure is missing. */
 function getDeviation(status: string, estimate: number | null, actual: number | null): number | null {
   if (estimate === null || actual === null || status === 'cancelled') return null
   const deviation = getRoundedHours(actual - estimate)
-  return status === 'completed' ? deviation : Math.max(0, deviation)
+  return isDone({ status }) ? deviation : Math.max(0, deviation)
 }
 
 /** A work package file's frontmatter; `link` is null unless it names an issue, a milestone or a branch. Throws on bad YAML; a bad figure goes to `errors`. */
@@ -187,7 +187,13 @@ function getStageEffort(current: number | null, workPackages: WorkPackage[]): Pr
   return { stage: current, estimate: sum(wp => wp.estimate!), actual: sum(wp => wp.actual!), deviation: sum(wp => wp.deviation!), counted: counted.length }
 }
 
-export const isOpen = (wp: { status: string }): boolean => wp.status !== 'completed' && wp.status !== 'cancelled'
+/** Delivered: `completed`, or `archived` once the Board has seen it. */
+export const isDone = (wp: { status: string }): boolean => wp.status === 'completed' || wp.status === 'archived'
+
+export const isOpen = (wp: { status: string }): boolean => !isDone(wp) && wp.status !== 'cancelled'
+
+/** Still a work theme of the desk: open, or completed and not yet archived. */
+export const isShown = (wp: { status: string }): boolean => wp.status !== 'archived' && wp.status !== 'cancelled'
 
 /** Reads one register file: the list under `key`, or the error that stopped it. */
 function readRegister(name: string, raw: string | undefined, key: string, errors: string[]): Doc[] {
@@ -241,7 +247,7 @@ function getCurrentIteration(iterations: Iteration[], workPackages: WorkPackage[
   if (!current) return null
   const own = workPackages.filter(wp => current.workPackages.includes(wp.id) && wp.status !== 'cancelled')
   return {
-    ...current, done: own.filter(wp => wp.status === 'completed').length, planned: own.length,
+    ...current, done: own.filter(isDone).length, planned: own.length,
     isOverdue: Boolean(current.end) && current.end < today,
   }
 }
@@ -333,9 +339,11 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     const ofWp = notes.filter(note => note.wp === wp.id)
     const commits = parseCommits(log?.text ?? '').map(commit => ({ ...commit, notes: ofWp.filter(note => isNoteOf(note, commit)) }))
     const phases = parsePhases(plan?.text ?? '')
+    const outcomes = parsePhaseOutcomes(plan?.text ?? '')
     const { done, total, current, failed } = getPhaseSummary(phases)
     const delivery: WpDelivery = {
-      ...link, ref: plan?.ref ?? '', planPath: plan?.path ?? '', phases,
+      ...link, ref: plan?.ref ?? '', planPath: plan?.path ?? '', objective: parseObjective(plan?.text ?? ''),
+      phases: phases.map(phase => ({ ...phase, outcome: outcomes[phase.number] ?? '' })),
       summary: { done, total, current: current ? `Phase ${current.number}: ${current.title}` : '', failed },
       commits, unlinkedNotes: ofWp.filter(note => !commits.some(commit => isNoteOf(note, commit))), forge: null,
     }
@@ -374,7 +382,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     notReady: 0,
     tolerances,
     light: getWorstLight(tolerances.map(one => one.light)),
-    progress: { done: inStage.filter(wp => wp.status === 'completed').length, total: inStage.length },
+    progress: { done: inStage.filter(isDone).length, total: inStage.length },
     effort,
     highRisks: risks.filter(risk => risk.status === 'open' && risk.score >= HIGH_RISK).length,
     openIssues: issues.filter(issue => issue.status === 'open').length,
@@ -441,10 +449,11 @@ async function readWpPlans($: EngineInterface, path: string, files: ProjectFiles
       continue // buildProject reports the parse error.
     }
     const link = wp.link
-    if (!link?.branch || !isOpen(wp)) continue
+    if (!link?.branch || !isShown(wp)) continue
     const ref = await resolveRef($, path, link.branch)
     if (!ref) {
-      gitErrors.push(`${wp.id}: branch ${link.branch} not found`)
+      // A completed work package's branch is often deleted after the merge: not an error.
+      if (isOpen(wp)) gitErrors.push(`${wp.id}: branch ${link.branch} not found`)
       continue
     }
     const tree = await git($, path, ['ls-tree', '-r', '--name-only', ref, '--', '.phased'])
@@ -526,6 +535,7 @@ export async function readProjectFiles($: EngineInterface, path: string): Promis
   }
   products.push(...(await listMarkdown($, `${pm}/reports`)))
   products.push(...(await listMarkdown($, `${pm}/digests`)))
+  products.push(...(await listMarkdown($, `${pm}/presentations`)))
   const workPackages = await listMarkdown($, `${pm}/work-packages`)
   const project = await readIfExists($, `${pm}/project.yaml`)
 
@@ -616,9 +626,9 @@ async function readWpForge(
 // The last forge read per project work package link, so the 60 s refresh does not hit the forge every time.
 const forgeCache = new Map<string, { at: number; forge: WpForge; errors: string[] }>()
 
-/** The open linked work packages of the current stage: the ones the forge is read for. */
+/** The linked work packages of the current stage, open or completed but not archived: the ones the forge is read for. */
 export const getWorkThemes = (project: Project): WorkPackage[] =>
-  project.workPackages.filter(pkg => pkg.delivery && pkg.stage !== null && pkg.stage === project.stage.current && isOpen(pkg))
+  project.workPackages.filter(pkg => pkg.delivery && pkg.stage !== null && pkg.stage === project.stage.current && isShown(pkg))
 
 // The forge of a project's origin, asked of git at most once per project read, and only when called.
 type OriginTarget = () => Promise<ForgeTarget | undefined>

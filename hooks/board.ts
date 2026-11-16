@@ -179,11 +179,21 @@ const dot = light => el('span', { className: 'dot', title: 'tolerances: ' + ligh
 const fileLink = (path, label) => el('a', { href: 'file://' + encodeURI(path), textContent: label })
 const sessionLink = p => el('a', { href: p.sessionLink, textContent: 'Open session', onclick: e => e.stopPropagation() })
 const bar = (done, total) => el('span', {}, el('span', { className: 'bar' }, el('i', { style: 'width:' + (total ? Math.round(100 * done / total) : 0) + '%' })), done + '/' + total)
-const phaseBar = d => d.phases.length ? el('span', { className: 'phases', title: d.summary.current }, ...d.phases.map(ph => el('i', { className: ph.state, title: 'Phase ' + ph.number + ': ' + ph.title + ' · ' + ph.state }))) : el('span', { className: 'dim', textContent: 'no plan' })
+// The milestone's items closed over all of them, from its item list when read, else from its counts; null without a milestone.
+const itemProgress = f => f && f.milestoneItems && f.milestoneItems.length ? { done: f.milestoneItems.filter(i => i.state !== 'open').length, total: f.milestoneItems.length }
+  : f && f.milestone ? { done: f.milestone.closed, total: f.milestone.open + f.milestone.closed } : null
+// The phases of the plan, one square each; with no plan, the milestone's closed items over all of them; else "no plan".
+const phaseBar = d => {
+  if (d.phases.length) return el('span', { className: 'phases', title: d.summary.current }, ...d.phases.map(ph => el('i', { className: ph.state, title: 'Phase ' + ph.number + ': ' + ph.title + ' · ' + ph.state })))
+  const items = itemProgress(d.forge)
+  return items ? el('span', { title: 'milestone items closed' }, bar(items.done, items.total), el('span', { className: 'dim', textContent: ' closed' })) : el('span', { className: 'dim', textContent: 'no plan' })
+}
 // A continuous stage has no end and no percentage: open and completed work packages, and the day it started.
 const progressOf = p => p.stage.isContinuous ? el('span', { textContent: (p.progress.total - p.progress.done) + ' open · ' + p.progress.done + ' completed' }) : bar(p.progress.done, p.progress.total)
 const stageSpan = p => p.stage.isContinuous ? 'since ' + (p.stage.start || '—') + ' · continuous' : (p.stage.start || '—') + ' → ' + (p.stage.plannedEnd || '—')
 const pill = (text, cls = '') => el('span', { className: 'pill ' + cls, textContent: text })
+// A completed work theme stays in view until archived: it says so.
+const completedPill = w => w.status === 'completed' ? el('span', {}, ' ', pill('completed', 'ready')) : null
 const stageOf = p => p.stage.current === null ? 'no stage' : 'stage ' + p.stage.current + (p.stage.name ? ' ' + p.stage.name : '')
 const isOpen = s => s === 'open'
 // WIP: one red badge per person over the limit, in the card head and in the recap's "Needs attention".
@@ -260,7 +270,7 @@ function overview() {
         el('span', {}, sessionLink(p))),
       ...(p.themes.length ? p.themes.map(w => el('div', { className: 'theme-row', onclick: () => go(p.path + '/theme/' + w.id) },
         el('span', { className: 'tree', textContent: '└' }),
-        el('div', {}, el('span', { className: 'mono', textContent: w.id + ' ' }), w.title),
+        el('div', {}, el('span', { className: 'mono', textContent: w.id + ' ' }), w.title, completedPill(w)),
         el('div', {}, phaseBar(w.delivery), el('span', { className: 'dim', textContent: progressText(w.delivery) })),
         el('div', { className: 'forge' }, ...forgePills(w.delivery))))
         : [el('div', { className: 'nothemes dim', textContent: "No work theme in the current stage: run /pm-link in the project's repo to see phases, commits and pull requests." })]))),
@@ -298,7 +308,7 @@ function recap(p) {
       el('div', {}, el('h3', { textContent: 'Tolerances' }), tableOf(['', 'Area', 'Used / limit'], p.tolerances.map(t => [dot(t.light), t.area, t.used + ' / ' + t.limit + ' ' + t.unit + (t.isComputed ? ' · from work packages' : '')]))),
       el('div', {}, el('h3', { textContent: 'Needs attention' }), ...attention(p))),
     el('h3', { textContent: 'Work themes' }),
-    tableOf(['', 'Theme', 'Phases', 'Forge'], p.themes.map(w => [link(w.id, p.path + '/theme/' + w.id, 'mono'), w.title,
+    tableOf(['', 'Theme', 'Progress', 'Forge'], p.themes.map(w => [link(w.id, p.path + '/theme/' + w.id, 'mono'), el('span', {}, w.title, completedPill(w)),
       el('span', {}, phaseBar(w.delivery), el('span', { className: 'dim', textContent: w.delivery.summary.current })), el('span', { className: 'forge' }, ...forgePills(w.delivery))])),
     ...(p.unthemedNotes.length ? [el('h3', { textContent: 'Notes without a work theme' }), ...p.unthemedNotes.map(shaNote)] : []),
   ]
@@ -317,26 +327,36 @@ function milestoneItems(items) {
   ]
 }
 
+// Each phase of the plan with what it adds: the plan's Done summary once the phase closed, else its Done criterion.
+const PHASE_CLASS = { done: 'ok', failed: 'err', 'in-progress': '' }
+function phaseTable(d) {
+  if (!d.phases.length) return el('p', { className: 'dim', textContent: d.ref ? 'No phased plan on the branch.' : d.branch ? 'Branch not read.' : 'No branch linked.' })
+  return el('div', {},
+    d.objective ? el('p', { textContent: d.objective }) : null,
+    tableOf(['', 'Phase', 'What it adds', 'State'], d.phases.map(ph => [String(ph.number), el('strong', { textContent: ph.title }),
+      el('span', { className: ph.outcome ? '' : 'dim', textContent: ph.outcome || '—' }),
+      el('span', { className: ph.state in PHASE_CLASS ? PHASE_CLASS[ph.state] : 'dim', textContent: ph.state })])))
+}
+
 function themePanel(p, w) {
   const d = w.delivery
   const f = d.forge
-  const isClosed = w.status === 'completed' || w.status === 'cancelled'
+  const noted = d.commits.filter(c => c.notes.length)
   return [
     el('p', {}, el('strong', { textContent: w.id + ' ' + w.title }), ' ',
       el('span', { className: 'dim', textContent: [w.status, d.issue === null ? '' : '#' + d.issue, d.milestone && 'milestone ' + d.milestone, d.ref || d.branch, d.base && 'over ' + d.base].filter(Boolean).join(' · ') })),
     el('div', { className: 'forge' }, ...forgePills(d)),
-    el('div', { className: 'grid2' },
-      el('div', {}, el('h3', { textContent: 'Phases' }), d.phases.length
-        ? tableOf(['', 'Phase', 'State'], d.phases.map(ph => [String(ph.number), ph.title, el('span', { className: ph.state === 'done' ? 'ok' : ph.state === 'failed' ? 'err' : ph.state === 'in-progress' ? '' : 'dim', textContent: ph.state })]))
-        : el('p', { className: 'dim', textContent: d.ref ? 'No phased plan on the branch.' : 'No branch linked.' })),
-      el('div', {}, el('h3', { textContent: 'Issue and pull requests' }),
+    el('h3', { textContent: 'Phases' }),
+    phaseTable(d),
+    el('div', {}, el('h3', { textContent: 'Issue and pull requests' }),
         f && f.issue ? el('p', { textContent: '#' + f.issue.number + ' · ' + f.issue.state + ' · ' + f.issue.title }) : null,
         f && f.milestone ? el('p', { textContent: f.milestone.title + ' ' + f.milestone.closed + '/' + (f.milestone.open + f.milestone.closed) + (f.milestone.due ? ' · due ' + f.milestone.due : '') }) : null,
         ...(f && f.milestoneItems ? milestoneItems(f.milestoneItems) : []),
-        tableOf(['PR', 'State', 'Title'], (f ? f.pulls : []).map(pr => [el('a', { href: pr.url, textContent: '#' + pr.number }), pill(pr.state, pr.state), pr.title])))),
-    el('h3', { textContent: 'Commits and notes' }),
-    tableOf(['Commit', 'Date', 'Subject and notes'], d.commits.map(c => [el('span', { className: 'mono', textContent: c.short }), c.date, el('div', {}, c.subject, ...c.notes.map(noteLine))])),
-    ...(d.unlinkedNotes.length ? [el('p', { className: 'dim', textContent: isClosed ? 'Branch not read: the work package is closed' : 'Notes on commits not on the branch' }), ...d.unlinkedNotes.map(shaNote)] : []),
+        f && f.pulls.length ? tableOf(['PR', 'State', 'Title'], f.pulls.map(pr => [el('a', { href: pr.url, textContent: '#' + pr.number }), pill(pr.state, pr.state), pr.title])) : null),
+    // The commits themselves are not listed: only the ones carrying a note, and the notes of commits off the branch.
+    ...(noted.length || d.unlinkedNotes.length ? [el('h3', { textContent: 'Notes on commits' })] : []),
+    ...(noted.length ? [tableOf(['Commit', 'Date', 'Subject and notes'], noted.map(c => [el('span', { className: 'mono', textContent: c.short }), c.date, el('div', {}, c.subject, ...c.notes.map(noteLine))]))] : []),
+    ...(d.unlinkedNotes.length ? [el('p', { className: 'dim', textContent: d.ref ? 'Notes on commits not on the branch' : 'Branch not read' }), ...d.unlinkedNotes.map(shaNote)] : []),
   ]
 }
 
@@ -553,7 +573,7 @@ function form(p, sub) {
     ...p.errors.map(e => el('p', { className: 'err', textContent: e })),
     el('div', { className: 'themebar' }, el('span', { className: 'label', textContent: 'Work themes' }),
       ...(p.themes.length ? p.themes.map(w => el('button', { className: 'theme-chip' + (theme && theme.id === w.id ? ' sel' : ''), onclick: () => go(p.path + '/theme/' + w.id) },
-        el('span', { className: 'mono', textContent: w.id + ' ' }), w.title,
+        el('span', { className: 'mono', textContent: w.id + ' ' }), w.title, completedPill(w),
         el('small', {}, phaseBar(w.delivery), w.delivery.summary.total ? w.delivery.summary.done + '/' + w.delivery.summary.total : '')))
         : [el('span', { className: 'dim', textContent: "none in the current stage: run /pm-link in the project's repo" })])),
     el('div', { className: 'tabs' },

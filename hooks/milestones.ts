@@ -1,4 +1,4 @@
-import type { ForgeIssue, ForgePull, MilestoneItem, MilestoneProgress, WorkPackage } from '../types'
+import type { ForgeIssue, ForgePull, MilestoneItem, MilestoneProgress, WorkPackage, WpForge } from '../types'
 import { toMilestone } from './forge'
 import { DEFAULT_HEADINGS, getMissingHeadings } from './readiness'
 import type { RestMilestone } from './forge'
@@ -59,4 +59,10 @@ export function toMilestoneItems(list: RestMilestoneItem[]): MilestoneItem[] {
       state: item.pull_request?.merged_at ? 'merged' as const : item.state === 'open' ? 'open' as const : 'closed' as const,
     }))
     .sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open') || b.number - a.number)
+}
+
+/** The milestone's items closed over all of them, from its item list when read, else from its counts; null without a milestone. */
+export function getItemProgress(forge: WpForge | null): { done: number; total: number } | null {
+  if (forge?.milestoneItems?.length) return { done: forge.milestoneItems.filter(item => item.state !== 'open').length, total: forge.milestoneItems.length }
+  return forge?.milestone ? { done: forge.milestone.closed, total: forge.milestone.open + forge.milestone.closed } : null
 }
