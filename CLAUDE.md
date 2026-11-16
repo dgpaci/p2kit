@@ -82,3 +82,8 @@ allowed.
 - The `.pm/` YAML subset (`hooks/yaml.ts`) has no `''` escape: `'it''s'` reads as `it''s`, and inside
   a flow map `{ … }` it breaks the entry. A skill writing a text that may hold `'` puts it in double
   quotes (`skills/pm-retro/SKILL.md` step 5).
+- The desk tests pin the shape of `hooks/board.ts` `TABS` entries with regexes: the `wps` entry stays exactly two lines
+  (`tests/iterations-desk.test.tsx`) and `lessons` stays one line (`tests/lessons-desk.test.tsx`). A new column goes inside the
+  two `wps` lines; a new tab goes after an existing line, never between `wps` and `iterations` or `iterations` and `lessons`.
+- `claude plugin test` does not typecheck: the hand-built `Project` fixtures of `tests/board.test.ts` and `tests/team-desk.test.tsx`
+  keep passing when `Project` gains a field, so board and pane code must tolerate the field missing (`p.effort ? … : null`).

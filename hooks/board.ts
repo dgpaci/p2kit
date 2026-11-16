@@ -190,6 +190,12 @@ const isOpen = s => s === 'open'
 const overLimit = p => p.team.filter(m => m.isOverLimit)
 const wipText = m => 'WIP ' + m.person + ' ' + m.wip + '/' + m.wipLimit
 const wipBadges = p => overLimit(p).map(m => pill(wipText(m), 'wip-over'))
+// Effort in hours: the deviation signed ("+4h", "0h", "-3h"); '' when a figure is missing.
+const signed = n => (n > 0 ? '+' : '') + n + 'h'
+const hours = n => n === null ? '' : n + 'h'
+const effortRed = p => p.tolerances.some(t => t.area === 'effort' && t.light === 'red')
+const effortFact = p => el('span', { className: effortRed(p) ? 'err' : '', textContent: 'effort ' + p.effort.actual + '/' + p.effort.estimate + 'h ' + signed(p.effort.deviation) })
+const stageEffort = e => 'Stage ' + e.stage + ' effort: ' + e.actual + 'h of ' + e.estimate + 'h, deviation ' + signed(e.deviation) + ' over ' + e.counted + ' work packages'
 // The open iteration: "iteration <n> · <done>/<planned> WPs · ends <end>", red and " overdue" past its end.
 const iterationFact = it => el('span', { className: it.isOverdue ? 'err' : '', textContent: 'iteration ' + it.number + ' · ' + it.done + '/' + it.planned + ' WPs · ends ' + (it.end || '—') + (it.isOverdue ? ' overdue' : '') })
 // Readiness: an open issue lacking a heading of project.yaml readiness.headings carries a notready pill naming what is missing.
@@ -242,6 +248,7 @@ function overview() {
             el('span', { textContent: stageOf(p) }),
             el('span', {}, 'WPs ', progressOf(p)),
             p.iteration ? iterationFact(p.iteration) : null,
+            p.effort ? effortFact(p) : null,
             el('span', { className: p.highRisks ? 'err' : '', textContent: 'high risks ' + p.highRisks }),
             el('span', { className: p.openBlockers ? 'err' : '', textContent: 'blockers ' + p.openBlockers }),
             el('span', { textContent: 'open issues ' + p.openIssues }),
@@ -288,7 +295,7 @@ function recap(p) {
       card('Blockers', String(p.openBlockers), 'open blocker notes', p.openBlockers ? 'err' : ''),
       card('Next report', p.nextReport.due || '—', p.nextReport.isOverdue ? 'overdue' : 'highlight report', p.nextReport.isOverdue ? 'err' : '')),
     el('div', { className: 'grid2' },
-      el('div', {}, el('h3', { textContent: 'Tolerances' }), tableOf(['', 'Area', 'Used / limit'], p.tolerances.map(t => [dot(t.light), t.area, t.used + ' / ' + t.limit + ' ' + t.unit]))),
+      el('div', {}, el('h3', { textContent: 'Tolerances' }), tableOf(['', 'Area', 'Used / limit'], p.tolerances.map(t => [dot(t.light), t.area, t.used + ' / ' + t.limit + ' ' + t.unit + (t.isComputed ? ' · from work packages' : '')]))),
       el('div', {}, el('h3', { textContent: 'Needs attention' }), ...attention(p))),
     el('h3', { textContent: 'Work themes' }),
     tableOf(['', 'Theme', 'Phases', 'Forge'], p.themes.map(w => [link(w.id, p.path + '/theme/' + w.id, 'mono'), w.title,
@@ -497,6 +504,19 @@ function iterations(p) {
   return tableOf(['#', 'Goal', 'Dates', 'WPs', 'Status', 'Result'], p.iterations.slice().reverse().map(it => [String(it.number), it.goal, (it.start || '—') + ' → ' + (it.end || '—'), wps(it), it.status, it.result]))
 }
 
+// The roadmap: a block per horizon in p.roadmap order, then the open work packages with no horizon.
+const HORIZONS = [['now', 'Now'], ['next', 'Next'], ['later', 'Later']]
+const placedCount = p => p.roadmap.now.length + p.roadmap.next.length + p.roadmap.later.length
+function roadmap(p) {
+  if (!placedCount(p) && !p.roadmap.unplaced.length) return el('p', { className: 'dim', textContent: "No roadmap yet: run /pm-roadmap in the project's repo." })
+  const wps = ids => ids.map(id => p.workPackages.find(w => w.id === id)).filter(Boolean)
+  return el('div', {},
+    ...HORIZONS.map(([key, label]) => el('div', {}, el('h3', { textContent: label }), p.roadmap[key].length
+      ? tableOf(['', 'Title', 'Stage', 'Status', 'Due'], wps(p.roadmap[key]).map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.due]))
+      : el('p', { className: 'dim', textContent: 'Nothing planned.' }))),
+    p.roadmap.unplaced.length ? el('p', { className: 'dim', textContent: 'Not on the roadmap: ' + p.roadmap.unplaced.join(', ') }) : null)
+}
+
 // One entry per tab: [id, label, count(p), render(p)].
 // Risks and issues list every entry, the open ones first; a closed one is dimmed.
 const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
@@ -507,10 +527,11 @@ const TABS = [
   ['activity', 'Activity', p => p.forgeIssues.length + p.forgePulls.length, activity],
   ['metrics', 'Metrics', p => p.flow ? p.flow.windows[0].merge.count : 0, metrics],
   ['documents', 'Documents', p => p.documents.length, documents],
-  ['wps', 'Work packages', p => p.workPackages.length, p => tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Link'],
-    p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.teamManager, w.due, wpLink(p, w)]))],
+  ['wps', 'Work packages', p => p.workPackages.length, p => el('div', {}, p.effort ? el('p', { textContent: stageEffort(p.effort) }) : null, tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Estimate', 'Actual', 'Deviation', 'Link'],
+    p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.teamManager, w.due, hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation), wpLink(p, w)])))],
   ['iterations', 'Iterations', p => p.iterations.length, iterations],
   ['lessons', 'Lessons', p => openActions(p).length, lessons],
+  ['roadmap', 'Roadmap', placedCount, roadmap],
   ['risks', 'Risks', p => p.risks.filter(r => isOpen(r.status)).length, p => tableOf(['', 'Risk', 'P × I', 'Status'], openFirst(p.risks).map(r => dimUnlessOpen(r.status, [r.id, r.title, r.probability + ' × ' + r.impact + ' = ' + r.score, r.status])))],
   ['issues', 'Issues', p => p.issues.filter(i => isOpen(i.status)).length, p => tableOf(['', 'Issue', 'Type', 'Priority', 'Status'], openFirst(p.issues).map(i => dimUnlessOpen(i.status, [i.id, i.title, i.type, i.priority, i.status])))],
   ['approvals', 'Approvals', p => p.approvals.length, p => tableOf(['Date', 'Decision', 'By', 'Note'], p.approvals.map(a => [a.date, a.decision, a.by, a.note]))],

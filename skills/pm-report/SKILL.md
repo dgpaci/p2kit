@@ -20,7 +20,10 @@ writes only after the user's OK, and commits nothing.
      from <today − 90> on`);
    - stage progress: `progress.done`/`progress.total` of `stage`, or on a continuous stage
      (`stage.isContinuous`) `<open> open · <completed> completed`;
-   - the tolerances with their light, and the project's `light`;
+   - the tolerances with their light, and the project's `light`; a tolerance with `isComputed`
+     true takes its `used` from the work packages;
+   - the stage effort, when `effort` is set: `actual`h of `estimate`h, deviation (signed) over
+     `counted` work packages;
    - the open high risks of `risks` (`score ≥ 6`), with owner;
    - the work packages of the current stage with status `completed` — all of them: a work
      package carries no completion date, so the section says they are the stage's, not the
@@ -32,7 +35,9 @@ writes only after the user's OK, and commits nothing.
    **Summary**, **Period and stage status**, **Tolerances**, **Completed in the period**,
    **Planned for the next period**, **Risks and issues**, **Blockers and decisions for the
    Board**, **Flow**. Summary and the Board requests are drafted from the data and from what the
-   user adds in chat; a section with nothing to say says so in one line.
+   user adds in chat; a section with nothing to say says so in one line. **Period and stage
+   status** carries one line with the stage effort when `effort` is set; **Tolerances** marks a
+   computed tolerance (`isComputed`) `from work packages`.
 5. Show the draft and ask for an explicit OK. Without it, write nothing; apply the user's
    corrections and show the draft again.
 6. On the OK:

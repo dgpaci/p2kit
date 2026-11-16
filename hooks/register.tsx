@@ -19,7 +19,7 @@ const SNAPSHOT_PATH = '.claude/p2kit/desk.json'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-11' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-13' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 // The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
 const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
@@ -74,6 +74,19 @@ function getProgressBar({ progress: { done, total }, stage }: Project): string {
   const filled = total ? Math.round((width * done) / total) : 0
   return `${'▓'.repeat(filled)}${'░'.repeat(width - filled)} ${done}/${total}`
 }
+
+/** Hours with their sign: "+4h", "0h", "-3h". */
+const getSignedHours = (hours: number): string => `${hours > 0 ? '+' : ''}${hours}h`
+
+/** "Stage <n> effort: <actual>h of <estimate>h, deviation <signed>h over <counted> work packages". */
+const getStageEffortLine = ({ stage, actual, estimate, deviation, counted }: NonNullable<Project['effort']>): string =>
+  `Stage ${stage} effort: ${actual}h of ${estimate}h, deviation ${getSignedHours(deviation)} over ${counted} work packages`
+
+/** "est <e>h · act <a>h · <signed>h" for the figures a work package has; '' with none. */
+const getWpEffortText = ({ estimate, actual, deviation }: WorkPackage): string =>
+  [estimate === null ? '' : `est ${estimate}h`, actual === null ? '' : `act ${actual}h`, deviation === null ? '' : getSignedHours(deviation)].filter(Boolean).join(' · ')
+
+const HORIZON_LABEL = { now: 'Now', next: 'Next', later: 'Later' } as const
 
 const getWipText = (member: TeamMember): string => `WIP ${member.person} ${member.wip}/${member.wipLimit}`
 
@@ -176,6 +189,15 @@ export const register: Register = on => {
         {`iteration ${iteration.number} · ${iteration.done}/${iteration.planned} WPs · ends ${iteration.end || '—'}${iteration.isOverdue ? ' overdue' : ''}`}
       </Text>
     )
+    /** The stage effort in the overview row, red when the effort tolerance is red. */
+    const getEffortFact = ({ effort, tolerances }: Project) => {
+      const isRed = tolerances.some(t => t.area === 'effort' && t.light === 'red')
+      return effort && (
+        <Text color={isRed ? 'red' : undefined} dimColor={!isRed}>
+          {`effort ${effort.actual}/${effort.estimate}h ${getSignedHours(effort.deviation)}`}
+        </Text>
+      )
+    }
     /** "notready <N>" in yellow when some open issue lacks a readiness heading. */
     const getNotReadyLine = (project: Project) => project.notReady > 0 && <Text color="yellow">{`notready ${project.notReady}`}</Text>
     /** One commit note: kind, status, text; red while an open blocker. */
@@ -222,6 +244,7 @@ export const register: Register = on => {
               </Box>
               <Text mono>{getProgressBar(project)}</Text>
               {getIterationFact(project)}
+              {getEffortFact(project)}
               <Text dimColor wrap="truncate-end">
                 {`high risks ${project.highRisks} · open issues ${project.openIssues} · next report ${project.nextReport.due || '—'} · last retro ${project.lastRetro || '—'}`}
               </Text>
@@ -272,6 +295,10 @@ export const register: Register = on => {
     const notReady = new Set(p.forgeIssues.filter(issue => issue.missing.length > 0).map(issue => issue.number))
     const notReadySuffix = (number: number) => (notReady.has(number) ? ' · notready' : '')
 
+    const placed = (['now', 'next', 'later'] as const).flatMap(horizon => p.roadmap[horizon].flatMap(id => {
+      const wp = p.workPackages.find(one => one.id === id)
+      return wp ? [{ label: HORIZON_LABEL[horizon], wp }] : []
+    }))
     const tabs: { id: string; label: string; count: number; render: () => unknown }[] = [
       {
         id: 'roles', label: 'Roles', count: p.roles.length,
@@ -377,6 +404,7 @@ export const register: Register = on => {
         id: 'wps', label: 'Work packages', count: p.workPackages.length,
         render: () => [
           <Text mono>{getProgressBar(p)}</Text>,
+          ...(p.effort ? [<Text wrap="truncate-end">{getStageEffortLine(p.effort)}</Text>] : []),
           ...(p.workPackages.length === 0 ? [<Text dimColor>None yet.</Text>] : p.workPackages.map(wp => (
             <Box key={`wp:${wp.path}`} flexDirection="row" columnGap={1}>
               <Text color={WP_COLOR[wp.status] ?? 'white'} mono>{wp.status.padEnd(11)}</Text>
@@ -385,6 +413,7 @@ export const register: Register = on => {
               {wp.delivery && !themes.some(one => one.id === wp.id) && (
                 <Button key={`theme:${wp.id}`} plain onPress={() => show(`theme:${wp.id}`)}>work theme</Button>
               )}
+              {getWpEffortText(wp) && <Text dimColor>{getWpEffortText(wp)}</Text>}
             </Box>
           ))),
         ],
@@ -415,6 +444,17 @@ export const register: Register = on => {
             </Text>
           )),
         ],
+      },
+      {
+        id: 'roadmap', label: 'Roadmap', count: placed.length,
+        render: () => placed.length === 0 && p.roadmap.unplaced.length === 0
+          ? <Text dimColor>No roadmap yet: run /pm-roadmap in the project's repo.</Text>
+          : [
+            ...placed.map(({ label, wp }) => (
+              <Text wrap="truncate-end">{`${label} · ${wp.id} ${wp.title} · ${wp.status}${wp.due ? ` · due ${wp.due}` : ''}`}</Text>
+            )),
+            ...(p.roadmap.unplaced.length ? [<Text dimColor wrap="truncate-end">{`Not on the roadmap: ${p.roadmap.unplaced.join(', ')}`}</Text>] : []),
+          ],
       },
       {
         id: 'risks', label: 'Risks', count: openRisks.length,
@@ -475,7 +515,7 @@ export const register: Register = on => {
           {p.tolerances.map(t => (
             <Box flexDirection="row" columnGap={1}>
               <Text color={LIGHT_COLOR[t.light]}>●</Text>
-              <Text>{`${t.area}: ${t.used} / ${t.limit} ${t.unit}`}</Text>
+              <Text>{`${t.area}: ${t.used} / ${t.limit} ${t.unit}${t.isComputed ? ' · from work packages' : ''}`}</Text>
             </Box>
           ))}
         </Box>

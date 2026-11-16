@@ -25,7 +25,10 @@ written from scratch.
   (default Why / What changes / Done when, set in `readiness:` of `project.yaml`) is marked
   `notready`, counted on the card and filterable. The Metrics tab gives the flow of the last 30 and
   90 days from the repo's closed issues and merged pull requests — lead time, time to first review
-  and to merge as median and p90 — and the weekly throughput. The same desk is a local browser page, where
+  and to merge as median and p90 — and the weekly throughput. Work packages may carry estimated
+  and actual effort in hours: the desk shows each one's deviation and the current stage's, which
+  feeds an `effort` tolerance. A Roadmap tab places the open work packages in Now, Next and Later
+  (`/pm-roadmap`). The same desk is a local browser page, where
   checked issues and pull requests open a session on `/pm-package` to group them into a work
   package.
 - **Work themes.** The work packages of a stage run in parallel; one linked with `/pm-link` to an
@@ -49,6 +52,7 @@ Status: phase 1 skeleton, under development.
 | `/pm-package` | groups issues and pull requests into a work package: a forge milestone they join, after your OK, and `WP-<nn>.md` linked to it |
 | `/pm-iterate` | opens or closes a timeboxed iteration of the stage — goal, dates, work packages, result — after your OK (`.pm/registers/iterations.yaml`) |
 | `/pm-retro` | runs a retrospective: lessons and actions in the Lessons Log after your OK, each action opened as a forge issue after its own OK (`.pm/registers/lessons.yaml`) |
+| `/pm-roadmap` | proposes the Now / Next / Later order of the open work packages, writes `horizon` and `rank` after your OK and generates `.pm/roadmap.md` and `.pm/roadmap-external.md` |
 | `/pm-note` | adds or closes an internal note on a commit of a work package's branch (`.pm/registers/commit-notes.yaml`) |
 | `/pm-digest` | writes the weekly digest for the alignment meeting from the desk's data (`.pm/digests/`, clipboard on request) |
 | `/pm-report` | drafts the Highlight Report for the Board and, after your OK, saves it and moves the next report date |
