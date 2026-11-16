@@ -35,6 +35,8 @@ reader (`hooks/yaml.ts`). Stay within:
   `007`);
 - a quote opens a quoted scalar only where the scalar starts, so a plain scalar may contain an
   apostrophe (`[Daniela D'Alessandro, Eva Neri]`); quote an item that holds a comma;
+- no escapes inside quotes (`'it''s'` reads as `it''s`): a quoted value holding a `'` goes in
+  double quotes (`"l'ordine, urgente"`);
 - `#` comments.
 
 No anchors, tags, multi-document streams or multi-line scalars: long text belongs in a Markdown
