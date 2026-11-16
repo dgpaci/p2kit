@@ -12,7 +12,7 @@ committed with the code. The skills write it; the project desk reads it.
   stages/<n>/plan.md        Stage Plan of stage n
   work-packages/WP-<nn>.md  one Work Package per file
   reports/<date>-<kind>.md  highlight, checkpoint, exception, end-stage, end-project reports
-  digests/<date>.md         weekly digests (/pm-digest); not a product, the desk does not list them
+  digests/<date>.md         weekly digests (/pm-digest), listed under Documents after the reports
   registers/risks.yaml      Risk Register
   registers/issues.yaml     Issue Register
   registers/commit-notes.yaml  internal notes on the commits of work-package branches (/pm-note)
@@ -245,7 +245,10 @@ at once), the desk reads the forge of the repo's `origin` (`github.com` → GitH
 any other host → Forgejo REST with the `fj` token of that host from
 `~/Library/Application Support/forgejo-cli.forgejo-cli/keys.json`). GET only — the desk never
 writes to a forge. `issue` → the issue's title and state; `milestone` → the milestone with that
-title, shown `<title> <closed>/<open+closed>` with its due day; `branch` → the pull requests whose
+title, shown `<title> <closed>/<open+closed>` with its due day — the count covers issues and pull
+requests alike — and every issue and pull request in it, any state (GitHub
+`issues?milestone=<number>&state=all`, Forgejo `issues?state=all&milestones=<id>`, up to 5 pages),
+the open ones named first as `still open`; `branch` → the pull requests whose
 head is the branch, open, merged or closed (GitHub filters by head; Forgejo has no such filter, so
 the 250 most recently updated pull requests are searched). Git and forge calls give up after
 30 s. A work package is `ready to close` when at least one pull request is merged and none is

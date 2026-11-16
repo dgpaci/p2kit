@@ -16,9 +16,11 @@ A work theme is a work package carrying link keys in its frontmatter: `issue`, `
    that is the work package: update its link keys (step 4) and go to step 5.
 3. Otherwise list the work packages of the current stage (id, title, status) and ask which one to
    link, or offer a new one: `WP-<nn>` with the next free number, `stage` = the current stage,
-   `status: draft`, `product: work-package`. Its title comes from the issue —
-   `gh issue view <n> --json title -q .title` on a `github.com` origin,
-   `fj issue view <n>` on any other host (read `git remote get-url origin`) — else ask it.
+   `status: draft`, `product: work-package`. Its title is a short name — one to three words, the
+   one the desk shows in every row — asked of the user, never the issue title copied: read the
+   issue's title (`gh issue view <n> --json title -q .title` on a `github.com` origin,
+   `fj issue view <n>` on any other host — read `git remote get-url origin`) and propose a short
+   name drawn from it (`Rivedere il giro delle certificazioni UNI: …` → `Certificazioni`).
 4. Fill the link keys:
    - `issue`: the number, when the argument is one, else leave it as it is.
    - `milestone`: the title, when the argument is one.

@@ -4,7 +4,8 @@ import type { Approval, CommitNote, Issue, Light, Product, Project, Risk, RoleLi
 import { FLOW_WINDOWS, getFirstReviewAt, toFlow } from './flow'
 import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from './forge'
 import type { ForgeTarget, RestMilestone } from './forge'
-import { toForgeIssues, toForgePulls, toMilestoneProgress } from './milestones'
+import { toForgeIssues, toForgePulls, toMilestoneItems, toMilestoneProgress } from './milestones'
+import type { RestMilestoneItem } from './milestones'
 import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
 import { findPlanPath, getPhaseSummary, parsePhases } from './stage'
 import { readReadiness } from './readiness'
@@ -43,6 +44,8 @@ const GITHUB_PAGE = 100
 // The closed issues and pull requests of a repo are read again only past this age, unless the refresh is forced; up to this many pages each.
 const FLOW_TTL_MS = 60 * 60 * 1000
 const FLOW_PAGES = 10
+// The items of a work package's milestone are paged up to this many pages.
+const MILESTONE_PAGES = 5
 // The reviews of at most this many merged pulls are read per read of the closed lists, this many at a time.
 const REVIEWS_PER_READ = 100
 const REVIEW_BATCH = 10
@@ -369,6 +372,7 @@ export async function readProjectFiles($: EngineInterface, path: string): Promis
     for (const stage of stages) products.push(...(await listMarkdown($, `${pm}/stages/${stage.name}`)))
   }
   products.push(...(await listMarkdown($, `${pm}/reports`)))
+  products.push(...(await listMarkdown($, `${pm}/digests`)))
   const workPackages = await listMarkdown($, `${pm}/work-packages`)
 
   return {
@@ -408,6 +412,21 @@ async function readWpForge(
   if (link.milestone) {
     const list = await get<Parameters<typeof toMilestone>[0]>('milestones', `milestones?state=all&${page}`)
     if (list) forge.milestone = toMilestone(list, link.milestone)
+    const found = list?.find(one => one.title === link.milestone)
+    const ref = target.forge === 'github' ? found?.number : found?.id
+    if (ref !== undefined) {
+      // Every issue and pull request of the milestone, any state: the issues list carries both on either forge.
+      const query = target.forge === 'github' ? `issues?milestone=${ref}&state=all&per_page=100` : `issues?state=all&milestones=${ref}&limit=${FORGEJO_PAGE}`
+      const size = target.forge === 'github' ? 100 : FORGEJO_PAGE
+      const items: RestMilestoneItem[] = []
+      for (let n = 1; n <= MILESTONE_PAGES; n++) {
+        const batch = await get<RestMilestoneItem[]>('milestone items', `${query}&page=${n}`)
+        if (!batch) break
+        items.push(...batch)
+        if (batch.length < size) break
+      }
+      forge.milestoneItems = toMilestoneItems(items)
+    }
   }
   if (link.branch && target.forge === 'github') {
     const owner = target.repo.split('/')[0]

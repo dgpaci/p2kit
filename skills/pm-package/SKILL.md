@@ -30,8 +30,10 @@ picked issues and pull requests — then writes one work package file. It commit
    `GET …/repos/<repo>/milestones?state=all&limit=50&page=<p>` from page 1 until a page returns fewer
    than 50. With `--milestone`, also its open items.
    A reference that does not exist or is closed → say so and leave it out.
-4. **Ask the package title**, offering a default: the milestone's title with `--milestone`, else the
-   first issue's title. The milestone and the work package take this title.
+4. **Ask the package title** — a short name, one to three words, the one the desk shows in every
+   row — offering a default: the milestone's title with `--milestone`, else a short name drawn
+   from the first issue's title, never that title copied. The milestone and the work package take
+   this title.
 5. **Draft the plan** and show it:
    - the milestone: *create* `<title>`, or *reuse* the one with that title (say if it is closed);
    - the items to assign to it, `#n title` / `PR #n title`;
