@@ -130,6 +130,14 @@ button { border: 1px solid var(--line); background: var(--chip); color: var(--fg
 .person-head .who small { color: var(--dim); margin-left: 6px; }
 .person table td, .person table th { padding: 5px 12px; }
 .person .empty { padding: 7px 12px; }
+.weeks { display: flex; gap: 4px; align-items: stretch; height: 150px; margin-top: 8px; }
+.week { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.week .stack { flex: 1; width: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+.week .stack i { display: block; width: 100%; }
+.week i.issues { background: var(--on); } .week i.pulls { background: var(--green); }
+.week small { font-size: 10px; color: var(--dim); white-space: nowrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 10px; vertical-align: middle; }
+.legend i.issues { background: var(--on); } .legend i.pulls { background: var(--green); }
 a.btn { display: inline-block; border: 1px solid var(--line); background: var(--chip); color: var(--fg); border-radius: 999px; padding: 3px 10px; }
 a.btn:hover { text-decoration: none; filter: brightness(0.97); }
 a.btn-primary { background: var(--on); border-color: var(--on); color: #fff; font-weight: 600; }
@@ -159,6 +167,7 @@ tr.checked td { background: color-mix(in srgb, var(--on) 8%, transparent); }
   .theme-row > :nth-child(3) { grid-column: 2; }
   .ms-row { grid-template-columns: 1fr; } .ms-row .wp { text-align: left; }
 }
+@media (max-width: 480px) { .week small:last-child { display: none; } }
 `
 
 // The route lives in the URL hash so the reload keeps it: '' overview · '<path>' recap · '<path>/tab/<id>' · '<path>/theme/<WP-id>'.
@@ -407,6 +416,26 @@ function activity(p) {
       : el('div', { className: 'empty dim', textContent: 'No open issue.' }))
 }
 
+// Metrics: lead, review and merge time over 30 and 90 days, then the weekly throughput of the 90 days as stacked bars.
+const FLOW_ROWS = [['Lead time', 'issue opened → closed', 'leadTime'], ['Review', 'opened → first review', 'firstReview'], ['Merge', 'opened → merged', 'merge']]
+const flowCell = s => s.count ? s.median + ' · ' + s.p90 + ' (' + s.count + ')' : '—'
+function metrics(p) {
+  if (!p.flow) return el('p', { className: 'dim', textContent: 'No forge data.' })
+  const [w30, w90] = p.flow.windows
+  const top = Math.max(1, ...w90.throughput.map(w => w.issues + w.pulls))
+  const height = n => 'height:' + Math.round(100 * n / top) + '%'
+  return el('div', {},
+    blockTitle('Cycle times', 'days: median · p90 (count)'),
+    tableOf(['', '30 days', '90 days'], FLOW_ROWS.map(([label, sub, key]) =>
+      [el('span', {}, label, el('span', { className: 'dim', textContent: ' · ' + sub })), flowCell(w30[key]), flowCell(w90[key])])),
+    blockTitle('Weekly throughput', '90 days'),
+    el('div', { className: 'legend dim' }, el('i', { className: 'issues' }), 'issues closed', el('i', { className: 'pulls' }), 'pull requests merged'),
+    el('div', { className: 'weeks' }, ...w90.throughput.map(w => el('div', { className: 'week', title: w.week + ': ' + w.issues + ' issues · ' + w.pulls + ' PRs' },
+      el('small', { textContent: String(w.issues + w.pulls) }),
+      el('div', { className: 'stack' }, el('i', { className: 'pulls', style: height(w.pulls) }), el('i', { className: 'issues', style: height(w.issues) })),
+      el('small', { textContent: w.week.slice(5) })))))
+}
+
 // One entry per tab: [id, label, count(p), render(p)].
 // Risks and issues list every entry, the open ones first; a closed one is dimmed.
 const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
@@ -415,6 +444,7 @@ const TABS = [
   ['roles', 'Roles', p => p.roles.length, p => tableOf(['Role', 'People'], p.roles.map(r => [r.label, r.people.join(', ') || '—']))],
   ['team', 'Team', p => p.team.length, team],
   ['activity', 'Activity', p => p.forgeIssues.length + p.forgePulls.length, activity],
+  ['metrics', 'Metrics', p => p.flow ? p.flow.windows[0].merge.count : 0, metrics],
   ['documents', 'Documents', p => p.documents.length, p => tableOf(['Document', 'Status', 'Version'], p.documents.map(d => [fileLink(d.path, d.title), d.status, d.version]))],
   ['wps', 'Work packages', p => p.workPackages.length, p => tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Link'],
     p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.teamManager, w.due, wpLink(p, w)]))],

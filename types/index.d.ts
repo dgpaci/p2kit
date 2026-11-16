@@ -83,6 +83,16 @@ export type TeamItem = { kind: 'issue' | 'pr'; number: number; title: string; st
 // One person of the roles; `login` is '' when team.people gives none. WIP counts every item but `review`.
 export type TeamMember = { person: string; login: string; roles: string[]; items: TeamItem[]; wip: number; wipLimit: number; isOverLimit: boolean }
 
+// Median and nearest-rank p90 in days, one decimal; null when count is 0.
+export type FlowStat = { count: number; median: number | null; p90: number | null }
+// One window of the last `days` days: lead time (issue opened -> closed), first review and merge time (pull opened -> first review,
+// -> merged), and the issues closed and pulls merged per UTC ISO week, `week` its Monday, oldest first.
+export type FlowWindow = { days: number; leadTime: FlowStat; firstReview: FlowStat; merge: FlowStat; throughput: { week: string; issues: number; pulls: number }[] }
+// An issue closed or a pull merged; `closedAt` an ISO day, `milestone` its title or ''.
+export type ClosedItem = { number: number; title: string; url: string; closedAt: string; milestone: string }
+// The 30- then 90-day windows, and the issues closed and pulls merged in the 90 days, most recently closed first.
+export type Flow = { windows: FlowWindow[]; closedIssues: ClosedItem[]; mergedPulls: ClosedItem[] }
+
 export type Project = {
   path: string
   name: string
@@ -98,6 +108,8 @@ export type Project = {
   milestones: MilestoneProgress[]
   forgeIssues: ForgeIssue[]
   forgePulls: ForgePull[]
+  // Flow metrics of the last 90 days, read by loadProjects from the forge; null when the origin is not a forge.
+  flow: Flow | null
   // The readiness headings in force (project.yaml `readiness.headings` or the default) and the open issues lacking one.
   readiness: string[]
   notReady: number

@@ -8,7 +8,7 @@ const member = (person: string, login: string, wip: number, wipLimit: number, it
 const project = (path: string, name: string, team: TeamMember[]): Project => ({
   path, name, code: name.toUpperCase(), profile: 'standard', status: 'delivery',
   stage: { current: 1, name: '', start: '', plannedEnd: '' },
-  roles: [{ role: 'team_manager', label: 'Team manager', people: team.map(one => one.person) }], team, milestones: [], forgeIssues: [], forgePulls: [], readiness: [], notReady: 0, tolerances: [], light: 'green',
+  roles: [{ role: 'team_manager', label: 'Team manager', people: team.map(one => one.person) }], team, milestones: [], forgeIssues: [], forgePulls: [], flow: null, readiness: [], notReady: 0, tolerances: [], light: 'green',
   progress: { done: 0, total: 0 }, highRisks: 0, openIssues: 0, nextReport: { due: '', isOverdue: false }, documents: [],
   workPackages: [], risks: [], issues: [], approvals: [], openBlockers: 0, unthemedNotes: [], errors: [],
 })

@@ -12,6 +12,7 @@ committed with the code. The skills write it; the project desk reads it.
   stages/<n>/plan.md        Stage Plan of stage n
   work-packages/WP-<nn>.md  one Work Package per file
   reports/<date>-<kind>.md  highlight, checkpoint, exception, end-stage, end-project reports
+  digests/<date>.md         weekly digests (/pm-digest); not a product, the desk does not list them
   registers/risks.yaml      Risk Register
   registers/issues.yaml     Issue Register
   registers/commit-notes.yaml  internal notes on the commits of work-package branches (/pm-note)
@@ -165,6 +166,38 @@ same blocks, without the selection: there `/pm-package` is typed in a session. `
 the forge — the milestone and the milestone of each item — and the work package file only after
 the user's OK.
 
+### Metrics
+
+For every registered project whose origin is a forge, the desk also reads, GET only, the closed
+issues and pull requests of the last 90 days: GitHub `issues?state=closed&since=<now − 90 d>` and
+`pulls?state=closed&sort=updated&direction=desc`, Forgejo `issues?state=closed&type=issues&since=…`
+and `pulls?state=closed&sort=recentupdate`, up to 10 pages each, the pull pages stopping at the first
+page that ends before the 90 days. For each pull request merged in the 90 days it reads
+`pulls/<n>/reviews` once — at most 100 per read, 10 at a time — and keeps its first review, the
+earliest submitted review that is not by the author — a pending review and a Forgejo review request
+(`REQUEST_REVIEW`) do not count —, for the life of the mod. The
+closed lists are read again after 60 minutes, or on `/pm-desk`. The result is the project's `flow`
+(`null` when the origin is not a forge):
+
+| Field | Meaning |
+|---|---|
+| `windows` | the last 30 and the last 90 days, in that order |
+| `windows[].leadTime` | issues closed in the window: opened → closed |
+| `windows[].firstReview` | pull requests merged in the window: opened → first review (a pull with no review is left out) |
+| `windows[].merge` | pull requests merged in the window: opened → merged (closed unmerged pulls are left out) |
+| `windows[].throughput` | per UTC ISO week, `week` its Monday, oldest first: `issues` closed and `pulls` merged |
+| `closedIssues`, `mergedPulls` | the items of the 90 days, most recently closed first: `number`, `title`, `url`, `closedAt` (day), `milestone` |
+
+Each figure is `{ count, median, p90 }` in days, one decimal — the median the mean of the two middle
+values on an even count, p90 the nearest rank — `null` with a count of 0. Every closed issue counts:
+Forgejo has no close reason to tell completed from not planned.
+
+The Metrics tab — its count the pull requests merged in the last 30 days — shows the three figures
+as `median · p90 (count)` for 30 and 90 days, `—` when nothing was counted, then the weekly
+throughput of the 90 days: stacked CSS bars on the browser page, one line per week in the pane.
+`No forge data.` when `flow` is null. A failed read is the project error
+`flow: <forge> issues|pulls|reviews: <reason>`; the figures are built from what was read.
+
 ### Readiness
 
 An open issue is ready when its body carries every heading of `readiness.headings` (default
@@ -227,7 +260,7 @@ Every product starts with a YAML frontmatter block:
 ```markdown
 ---
 title: Project Brief
-product: brief            # brief | pid | business-case | stage-plan | work-package | report
+product: brief            # brief | pid | business-case | stage-plan | work-package | report | digest
 version: 0.1
 status: draft             # draft | submitted | approved | superseded
 updated: 2026-11-03
@@ -312,6 +345,31 @@ notes:
 
 `reporting.last_highlight + reporting.highlight_every_days`; with no highlight yet,
 `stage.start + highlight_every_days`. Past today, the desk marks it overdue.
+
+`/pm-report` drafts the Highlight Report for the period `last_highlight` (or `stage.start`) →
+today and, after the user's OK, saves it as `reports/<date>-highlight.md` and sets
+`reporting.last_highlight` to today, which moves the next report date.
+
+## The desk snapshot
+
+Every time the mod writes the browser board, it also writes `~/.claude/p2kit/desk.json`, the data
+`/pm-digest` and `/pm-report` read, so they count stalled, waiting, in review and blockers as the
+desk does:
+
+```json
+{
+  "version": 1,
+  "refreshedAt": "2026-11-13T12:00:00.000Z",
+  "errors": [],
+  "projects": [ { "path": "/Users/me/src/customer-portal", "name": "Customer portal", "...": "..." } ]
+}
+```
+
+`projects` holds each project as the desk does (the `Project` type of `types/index.d.ts`: team,
+milestones, forge issues and pulls, flow, registers, next report, …). The desk refreshes it every
+minute while a session has p2kit loaded; the skills look a project up by `path`, the repo's
+top level, and flag a snapshot older than 10 minutes. A failed write is logged and never stops the
+board.
 
 ## The project registry
 

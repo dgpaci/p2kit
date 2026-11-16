@@ -38,7 +38,7 @@ allowed.
 - Ask the user whether a new branch should be a worktree or a plain branch.
 - Mod style reference: `~/sviluppo/claude/forge-desk`.
 
-## Mod notes (learned in the stage-delivery, desk-redesign, team-wip and planning-signals workflows)
+## Mod notes (learned in the stage-delivery, desk-redesign, team-wip, planning-signals and flow-reporting workflows)
 
 - `claude plugin test` runs every `*.test.ts(x)` under the folder but skips dot folders, so tests
   under `.phased/` and worktrees under `.claude/` never run by accident.
@@ -72,3 +72,10 @@ allowed.
 - The browser page reloads itself every 60 s (`RELOAD_MS`), dropping any page-local state. State the
   user builds over time (the Activity selection) holds the reload while it is set
   (`if (!pickedItems.size) location.reload()`); a plain filter may reset.
+- Forgejo's `pulls/<n>/reviews` lists every requested reviewer as a review with `state: REQUEST_REVIEW`
+  and a date: a "first review" must skip it as well as `PENDING` (`hooks/flow.ts:getFirstReviewAt`).
+- `tests/team-forge.test.ts` and `tests/milestones-forge.test.ts` assert the exact set and count of forge
+  requests, so any new forge read turns them red: filter the new read out of their mocks and pin it in
+  a test of its own — and say in the plan that those mocks may change, or the phase records it as a deviation.
+- The test clock of `mock.clock` starts at 0: a guard such as "never read yet" on `refreshedAt === 0`
+  also fires in tests, so pair it with another signal (no project held) or `await clock.set(...)` first.

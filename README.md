@@ -14,7 +14,7 @@ written from scratch.
   project with no fixed end runs a continuous stage (`stage.continuous: true`), shown as open and
   completed work packages, with no percentage and no end date. A
   project opens on a form: a header, a bar of its work themes and the tabs Recap, Roles, Team,
-  Activity, Documents, Work packages, Risks, Issues and Approvals; picking a theme shows its phases, issue
+  Activity, Metrics, Documents, Work packages, Risks, Issues and Approvals; picking a theme shows its phases, issue
   and pull requests, commits with notes. The Team tab lists each person of the roles with the
   open issues and pull requests that are theirs — to do, in progress, review asked, waiting for
   review, stalled — filterable by member; a red `WIP <person> n/limit` badge on the card and in
@@ -23,7 +23,9 @@ written from scratch.
   due day, stalled items, pulls in review, and the work package carrying each — its open pull
   requests, and its open issues grouped by milestone; an open issue missing a readiness heading
   (default Why / What changes / Done when, set in `readiness:` of `project.yaml`) is marked
-  `notready`, counted on the card and filterable. The same desk is a local browser page, where
+  `notready`, counted on the card and filterable. The Metrics tab gives the flow of the last 30 and
+  90 days from the repo's closed issues and merged pull requests — lead time, time to first review
+  and to merge as median and p90 — and the weekly throughput. The same desk is a local browser page, where
   checked issues and pull requests open a session on `/pm-package` to group them into a work
   package.
 - **Work themes.** The work packages of a stage run in parallel; one linked with `/pm-link` to an
@@ -46,6 +48,8 @@ Status: phase 1 skeleton, under development.
 | `/pm-issue` | drafts a work package's forge issue with the readiness headings, creates it after your OK and records `issue:` |
 | `/pm-package` | groups issues and pull requests into a work package: a forge milestone they join, after your OK, and `WP-<nn>.md` linked to it |
 | `/pm-note` | adds or closes an internal note on a commit of a work package's branch (`.pm/registers/commit-notes.yaml`) |
+| `/pm-digest` | writes the weekly digest for the alignment meeting from the desk's data (`.pm/digests/`, clipboard on request) |
+| `/pm-report` | drafts the Highlight Report for the Board and, after your OK, saves it and moves the next report date |
 | `/pm-register` | adds the current repo to the project desk (`~/.config/p2kit/projects.yaml`) |
 
 `/pm-desk` opens the pane.

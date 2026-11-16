@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { Approval, CommitNote, Issue, Light, Product, Project, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
+import { FLOW_WINDOWS, getFirstReviewAt, toFlow } from './flow'
 import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from './forge'
 import type { ForgeTarget, RestMilestone } from './forge'
 import { toForgeIssues, toForgePulls, toMilestoneProgress } from './milestones'
@@ -39,6 +40,12 @@ const FORGEJO_PAGE = 50
 // The open issues and pull requests of a repo are paged up to this many pages each.
 const TEAM_PAGES = 5
 const GITHUB_PAGE = 100
+// The closed issues and pull requests of a repo are read again only past this age, unless the refresh is forced; up to this many pages each.
+const FLOW_TTL_MS = 60 * 60 * 1000
+const FLOW_PAGES = 10
+// The reviews of at most this many merged pulls are read per read of the closed lists, this many at a time.
+const REVIEWS_PER_READ = 100
+const REVIEW_BATCH = 10
 
 // The raw text of a project's .pm/ files, as the loader found them; paths are absolute.
 export type ProjectFiles = {
@@ -257,6 +264,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     milestones: [],
     forgeIssues: [],
     forgePulls: [],
+    flow: null,
     readiness,
     notReady: 0,
     tolerances,
@@ -531,6 +539,73 @@ async function addRepoState($: EngineInterface, project: Project, isForced: bool
   }
 }
 
+// The last read of each project's closed issues and pull requests; first reviews per `<repo>#<pull>`, kept for the module's life.
+const flowCache = new Map<string, { at: number; issues: RestIssue[]; pulls: RestPull[]; errors: string[] }>()
+const firstReviewCache = new Map<string, string | null>()
+
+/** Reads, GET only, the closed issues and pulls of the last 90 days and the first reviews of the merged pulls not yet known. */
+async function readFlow($: EngineInterface, target: ForgeTarget, now: number): Promise<{ issues: RestIssue[]; pulls: RestPull[]; errors: string[] }> {
+  const errors: string[] = []
+  const fail = (what: string, error: unknown) => {
+    const line = `flow: ${target.forge} ${what}: ${error instanceof Error ? error.message : String(error)}`
+    if (!errors.includes(line)) errors.push(line)
+  }
+  const from = now - FLOW_WINDOWS[FLOW_WINDOWS.length - 1] * DAY_MS
+  const size = target.forge === 'github' ? GITHUB_PAGE : FORGEJO_PAGE
+  const since = new Date(from).toISOString()
+  const query = target.forge === 'github'
+    ? { issues: `issues?state=closed&since=${since}&per_page=${size}`, pulls: `pulls?state=closed&sort=updated&direction=desc&per_page=${size}` }
+    : { issues: `issues?state=closed&type=issues&since=${since}&limit=${size}`, pulls: `pulls?state=closed&sort=recentupdate&limit=${size}` }
+  const readPages = async <T extends { updated_at: string }>(what: 'issues' | 'pulls'): Promise<T[]> => {
+    const list: T[] = []
+    try {
+      for (let n = 1; n <= FLOW_PAGES; n++) {
+        const batch = (await getForgeJson($, target, `repos/${target.repo}/${query[what]}&page=${n}`)) as T[]
+        list.push(...batch)
+        if (batch.length < size) break
+        if (what === 'pulls' && Date.parse(batch[batch.length - 1].updated_at) < from) break
+      }
+    } catch (error) {
+      fail(what, error)
+    }
+    return list
+  }
+  const [issues, pulls] = await Promise.all([readPages<RestIssue>('issues'), readPages<RestPull>('pulls')])
+  const unknown = pulls
+    .filter(pull => pull.merged_at && Date.parse(pull.merged_at) > from && !firstReviewCache.has(`${target.repo}#${pull.number}`))
+    .sort((a, b) => b.merged_at!.localeCompare(a.merged_at!))
+    .slice(0, REVIEWS_PER_READ)
+  for (let n = 0; n < unknown.length; n += REVIEW_BATCH) {
+    await Promise.all(unknown.slice(n, n + REVIEW_BATCH).map(async pull => {
+      try {
+        const reviews = await getForgeJson($, target, `repos/${target.repo}/pulls/${pull.number}/reviews${target.forge === 'github' ? `?per_page=${GITHUB_PAGE}` : ''}`)
+        firstReviewCache.set(`${target.repo}#${pull.number}`, getFirstReviewAt(reviews as Parameters<typeof getFirstReviewAt>[0], pull.user?.login ?? ''))
+      } catch (error) {
+        fail('reviews', error)
+      }
+    }))
+  }
+  return { issues, pulls, errors }
+}
+
+/** The project with the flow of its last 90 days; a project whose origin is not a forge reads nothing and keeps flow null. */
+async function addFlow($: EngineInterface, project: Project, isForced: boolean, originTarget: OriginTarget): Promise<Project> {
+  const target = await originTarget()
+  if (!target) return project
+  const now = await $.clock.now()
+  let read = flowCache.get(project.path)
+  if (!read || isForced || now - read.at >= FLOW_TTL_MS) {
+    read = { at: now, ...(await readFlow($, target, now)) }
+    flowCache.set(project.path, read)
+  }
+  const firstReviews: Record<number, string> = {}
+  for (const pull of read.pulls) {
+    const at = firstReviewCache.get(`${target.repo}#${pull.number}`)
+    if (at) firstReviews[pull.number] = at
+  }
+  return { ...project, flow: toFlow(read.issues, read.pulls, firstReviews, now), errors: [...project.errors, ...read.errors] }
+}
+
 /** Every registered project, read afresh; registry problems come back as errors. */
 export async function loadProjects($: EngineInterface, isForced = false): Promise<{ projects: Project[]; errors: string[] }> {
   const home = (await $.env.get('HOME')) ?? ''
@@ -548,7 +623,9 @@ export async function loadProjects($: EngineInterface, isForced = false): Promis
       try {
         const originTarget = getOriginTarget($, path)
         const project = await addForgeState($, buildProject(await readProjectFiles($, path), today), isForced, originTarget)
-        return await addRepoState($, project, isForced, originTarget)
+        // The open and the closed items are read side by side; the flow's own errors follow the repo's.
+        const [repo, flowed] = await Promise.all([addRepoState($, project, isForced, originTarget), addFlow($, project, isForced, originTarget)])
+        return { ...repo, flow: flowed.flow, errors: [...repo.errors, ...flowed.errors.slice(project.errors.length)] }
       } catch (error) {
         const empty = buildProject({ path, products: [], workPackages: [] }, today)
         return { ...empty, errors: [`cannot read ${path}: ${String(error)}`] }

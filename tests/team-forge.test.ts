@@ -24,6 +24,8 @@ const ISSUES = [{ number: 1, title: 'Issue 1', html_url: 'https://h/issues/1', u
 const PULLS = [
   { number: 2, title: 'Pull 2', html_url: 'https://h/pulls/2', updated_at: '2026-11-11T10:00:00Z', draft: false, user: user('dgpaci'), assignees: [], requested_reviewers: [user('lverdi')] },
 ]
+// The closed-item reads of the flow metrics answer empty and are left out of the counts: tests/flow-forge.test.ts covers them.
+const isFlowRead = (path: string): boolean => path.includes('state=closed') || path.includes('/reviews')
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 const FORGEJO_PAGE_1 = Array.from({ length: 50 }, (_, n) => ({ ...PULLS[0], number: 100 + n, user: user('someone'), requested_reviewers: [] }))
 
@@ -56,6 +58,7 @@ test('the team items are read once per project from the open issues and pull req
   on('fs.list', () => ({ value: [] }))
   on('fs.write', () => ({ value: undefined }))
   on('http.fetch', (_, e) => {
+    if (isFlowRead(e.url)) return { value: { status: 200, ok: true, headers: {}, text: '[]' } }
     fetched.push({ url: e.url, method: e.init?.method ?? 'GET' })
     const reply = (body: unknown) => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } })
     const api = 'https://hub.genro.com/api/v1/repos/acme/fj/'
@@ -68,6 +71,7 @@ test('the team items are read once per project from the open issues and pull req
   on('process.run', (_, e) => {
     const answer = (exitCode: number, stdout = '', stderr = '') =>
       ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } })
+    if (e.argv[0] === 'gh' && isFlowRead(e.argv[2] ?? '')) return answer(0, '[]')
     if (e.argv[0] === 'gh') {
       gh.push([...e.argv])
       if (e.argv[2] === 'repos/acme/gh/issues?state=open&per_page=100&page=1') return answer(0, JSON.stringify(ISSUES))
@@ -117,6 +121,8 @@ test('the team items are read once per project from the open issues and pull req
     'team: forgejo issues: no fj token for other.host',
     'team: forgejo pulls: no fj token for other.host',
     'milestones: forgejo milestones: no fj token for other.host',
+    'flow: forgejo issues: no fj token for other.host',
+    'flow: forgejo pulls: no fj token for other.host',
   ])
   expect(named('Broken').team.map(member => member.items.length)).toEqual([0, 0, 0])
 
@@ -124,7 +130,7 @@ test('the team items are read once per project from the open issues and pull req
   await clock.advance(60 * 1000)
   expect(reads()).toBe(before)
   expect(named('Gh').team[1]!.items.length).toBe(2)
-  expect(named('Broken').errors.length).toBe(3)
+  expect(named('Broken').errors.length).toBe(5)
 
   // /pm-desk forces the read; past 5 minutes the timer reads again.
   await $.command.run(RUN)

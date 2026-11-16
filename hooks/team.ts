@@ -11,12 +11,12 @@ type RestUser = { login: string }
 type RestMilestoneRef = { title: string } | null
 export type RestIssue = {
   number: number; title: string; html_url: string; updated_at: string; assignees?: RestUser[] | null; pull_request?: unknown
-  milestone?: RestMilestoneRef; body?: string | null
+  milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null
 }
 export type RestPull = {
   number: number; title: string; html_url: string; updated_at: string; draft?: boolean
   user?: RestUser | null; assignees?: RestUser[] | null; requested_reviewers?: RestUser[] | null
-  milestone?: RestMilestoneRef; body?: string | null
+  milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null; merged_at?: string | null
 }
 
 const logins = (users: RestUser[] | null | undefined): string[] => (users ?? []).map(user => user.login)
