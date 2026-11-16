@@ -8,6 +8,8 @@ committed with the code. The skills write it; the project desk reads it.
   project.yaml              identity, stage, tolerances, roles, reporting, Board approvals
   brief.md                  Project Brief            (/pm-start-up)
   pid.md                    Project Initiation Documentation (/pm-initiate)
+  roadmap.md                Now / Next / Later roadmap, internal (/pm-roadmap, generated)
+  roadmap-external.md       the same roadmap for outside readers: no ids, risks or effort
   business-case.md          Business Case            (full profile, or inside pid.md in light)
   stages/<n>/plan.md        Stage Plan of stage n
   work-packages/WP-<nn>.md  one Work Package per file
@@ -61,6 +63,7 @@ tolerances:                     # project-level; a stage may tighten them in its
   time:  { limit: 10, used: 3, unit: days }     # used = current forecast deviation
   cost:  { limit: 5000, used: 4200, unit: EUR }
   scope: { limit: 0, used: 0, unit: must-have items dropped }
+  effort: { limit: 16, used: 0, unit: hours }  # used computed from the work packages when they carry the figures (### Effort)
 roles:
   executive: Anna Rossi
   senior_user: [Marco Bianchi]
@@ -268,7 +271,7 @@ Every product starts with a YAML frontmatter block:
 ```markdown
 ---
 title: Project Brief
-product: brief            # brief | pid | business-case | stage-plan | work-package | report | digest
+product: brief            # brief | pid | business-case | stage-plan | work-package | report | digest | roadmap
 version: 0.1
 status: draft             # draft | submitted | approved | superseded
 updated: 2026-11-03
@@ -291,6 +294,10 @@ issue: 498                # link keys, optional (/pm-link or /pm-issue): forge i
 milestone: ''             # forge milestone title, or absent / '' (/pm-link or /pm-package)
 branch: feature/498-pay   # the branch the work package is worked on
 base: develop             # '' = the repo's default branch
+estimate: 24              # optional: estimated effort, hours
+actual: 18                # optional: effort spent so far, hours, entered by hand
+horizon: now              # optional: now | next | later (/pm-roadmap)
+rank: 2                   # optional: order inside the horizon, 1 = first
 ```
 
 Progress of a stage = WPs of that stage with status `completed` / WPs of that stage that are not
@@ -298,6 +305,55 @@ Progress of a stage = WPs of that stage with status `completed` / WPs of that st
 
 `id` is unique in the project: two files carrying the same one are the error
 `duplicate work package id <id> (<file>, <file>)`.
+
+### Effort
+
+`estimate` and `actual` are hours, both optional; `actual` is typed by hand — there is no time
+tracker. A value that is not a number (a word, a quoted `'3'`) is the error
+`WP-<nn>: estimate is not a number` (resp. `actual`) and reads as missing.
+
+The **deviation** of a work package, in hours:
+
+| work package | deviation |
+|---|---|
+| `completed` | `actual − estimate` (negative = a saving) |
+| any other open status | `max(0, actual − estimate)` — only an overrun is known before the end |
+| `cancelled`, or a figure missing | none |
+
+The **stage effort** sums estimate, actual and deviation over the work packages of the current
+stage that are not cancelled and carry both figures; none counted, no stage effort.
+
+When the stage effort exists, the `effort` tolerance of `project.yaml` (`{ limit, used, unit:
+hours }`) takes `used = max(0, stage deviation)` in place of the written one, and its light is
+recomputed: the desk marks it `from work packages`. Without the figures the written `used`
+stands. No other tolerance area is touched.
+
+The desk shows `effort <actual>/<estimate>h <deviation>h` in the project row (red when the
+`effort` tolerance is red), the stage line `Stage <n> effort: …` and per work package its
+estimate, actual and deviation in the Work packages tab. `/pm-report` reports them from the
+snapshot (`effort`, each work package's `estimate` / `actual` / `deviation`).
+
+## Roadmap
+
+The roadmap lives in the work packages: `horizon` (`now`, `next` or `later`) and `rank` (an
+integer, 1 = first), both optional, written by `/pm-roadmap` after the user's OK. Another horizon is
+the error `WP-<nn>: horizon <value> is not now, next or later` and reads as none; a rank that is not
+a number is `WP-<nn>: rank is not a number` and reads as none.
+
+Only the open work packages (neither `completed` nor `cancelled`) are on the roadmap. Within a
+horizon they are ordered by rank, the ones with no rank last, then by id; the open ones with no
+horizon are *not on the roadmap*, by id.
+
+`/pm-roadmap` also generates two products from it, frontmatter `product: roadmap`:
+
+- `roadmap.md`, title `Roadmap` — per horizon id, title, stage, status, due and the effort figures,
+  the stage effort line, the open high risks and the open issues;
+- `roadmap-external.md`, title `Roadmap (external)` — per horizon title, status and due only: no
+  ids, no risks, no effort.
+
+Nothing reads them back but the Documents list. The desk's Roadmap tab shows the Now, Next and
+Later blocks from the work packages, and the open ones not on the roadmap; the snapshot carries
+`roadmap: { now, next, later, unplaced }` (ids).
 
 ## Registers
 

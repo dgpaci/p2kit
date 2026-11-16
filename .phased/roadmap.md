@@ -64,7 +64,7 @@ Original scope, kept for the contracts:
 - Requires of earlier work: `parsePhases` pure and exported.
 - Open decisions: whether iterations are needed at all once phases are visible (#9's own check).
 
-## Macro 7: Planning products
+## Macro 7 (done): Planning products — closed by wf/planning-products
 - Issues: #12 roadmap in three horizons, #15 estimated vs actual effort
 - Objective: a Now/Next/Later roadmap built from `.pm/` data; effort fields on work packages with deviation against stage tolerance.
 - Starts from: Macros 1–4 landed.

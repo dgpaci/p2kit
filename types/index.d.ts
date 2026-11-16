@@ -1,6 +1,7 @@
 export type Light = 'green' | 'amber' | 'red' | 'none'
 
-export type Tolerance = { area: string; limit: number; used: number; unit: string; light: Light }
+// `isComputed` when `used` comes from the work packages (the `effort` area with stage figures), not from project.yaml.
+export type Tolerance = { area: string; limit: number; used: number; unit: string; light: Light; isComputed: boolean }
 
 export type RoleLine = { role: string; label: string; people: string[] }
 
@@ -16,6 +17,14 @@ export type WorkPackage = {
   status: string
   teamManager: string
   due: string
+  // Hours from the frontmatter, null when absent or not a number. `deviation` is actual − estimate on a completed work package,
+  // the overrun only (never below 0) on an open one, null when a figure is missing or the work package is cancelled.
+  estimate: number | null
+  actual: number | null
+  deviation: number | null
+  // Roadmap placement: `horizon` now | next | later, '' when absent or unknown; `rank` 1 = first, null when absent.
+  horizon: string
+  rank: number | null
   // Its work theme, when it links an issue, a milestone or a branch; null otherwise.
   delivery: WpDelivery | null
 }
@@ -140,6 +149,8 @@ export type Project = {
   light: Light
   // Work packages of the current stage: completed over not cancelled.
   progress: { done: number; total: number }
+  // Hours over the work packages of the current stage, not cancelled, carrying both figures; null when there is none.
+  effort: { stage: number; estimate: number; actual: number; deviation: number; counted: number } | null
   highRisks: number
   openIssues: number
   nextReport: { due: string; isOverdue: boolean }
@@ -156,6 +167,8 @@ export type Project = {
   lessons: Lesson[]
   actions: RetroAction[]
   lastRetro: string
+  // Ids of the open work packages (neither completed nor cancelled) per horizon, by rank then id (no rank last); `unplaced` by id.
+  roadmap: { now: string[]; next: string[]; later: string[]; unplaced: string[] }
   // Open blocker notes over the whole commit-notes register.
   openBlockers: number
   // Notes naming no linked work package: counted, so shown too.

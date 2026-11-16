@@ -97,14 +97,16 @@ const LIGHT_RANK: Record<Light, number> = { none: 0, green: 1, amber: 2, red: 3 
 export const getWorstLight = (lights: Light[]): Light =>
   lights.reduce<Light>((worst, one) => (LIGHT_RANK[one] > LIGHT_RANK[worst] ? one : worst), 'none')
 
-function getTolerances(value: Value | undefined): Tolerance[] {
+/** The tolerances of project.yaml; the `effort` area takes the stage overrun as `used` when the work packages carry the figures. */
+function getTolerances(value: Value | undefined, effort: Project['effort']): Tolerance[] {
   if (!isDoc(value)) return []
   return Object.entries(value).flatMap(([area, entry]) => {
     if (!isDoc(entry)) return []
     const limit = num(entry.limit)
-    const used = num(entry.used) ?? 0
+    const isComputed = area === 'effort' && effort !== null
+    const used = isComputed ? Math.max(0, effort.deviation) : num(entry.used) ?? 0
     if (limit === null) return []
-    return [{ area, limit, used, unit: text(entry.unit), light: getLight(limit, used) }]
+    return [{ area, limit, used, unit: text(entry.unit), light: getLight(limit, used), isComputed }]
   })
 }
 
@@ -125,20 +127,64 @@ export function addDays(date: string, days: number): string {
   return Number.isNaN(time) ? '' : new Date(time + days * DAY_MS).toISOString().slice(0, 10)
 }
 
-/** A work package file's frontmatter; `link` is null unless it names an issue, a milestone or a branch. Throws on bad YAML. */
-function readWpFront(file: { path: string; text: string }): WpFront {
+/** Hours rounded to two decimals, so sums of decimal figures print clean (2.2 + 1.1 = 3.3). */
+const getRoundedHours = (hours: number): number => Math.round(hours * 100) / 100
+
+/** Actual − estimate when completed, the overrun only while open; null when cancelled or a figure is missing. */
+function getDeviation(status: string, estimate: number | null, actual: number | null): number | null {
+  if (estimate === null || actual === null || status === 'cancelled') return null
+  const deviation = getRoundedHours(actual - estimate)
+  return status === 'completed' ? deviation : Math.max(0, deviation)
+}
+
+/** A work package file's frontmatter; `link` is null unless it names an issue, a milestone or a branch. Throws on bad YAML; a bad figure goes to `errors`. */
+function readWpFront(file: { path: string; text: string }, errors: string[] = []): WpFront {
   const { data: front } = parseFrontmatter(file.text)
   const link = { issue: num(front.issue), milestone: text(front.milestone), branch: text(front.branch), base: text(front.base) }
+  const id = text(front.id) || basename(file.path).replace(/\.md$/, '')
+  const status = text(front.status) || 'draft'
+  const hours = (key: 'estimate' | 'actual'): number | null => {
+    if (front[key] !== undefined && front[key] !== null && typeof front[key] !== 'number') errors.push(`${id}: ${key} is not a number`)
+    return num(front[key])
+  }
+  const estimate = hours('estimate')
+  const actual = hours('actual')
+  const horizon = text(front.horizon)
+  if (horizon && !HORIZONS.includes(horizon)) errors.push(`${id}: horizon ${horizon} is not now, next or later`)
+  if (front.rank !== undefined && front.rank !== null && typeof front.rank !== 'number') errors.push(`${id}: rank is not a number`)
   return {
     path: file.path,
-    id: text(front.id) || basename(file.path).replace(/\.md$/, ''),
+    id,
     title: text(front.title),
     stage: num(front.stage),
-    status: text(front.status) || 'draft',
+    status,
     teamManager: text(front.team_manager),
     due: text(front.due),
+    estimate,
+    actual,
+    deviation: getDeviation(status, estimate, actual),
+    horizon: HORIZONS.includes(horizon) ? horizon : '',
+    rank: num(front.rank),
     link: link.issue !== null || link.milestone || link.branch ? link : null,
   }
+}
+
+const HORIZONS = ['now', 'next', 'later']
+
+/** The open work packages per horizon, by rank (none last) then id; the open ones with no horizon are unplaced, by id. A duplicate id counts once. */
+function getRoadmap(workPackages: WorkPackage[]): Project['roadmap'] {
+  const open = workPackages.filter(isOpen)
+  const byRank = (a: WorkPackage, b: WorkPackage) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.id.localeCompare(b.id)
+  const ids = (horizon: string) => [...new Set(open.filter(wp => wp.horizon === horizon).sort(byRank).map(wp => wp.id))]
+  return { now: ids('now'), next: ids('next'), later: ids('later'), unplaced: ids('') }
+}
+
+/** The effort sums over the work packages of the current stage, not cancelled, carrying both figures; null when there is none. */
+function getStageEffort(current: number | null, workPackages: WorkPackage[]): Project['effort'] {
+  const counted = workPackages.filter(wp => wp.stage === current && wp.status !== 'cancelled' && wp.estimate !== null && wp.actual !== null)
+  if (current === null || counted.length === 0) return null
+  const sum = (pick: (wp: WorkPackage) => number) => getRoundedHours(counted.reduce((total, wp) => total + pick(wp), 0))
+  return { stage: current, estimate: sum(wp => wp.estimate!), actual: sum(wp => wp.actual!), deviation: sum(wp => wp.deviation!), counted: counted.length }
 }
 
 export const isOpen = (wp: { status: string }): boolean => wp.status !== 'completed' && wp.status !== 'cancelled'
@@ -250,7 +296,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
   const fronts: WpFront[] = []
   for (const file of files.workPackages) {
     try {
-      const front = readWpFront(file)
+      const front = readWpFront(file, errors)
       const twin = fronts.find(one => one.id === front.id)
       if (twin) errors.push(`duplicate work package id ${front.id} (${basename(twin.path)}, ${basename(front.path)})`)
       fronts.push(front)
@@ -300,7 +346,8 @@ export function buildProject(files: ProjectFiles, today: string): Project {
 
   const iterations = readIterations(files.iterations, workPackages, errors)
   const inStage = workPackages.filter(wp => wp.stage === stage.current && wp.status !== 'cancelled')
-  const tolerances = getTolerances(data.tolerances)
+  const effort = getStageEffort(stage.current, workPackages)
+  const tolerances = getTolerances(data.tolerances, effort)
   const reporting = isDoc(data.reporting) ? data.reporting : {}
   const every = num(reporting.highlight_every_days)
   const since = text(reporting.last_highlight) || stage.start
@@ -328,6 +375,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     tolerances,
     light: getWorstLight(tolerances.map(one => one.light)),
     progress: { done: inStage.filter(wp => wp.status === 'completed').length, total: inStage.length },
+    effort,
     highRisks: risks.filter(risk => risk.status === 'open' && risk.score >= HIGH_RISK).length,
     openIssues: issues.filter(issue => issue.status === 'open').length,
     nextReport: { due, isOverdue: Boolean(due) && due < today },
@@ -339,6 +387,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     iterations,
     iteration: getCurrentIteration(iterations, workPackages, today),
     ...readLessons(files.lessons, errors),
+    roadmap: getRoadmap(workPackages),
     openBlockers: notes.filter(note => note.kind === 'blocker' && note.status === 'open').length,
     unthemedNotes: notes.filter(note => !workPackages.some(pkg => pkg.delivery && pkg.id === note.wp)),
     errors,
