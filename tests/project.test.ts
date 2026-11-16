@@ -46,7 +46,7 @@ test('the overview figures come from the .pm files', async () => {
   expect(project.openIssues).toBe(1)
   expect(project.nextReport).toEqual({ due: '2026-10-29', isOverdue: true })
   expect(project.roles.map(role => `${role.label}: ${role.people.join(', ')}`)).toEqual(['Executive: Anna', 'Senior User: Marco'])
-  expect(project.documents[0]).toEqual({ path: '/p/.pm/brief.md', title: 'Project Brief', product: '', status: 'approved', version: '1.0' })
+  expect(project.documents[0]).toEqual({ path: '/p/.pm/brief.md', title: 'Project Brief', product: '', status: 'approved', version: '1.0', folder: '' })
   expect(project.errors).toEqual([])
 })
 

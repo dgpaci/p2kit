@@ -173,8 +173,8 @@ tr.checked td { background: color-mix(in srgb, var(--on) 8%, transparent); }
 // The route lives in the URL hash so the reload keeps it: '' overview · '<path>' recap · '<path>/tab/<id>' · '<path>/theme/<WP-id>'.
 const SCRIPT = `
 const data = JSON.parse(document.getElementById('data').textContent)
-// A link to the web (forge issues and pull requests) opens in a new tab, so the desk stays open.
-const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); if (tag === 'a' && /^https?:/.test(node.getAttribute('href') || '')) Object.assign(node, { target: '_blank', rel: 'noopener' }); node.append(...children.filter(c => c !== null && c !== undefined && c !== false)); return node }
+// A link to the web (forge issues and pull requests) or to a file (documents) opens in a new tab, so the desk stays open.
+const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); if (tag === 'a' && /^(https?|file):/.test(node.getAttribute('href') || '')) Object.assign(node, { target: '_blank', rel: 'noopener' }); node.append(...children.filter(c => c !== null && c !== undefined && c !== false)); return node }
 const dot = light => el('span', { className: 'dot', title: 'tolerances: ' + light, style: 'background: var(--' + light + ')' })
 const fileLink = (path, label) => el('a', { href: 'file://' + encodeURI(path), textContent: label })
 const sessionLink = p => el('a', { href: p.sessionLink, textContent: 'Open session', onclick: e => e.stopPropagation() })
@@ -451,6 +451,18 @@ function metrics(p) {
       el('small', { textContent: w.week.slice(5) })))))
 }
 
+// Documents: the products of .pm/, then each folder of the project.yaml documents key with its files.
+function documents(p) {
+  const own = p.documents.filter(d => !d.folder)
+  const folders = [...new Set(p.documents.filter(d => d.folder).map(d => d.folder))]
+  if (!p.documents.length) return el('p', { className: 'dim', textContent: 'None yet.' })
+  return el('div', {},
+    own.length ? tableOf(['Document', 'Status', 'Version'], own.map(d => [fileLink(d.path, d.title), d.status, d.version])) : null,
+    ...folders.map(f => el('div', {},
+      el('h3', { textContent: f }),
+      tableOf(['Document', 'File'], p.documents.filter(d => d.folder === f).map(d => [fileLink(d.path, d.title), el('span', { className: 'dim mono', textContent: d.path.split('/').pop() })])))))
+}
+
 // One entry per tab: [id, label, count(p), render(p)].
 // Risks and issues list every entry, the open ones first; a closed one is dimmed.
 const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
@@ -460,7 +472,7 @@ const TABS = [
   ['team', 'Team', p => p.team.length, team],
   ['activity', 'Activity', p => p.forgeIssues.length + p.forgePulls.length, activity],
   ['metrics', 'Metrics', p => p.flow ? p.flow.windows[0].merge.count : 0, metrics],
-  ['documents', 'Documents', p => p.documents.length, p => tableOf(['Document', 'Status', 'Version'], p.documents.map(d => [fileLink(d.path, d.title), d.status, d.version]))],
+  ['documents', 'Documents', p => p.documents.length, documents],
   ['wps', 'Work packages', p => p.workPackages.length, p => tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Link'],
     p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.teamManager, w.due, wpLink(p, w)]))],
   ['risks', 'Risks', p => p.risks.filter(r => isOpen(r.status)).length, p => tableOf(['', 'Risk', 'P × I', 'Status'], openFirst(p.risks).map(r => dimUnlessOpen(r.status, [r.id, r.title, r.probability + ' × ' + r.impact + ' = ' + r.score, r.status])))],

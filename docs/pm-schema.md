@@ -73,6 +73,8 @@ team:                           # optional: forge logins and WIP limits of the p
     Marco Bianchi: { login: mbianchi }
 readiness:                      # optional: headings an open forge issue must carry to be ready
   headings: [Why, What changes, Done when]      # the default when absent
+documents:                      # optional: folders, relative to the repo, listed under Documents
+  - anaci_app/report            #   .html, .md and .pdf files, subfolders up to 3 levels, titled by <title> / title / # heading
 reporting:
   highlight_every_days: 14
   last_highlight: 2026-10-20    # date of the last highlight report, or null

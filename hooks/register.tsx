@@ -361,7 +361,7 @@ export const register: Register = on => {
         id: 'documents', label: 'Documents', count: p.documents.length,
         render: () => p.documents.length === 0 ? <Text dimColor>None yet.</Text> : p.documents.map(doc => (
           <Button key={`doc:${doc.path}`} plain onPress={() => void openFile($, doc.path)}>
-            {`${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
+            {doc.folder ? `${doc.folder} · ${doc.title}` : `${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
           </Button>
         )),
       },

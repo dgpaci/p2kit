@@ -5,7 +5,8 @@ export type Tolerance = { area: string; limit: number; used: number; unit: strin
 export type RoleLine = { role: string; label: string; people: string[] }
 
 // A Markdown product: brief, PID, stage plan, report.
-export type Product = { path: string; title: string; product: string; status: string; version: string }
+// `folder` is '' for a product of .pm/, else the project.yaml `documents:` folder the file was found in, with its subfolder.
+export type Product = { path: string; title: string; product: string; status: string; version: string; folder: string }
 
 export type WorkPackage = {
   path: string
