@@ -22,7 +22,7 @@ const SNAPSHOT_PATH = '.claude/p2kit/desk.json'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-14' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-15' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 // The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
 const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
@@ -361,6 +361,9 @@ export const register: Register = on => {
     const themes = getWorkThemes(p)
     const openRisks = p.risks.filter(risk => risk.status === 'open').sort((a, b) => b.score - a.score)
     const openActions = p.actions.filter(one => one.status === 'open')
+    // A project held by older code has no dailyLog: read as empty.
+    const log = p.dailyLog ?? []
+    const logDays = [...new Set(log.map(one => one.date))].sort().reverse()
     const openIssues = p.issues.filter(issue => issue.status === 'open')
     // Risks and issues list every entry, the open ones first; a closed one is dimmed.
     const allRisks = [...openRisks, ...p.risks.filter(risk => risk.status !== 'open')]
@@ -543,6 +546,18 @@ export const register: Register = on => {
           ],
       },
       {
+        id: 'log', label: 'Daily log', count: log.filter(one => one.status === 'open').length,
+        render: () => log.length === 0 ? <Text dimColor>No daily log yet: run /pm-log in the project's repo.</Text> : logDays.flatMap(day => [
+          <Text bold>{day}</Text>,
+          ...log.filter(one => one.date === day).map(one => (
+            <Text color={one.isOverdue ? 'red' : undefined} dimColor={one.status === 'done'} wrap="truncate-end">
+              {[one.id, one.kind, one.text, one.ref, one.register ? `→ ${one.register}` : '', one.issue === null ? '' : `#${one.issue}`, one.owner,
+                one.due ? `due ${one.due}` : '', one.status].filter(Boolean).join(' · ')}
+            </Text>
+          )),
+        ]),
+      },
+      {
         id: 'risks', label: 'Risks', count: openRisks.length,
         render: () => allRisks.length === 0 ? <Text dimColor>None.</Text> : allRisks.map(risk => (
           <Text color={risk.status === 'open' && risk.score >= 6 ? 'red' : undefined} dimColor={risk.status !== 'open'} wrap="truncate-end">
@@ -576,6 +591,7 @@ export const register: Register = on => {
         ...(p.nextReport.isOverdue ? [<Text color="red">{`highlight report overdue (${p.nextReport.due})`}</Text>] : []),
         ...(p.iteration?.isOverdue ? [<Text color="red">{`Iteration ${p.iteration.number} past its end (${p.iteration.end})`}</Text>] : []),
         ...openActions.map(one => <Text wrap="truncate-end">{`${one.id} ${one.text}${one.issue === null ? '' : ` #${one.issue}`}`}</Text>),
+        ...log.filter(one => one.isOverdue).map(one => <Text color="red" wrap="truncate-end">{`${one.id} ${one.text}${one.owner ? ` · ${one.owner}` : ''} · due ${one.due}`}</Text>),
         ...getWipLines(p),
       ]
       return lines.length ? lines : [<Text dimColor>Nothing.</Text>]

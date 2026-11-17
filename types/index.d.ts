@@ -53,6 +53,14 @@ export type Retrospective = { date: string; iteration: number | null; stage: num
 export type Lesson = { id: string; date: string; iteration: number | null; kind: string; text: string }
 export type RetroAction = { id: string; date: string; text: string; issue: number | null; status: string }
 
+// One line of the Daily Log, `.pm/registers/daily-log.yaml` (/pm-log). `kind` is event | decision | action | problem | note;
+// `source` forge | meeting | manual ('' when absent); `owner`, `due`, `ref`, `register` are '' when absent; `status` is 'open'
+// or 'done' on an action, '' on any other kind; `isOverdue` when an open action is past its `due`.
+export type DailyEntry = {
+  id: string; date: string; kind: string; source: string; text: string; owner: string; due: string; status: string
+  issue: number | null; register: string; ref: string; isOverdue: boolean
+}
+
 export type PhaseState = 'done' | 'in-progress' | 'todo' | 'failed' | 'blocked'
 
 // One phase of the phased-workflow plan found on a work package's branch.
@@ -75,10 +83,10 @@ export type Pull = { number: number; title: string; state: 'open' | 'merged' | '
 export type Milestone = { title: string; open: number; closed: number; due: string }
 // An open milestone with its open items untouched for over 7 days and its open non-draft pulls waiting on a reviewer.
 export type MilestoneProgress = Milestone & { stalled: number; inReview: number }
-// An open issue of the repo; `updatedAt` an ISO day, `milestone` its title or '', `missing` the readiness headings its body lacks.
-export type ForgeIssue = { number: number; title: string; url: string; updatedAt: string; milestone: string; missing: string[] }
+// An open issue of the repo; `createdAt` and `updatedAt` ISO days ('' when the forge gave no creation time), `milestone` its title or '', `missing` the readiness headings its body lacks.
+export type ForgeIssue = { number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; missing: string[] }
 // An open pull request of the repo; `inReview` when it is not a draft and waits on a requested reviewer.
-export type ForgePull = { number: number; title: string; url: string; updatedAt: string; milestone: string; draft: boolean; inReview: boolean }
+export type ForgePull = { number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; draft: boolean; inReview: boolean }
 
 // An issue or a pull request of a work package's milestone, any state.
 export type MilestoneItem = { kind: 'issue' | 'pr'; number: number; title: string; url: string; state: 'open' | 'closed' | 'merged' }
@@ -172,6 +180,9 @@ export type Project = {
   lessons: Lesson[]
   actions: RetroAction[]
   lastRetro: string
+  // The Daily Log in file order; `lastLog` its latest date, '' when none.
+  dailyLog: DailyEntry[]
+  lastLog: string
   // Ids of the open work packages (neither completed nor cancelled) per horizon, by rank then id (no rank last); `unplaced` by id.
   roadmap: { now: string[]; next: string[]; later: string[]; unplaced: string[] }
   // Open blocker notes over the whole commit-notes register.

@@ -29,9 +29,9 @@ test('the open pull requests, most recently updated first, each marked draft or 
     { number: 6, title: 'Quiet', html_url: 'https://h/pulls/6', updated_at: '2026-11-11T09:00:00Z', requested_reviewers: null, milestone: null },
   ])
   expect(pulls).toEqual([
-    { number: 7, title: 'Fix', url: 'https://h/pulls/7', updatedAt: '2026-11-12', milestone: '', draft: false, inReview: true },
-    { number: 6, title: 'Quiet', url: 'https://h/pulls/6', updatedAt: '2026-11-11', milestone: '', draft: false, inReview: false },
-    { number: 8, title: 'Spike', url: 'https://h/pulls/8', updatedAt: '2026-11-10', milestone: 'v1', draft: true, inReview: false },
+    { number: 7, title: 'Fix', url: 'https://h/pulls/7', createdAt: '', updatedAt: '2026-11-12', milestone: '', draft: false, inReview: true },
+    { number: 6, title: 'Quiet', url: 'https://h/pulls/6', createdAt: '', updatedAt: '2026-11-11', milestone: '', draft: false, inReview: false },
+    { number: 8, title: 'Spike', url: 'https://h/pulls/8', createdAt: '', updatedAt: '2026-11-10', milestone: 'v1', draft: true, inReview: false },
   ])
   expect(buildProject(files('/p'), '2026-11-13').forgePulls).toEqual([])
 })
@@ -67,7 +67,7 @@ test('the browser page embeds the package link, the pull requests and the work p
   const project: Project = {
     ...buildProject(files('/p'), '2026-11-13'),
     milestones: MILESTONES,
-    forgePulls: [{ number: 7, title: 'Fix', url: 'https://h/pulls/7', updatedAt: '2026-11-12', milestone: '', draft: false, inReview: true }],
+    forgePulls: [{ number: 7, title: 'Fix', url: 'https://h/pulls/7', createdAt: '', updatedAt: '2026-11-12', milestone: '', draft: false, inReview: true }],
   }
   const page = renderBoard({ projects: [project], refreshedAt: 0, errors: [] })
   const json = page.slice(page.indexOf('<script type="application/json" id="data">') + 42, page.indexOf('</script>'))

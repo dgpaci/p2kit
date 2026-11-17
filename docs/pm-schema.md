@@ -22,7 +22,7 @@ committed with the code. The skills write it; the project desk reads it.
   registers/iterations.yaml timeboxed iterations of the stage (/pm-iterate)
   registers/quality.yaml    Quality Register          (phase 2)
   registers/lessons.yaml    Lessons Log: retrospectives, lessons, actions (/pm-retro)
-  registers/daily-log.yaml  Daily Log                 (phase 2)
+  registers/daily-log.yaml  Daily Log: the day's forge events, decisions, actions, problems, notes (/pm-log)
 ```
 
 Stage baselines are git tags `pm/stage-<n>-approved`, set when the Board approves stage `n`'s plan.
@@ -483,6 +483,35 @@ actions:
   per open action in Needs attention (`<id> <text> #<issue>`), and a Lessons tab after Iterations,
   its count the open actions: the last retrospective, the actions open first, the lessons newest
   first. On the page an action's issue links to the forge.
+
+### `registers/daily-log.yaml`
+
+The Daily Log, written by `/pm-log`: the project manager's diary, one entry per line in one list.
+
+```yaml
+entries:
+  - { id: D-001, date: 2026-11-17, kind: event, source: forge, text: 'issue closed: Fix login', ref: '#41' }
+  - { id: D-002, date: 2026-11-17, kind: decision, source: meeting, text: 'the export keeps the old layout until January' }
+  - { id: D-003, date: 2026-11-17, kind: action, source: meeting, text: 'send the revised price list', owner: Marco Bianchi, due: 2026-11-21, status: open }
+  - { id: D-004, date: 2026-11-17, kind: problem, source: meeting, text: 'test server down since Friday', register: I-004 }
+```
+
+- `kind` is `event`, `decision`, `action`, `problem` or `note`; `source` is `forge` (an event read
+  from the desk's snapshot), `meeting` or `manual`, absent = unknown.
+- An `action` has `status` `open` or `done`, absent = `open`, an optional `owner` (a person of the
+  roles when it is one) and `due`; the other kinds have no status. An open action past its `due`
+  is **overdue**.
+- `ref` is the forge item a `forge` event is about (`'#41'`, quoted: a `#` would start a
+  comment); `register` the Issue or Risk Register entry an entry was moved to, `issue` the forge
+  issue opened for it — both written by `/pm-log` after the user's OK.
+- The forge events of a day are the snapshot's `forgeIssues` / `forgePulls` with that `createdAt`
+  and `flow.closedIssues` / `flow.mergedPulls` with that `closedAt`, UTC days; an item opened and
+  closed on the same day shows only as closed. The **last log** is the latest `date`.
+- Errors: a parse failure is one error `daily-log.yaml: <reason>` and the list stays empty.
+- The desk: one red line per overdue action in Needs attention (`<id> <text> · <owner> · due
+  <due>`), and a Daily log tab after Roadmap, its count the open actions: a block per day, newest
+  first, the entries in file order with kind and source, text and ref, issue, owner, due and
+  status; an overdue due is red, a done action dimmed.
 
 ## Next report due
 
