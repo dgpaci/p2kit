@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import type { Approval, CommitNote, Issue, Iteration, Lesson, Light, Product, Project, RetroAction, Retrospective, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
+import type { Approval, CommitNote, DailyEntry, Issue, Iteration, Lesson, Light, Product, Project, RetroAction, Retrospective, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
 import { FLOW_WINDOWS, getFirstReviewAt, toFlow } from './flow'
 import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from './forge'
 import type { ForgeTarget, RestMilestone } from './forge'
@@ -65,6 +65,7 @@ export type ProjectFiles = {
   commitNotes?: string
   iterations?: string
   lessons?: string
+  dailyLog?: string
   gitErrors?: string[]
   // The files of the project.yaml `documents:` folders, with their title; `folder` is relative to the project.
   sharedDocs?: { folder: string; path: string; title: string }[]
@@ -241,6 +242,20 @@ function readLessons(raw: string | undefined, errors: string[]): Pick<Project, '
   return { retrospectives, lessons, actions, lastRetro }
 }
 
+/** The Daily Log in file order, its latest date; an open action past its `due` is overdue on `today`. */
+function readDailyLog(raw: string | undefined, today: string, errors: string[]): Pick<Project, 'dailyLog' | 'lastLog'> {
+  const dailyLog: DailyEntry[] = readRegister('daily-log.yaml', raw, 'entries', errors).map(one => {
+    const kind = text(one.kind)
+    const status = kind === 'action' ? text(one.status) || 'open' : ''
+    const due = text(one.due)
+    return {
+      id: text(one.id), date: text(one.date), kind, source: text(one.source), text: text(one.text), owner: text(one.owner), due, status,
+      issue: num(one.issue), register: text(one.register), ref: text(one.ref), isOverdue: status === 'open' && Boolean(due) && due < today,
+    }
+  })
+  return { dailyLog, lastLog: dailyLog.map(one => one.date).reduce((last, date) => (date > last ? date : last), '') }
+}
+
 /** The open iteration with the highest number, with its progress; null when none is open. */
 function getCurrentIteration(iterations: Iteration[], workPackages: WorkPackage[], today: string): Project['iteration'] {
   const current = iterations.filter(one => one.status === 'open').pop()
@@ -395,6 +410,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     iterations,
     iteration: getCurrentIteration(iterations, workPackages, today),
     ...readLessons(files.lessons, errors),
+    ...readDailyLog(files.dailyLog, today, errors),
     roadmap: getRoadmap(workPackages),
     openBlockers: notes.filter(note => note.kind === 'blocker' && note.status === 'open').length,
     unthemedNotes: notes.filter(note => !workPackages.some(pkg => pkg.delivery && pkg.id === note.wp)),
@@ -551,6 +567,7 @@ export async function readProjectFiles($: EngineInterface, path: string): Promis
     commitNotes: await readIfExists($, `${pm}/registers/commit-notes.yaml`),
     iterations: await readIfExists($, `${pm}/registers/iterations.yaml`),
     lessons: await readIfExists($, `${pm}/registers/lessons.yaml`),
+    dailyLog: await readIfExists($, `${pm}/registers/daily-log.yaml`),
   }
 }
 

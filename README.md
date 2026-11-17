@@ -58,6 +58,7 @@ Status: phase 1 skeleton, under development.
 | `/pm-package` | groups issues and pull requests into a work package: a forge milestone they join, after your OK, and `WP-<nn>.md` linked to it |
 | `/pm-iterate` | opens or closes a timeboxed iteration of the stage — goal, dates, work packages, result — after your OK (`.pm/registers/iterations.yaml`) |
 | `/pm-retro` | runs a retrospective: lessons and actions in the Lessons Log after your OK, each action opened as a forge issue after its own OK (`.pm/registers/lessons.yaml`) |
+| `/pm-log` | updates the Daily Log: the day's forge events from the desk's data, plus decisions, actions and problems from a meeting transcript or your notes, after your OK; a problem goes to a register or a forge issue after its own OK (`.pm/registers/daily-log.yaml`) |
 | `/pm-roadmap` | proposes the Now / Next / Later order of the open work packages, writes `horizon` and `rank` after your OK and generates `.pm/roadmap.md` and `.pm/roadmap-external.md` |
 | `/pm-present` | writes the presentation of a work package for its users and the Board — what is new, what improves, how it works — and saves it after your OK (`.pm/presentations/`) |
 | `/pm-archive` | sets a completed work package `archived` after your OK, so it leaves the desk's work themes |

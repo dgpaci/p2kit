@@ -27,7 +27,7 @@ export function toForgeIssues(issues: RestIssue[], headings: string[] = DEFAULT_
   return issues
     .filter(isPlainIssue)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    .map(issue => ({ number: issue.number, title: issue.title, url: issue.html_url, updatedAt: issue.updated_at.slice(0, 10), milestone: issue.milestone?.title ?? '', missing: getMissingHeadings(issue.body, headings) }))
+    .map(issue => ({ number: issue.number, title: issue.title, url: issue.html_url, createdAt: (issue.created_at ?? '').slice(0, 10), updatedAt: issue.updated_at.slice(0, 10), milestone: issue.milestone?.title ?? '', missing: getMissingHeadings(issue.body, headings) }))
 }
 
 /** The open pull requests, most recently updated first, each marked draft or in review. */
@@ -35,7 +35,7 @@ export function toForgePulls(pulls: RestPull[]): ForgePull[] {
   return [...pulls]
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .map(pull => ({
-      number: pull.number, title: pull.title, url: pull.html_url, updatedAt: pull.updated_at.slice(0, 10),
+      number: pull.number, title: pull.title, url: pull.html_url, createdAt: (pull.created_at ?? '').slice(0, 10), updatedAt: pull.updated_at.slice(0, 10),
       milestone: pull.milestone?.title ?? '', draft: Boolean(pull.draft), inReview: isInReview(pull),
     }))
 }

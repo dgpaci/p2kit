@@ -424,6 +424,7 @@ function attention(p) {
     p.nextReport.isOverdue ? el('div', { className: 'err', textContent: 'Highlight report overdue since ' + p.nextReport.due }) : null,
     p.iteration && p.iteration.isOverdue ? el('div', { className: 'err', textContent: 'Iteration ' + p.iteration.number + ' past its end (' + p.iteration.end + ')' }) : null,
     ...openActions(p).map(a => el('div', { textContent: actionText(a) })),
+    ...logOf(p).filter(d => d.isOverdue).map(d => el('div', { className: 'err', textContent: d.id + ' ' + d.text + (d.owner ? ' · ' + d.owner : '') + ' · due ' + d.due })),
     ...overLimit(p).map(m => el('div', { className: 'err', textContent: wipText(m) })),
     p.notReady ? el('div', { textContent: p.notReady + ' issues not ready' }) : null,
   ].filter(Boolean)
@@ -678,6 +679,19 @@ function roadmap(p) {
     server && p.roadmap.unplaced.length ? tableOf(['', 'Title', 'Place'], wps(p.roadmap.unplaced).map(w => [w.id, w.title, placeControls(p, w)])) : null)
 }
 
+// The Daily Log: a block per day, newest first, its entries in file order; an open action past its due is red.
+// p.dailyLog is missing on a project built by older code: read as empty.
+const logOf = p => p.dailyLog || []
+const openLogActions = p => logOf(p).filter(d => d.status === 'open')
+const logText = d => d.text + (d.ref ? ' ' + d.ref : '') + (d.register ? ' → ' + d.register : '')
+function dailyLog(p) {
+  if (!logOf(p).length) return el('p', { className: 'dim', textContent: "No daily log yet: run /pm-log in the project's repo." })
+  const days = [...new Set(logOf(p).map(d => d.date))].sort().reverse()
+  return el('div', {}, ...days.map(day => el('div', {}, el('h3', { textContent: day }),
+    tableOf(['', 'Kind', 'Entry', 'Issue', 'Owner', 'Due', 'Status'], logOf(p).filter(d => d.date === day).map(d => dimUnlessOpen(d.status || 'open',
+      [d.id, d.kind + (d.source ? ' · ' + d.source : ''), logText(d), d.issue === null ? '' : issueLink(p, d.issue), d.owner, d.isOverdue ? el('span', { className: 'err', textContent: d.due }) : d.due, d.status]))))))
+}
+
 // One entry per tab: [id, label, count(p), render(p)].
 // Risks and issues list every entry, the open ones first; a closed one is dimmed.
 const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
@@ -693,6 +707,7 @@ const TABS = [
   ['iterations', 'Iterations', p => p.iterations.length, iterations],
   ['lessons', 'Lessons', p => openActions(p).length, lessons],
   ['roadmap', 'Roadmap', placedCount, roadmap],
+  ['log', 'Daily log', p => openLogActions(p).length, dailyLog],
   ['risks', 'Risks', p => p.risks.filter(r => isOpen(r.status)).length, p => tableOf(['', 'Risk', 'P × I', 'Status'], openFirst(p.risks).map(r => dimUnlessOpen(r.status, [r.id, r.title, r.probability + ' × ' + r.impact + ' = ' + r.score, r.status])))],
   ['issues', 'Issues', p => p.issues.filter(i => isOpen(i.status)).length, p => tableOf(['', 'Issue', 'Type', 'Priority', 'Status'], openFirst(p.issues).map(i => dimUnlessOpen(i.status, [i.id, i.title, i.type, i.priority, i.status])))],
   ['approvals', 'Approvals', p => p.approvals.length, p => tableOf(['Date', 'Decision', 'By', 'Note'], p.approvals.map(a => [a.date, a.decision, a.by, a.note]))],
