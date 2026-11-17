@@ -6,7 +6,7 @@ const WPS = '/src/anaci/.pm/work-packages'
 const FILES: Record<string, string> = {
   '/h/.config/p2kit/projects.yaml': 'projects:\n  - path: /src/anaci\n',
   '/src/anaci/.pm/project.yaml': 'name: Anaci\nstage: { current: 3, name: Certificate }\n',
-  [`${WPS}/WP-02.md`]: '---\nid: WP-02\ntitle: Old header\nstage: 2\nstatus: completed\nissue: 400\nbranch: feature/400-old\n---\n',
+  [`${WPS}/WP-02.md`]: '---\nid: WP-02\ntitle: Old header\nstage: 2\nstatus: archived\nissue: 400\nbranch: feature/400-old\n---\n',
   [`${WPS}/WP-03.md`]: '---\nid: WP-03\ntitle: Certificate\nstage: 3\nstatus: in-progress\nissue: 498\nbranch: feature/498-x\n---\n',
 }
 const DIRS: Record<string, { name: string; kind: 'file' | 'dir' }[]> = {
@@ -24,11 +24,11 @@ const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presen
 
 test('the desk reads the plan from the branch of each open work package and shows its phases', async ($, on) => {
   // wf:contract: a registered project with current stage 3 and two work packages in .pm/work-packages/: WP-03 (stage 3, in-progress,
-  // wf:contract: issue 498, branch feature/498-x) and WP-02 (stage 2, completed, branch feature/400-old);
+  // wf:contract: issue 498, branch feature/498-x) and WP-02 (stage 2, archived, branch feature/400-old);
   // wf:contract: process.run answers the git calls of the loader: rev-parse --verify --quiet, ls-tree -r --name-only, show <ref>:<path>;
   // wf:contract: `git remote get-url origin` answers exit code 2 (no origin), so no forge is read;
   // wf:contract: the local ref feature/498-x missing and origin/feature/498-x present → the plan is read from origin/feature/498-x.
-  // wf:contract: Git is read only for work packages neither completed nor cancelled: no git call names feature/400-old.
+  // wf:contract: Git is read only for work packages neither archived nor cancelled: no git call names feature/400-old.
   // wf:contract: The overview row shows a Text matching /WP-03 · phases 3\/7/ and one containing "Signature flow".
   // wf:contract: After pressing the project's name button (`open:<path>`) and the theme button (`theme:<WP-id>`) the drill-in shows a Text "Work themes" and one line per phase carrying its title and state.
   // wf:contract: When neither feature/498-x nor origin/feature/498-x resolves, the project shows the error "WP-03: branch feature/498-x not found".

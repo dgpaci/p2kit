@@ -7,7 +7,7 @@ const FILES: Record<string, string> = {
   '/src/anaci/.pm/project.yaml': 'name: Anaci\nstage: { current: 3 }\n',
   '/src/anaci/.pm/work-packages/WP-02.md': wp('id: WP-02\ntitle: Previous release\nstage: 2\nstatus: in-progress\nmilestone: v2.4\n'),
   '/src/anaci/.pm/work-packages/WP-03.md': wp('id: WP-03\ntitle: Certificate\nstage: 3\nstatus: in-progress\nissue: 498\nbranch: feature/498-x\nbase: develop\n'),
-  '/src/anaci/.pm/work-packages/WP-04.md': wp('id: WP-04\ntitle: Done already\nstage: 3\nstatus: completed\nissue: 497\n'),
+  '/src/anaci/.pm/work-packages/WP-04.md': wp('id: WP-04\ntitle: Done already\nstage: 3\nstatus: archived\nissue: 497\n'),
   '/src/kit/.pm/project.yaml': 'name: Kit\nstage: { current: 1 }\n',
   '/src/kit/.pm/work-packages/WP-01.md': wp('id: WP-01\ntitle: Release\nstage: 1\nstatus: authorized\nmilestone: v2.5\n'),
   '/src/plain/.pm/project.yaml': 'name: Plain\nstage: { current: 1 }\n',
@@ -41,13 +41,13 @@ const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presen
 
 test('the drill-in shows the forge state of each open work package of the current stage and whether it is ready to close', async ($, on) => {
   // wf:contract: a registered project whose origin is git@hub.genro.com:anaci/anaci.git, current stage 3, work package WP-03
-  // wf:contract: (stage 3, in-progress) linked to issue 498 and branch feature/498-x; WP-02 of stage 2 and WP-04 completed are not read;
+  // wf:contract: (stage 3, in-progress) linked to issue 498 and branch feature/498-x; WP-02 of stage 2 and WP-04 archived are not read;
   // wf:contract: the Forgejo token is read from ~/Library/Application Support/forgejo-cli.forgejo-cli/keys.json, hosts["hub.genro.com"].token;
   // wf:contract: Forgejo is read with http.fetch GET only (issue, pulls?state=all); GitHub with `gh api <path>` only, never -X, -f or --method.
   // wf:contract: The drill-in shows the issue as "#498" with its state, each pull request of the branch with its state,
   // wf:contract: and a Text "ready to close" when isReadyToClose holds for them; a milestone-linked work package shows "<title> <closed>/<open+closed>".
   // wf:contract: A forge failure (HTTP error, gh exit code ≠ 0, missing token) becomes a project error naming the work package; the local data still shows.
-  // wf:contract: Only work packages of the current stage, neither completed nor cancelled, are read from the forge;
+  // wf:contract: Only work packages of the current stage, neither archived nor cancelled, are read from the forge;
   // wf:contract: a project with no linked work package makes no work-package forge request; its repo is still read, for team, milestones and readiness (Macro 4).
   const fetched: { url: string; init: { method?: string; headers?: Record<string, string> } }[] = []
   const gh: string[][] = []
@@ -115,7 +115,7 @@ test('the drill-in shows the forge state of each open work package of the curren
     expect(one.init.method ?? 'GET').toBe('GET')
     expect(one.init.headers?.Authorization).toBe('token tok')
   }
-  // The work-package reads only: WP-02 (other stage) and WP-04 (completed) are not read; the repo reads (state=open) are Macro 4's.
+  // The work-package reads only: WP-02 (other stage) and WP-04 (archived) are not read; the repo reads (state=open) are Macro 4's.
   expect(fetched.map(one => one.url).some(url => url.includes('milestones?state=all') || url.includes('issues/497'))).toBe(false)
   expect(gh.filter(argv => argv[2]!.includes('state=all'))).toEqual([['gh', 'api', 'repos/dgpaci/p2kit/milestones?state=all&per_page=100']])
   expect(gh.every(argv => argv.length === 3 && argv[1] === 'api')).toBe(true)

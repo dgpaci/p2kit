@@ -25,10 +25,10 @@ at a time, after the user's OK; it never touches the forge and commits nothing.
    - `stage`: `stage.current`;
    - `goal`: ask the user for it, in one line;
    - `work_packages`: propose the open work packages of the current stage (status neither
-     `completed` nor `cancelled`), id and title; the user picks.
+     `completed`, `archived` nor `cancelled`), id and title; the user picks.
 4. **Close** — the open iteration, the highest number when several are open:
    - show its number, goal, dates and each of its work packages with its status;
-   - propose `delivered`: its work packages now `completed`; the user may correct it;
+   - propose `delivered`: its work packages now `completed` or `archived`; the user may correct it;
    - ask for the one-line `result`;
    - set `status: closed`.
 5. Show the exact YAML entry as it will be written — a block-list entry under `iterations:`, with

@@ -3,10 +3,13 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { openFile, openSession } from './actions'
 import { getOpenBlockers, renderBoard } from './board'
-import type { CommitNote, Light, MilestoneItem, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpForge } from '../types'
+import type { CommitNote, Light, MilestoneItem, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpDelivery, WpForge } from '../types'
+import { EditError, setFrontmatterKey, setNoteStatus, setWpStatus } from './edits'
+import type { LineChange } from './edits'
 import { getFlowCell } from './flow'
-import { getMilestonePackage } from './milestones'
-import { getWorkThemes, isOpen, loadProjects } from './project'
+import { getItemProgress, getMilestonePackage } from './milestones'
+import { getWorkThemes, loadProjects } from './project'
+import { getDeskServer } from './server'
 import { toSnapshot } from './snapshot'
 
 const PANE = 'p2kit-desk'
@@ -19,7 +22,7 @@ const SNAPSHOT_PATH = '.claude/p2kit/desk.json'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-13' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-14' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 // The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
 const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
@@ -41,7 +44,7 @@ const STATUS_LABEL: Record<TeamStatus, string> = { review: 'review asked', inpro
 const FLOW_ROWS: [string, 'leadTime' | 'firstReview' | 'merge'][] = [['Lead time', 'leadTime'], ['Review (opened → first review)', 'firstReview'], ['Merge (opened → merged)', 'merge']]
 // The longest weekly bar of the Metrics tab, in characters.
 const METRICS_BAR = 20
-const WP_COLOR: Record<string, string> = { completed: 'green', 'in-progress': 'cyan', authorized: 'white', draft: 'gray', cancelled: 'gray' }
+const WP_COLOR: Record<string, string> = { completed: 'green', 'in-progress': 'cyan', authorized: 'white', draft: 'gray', cancelled: 'gray', archived: 'gray' }
 
 // The automatic refresh; a reload of the module starts a new one.
 let timer: Timer | undefined
@@ -65,6 +68,12 @@ function getForgeLine(forge: WpForge): string {
     forge.milestone ? `${forge.milestone.title} ${forge.milestone.closed}/${forge.milestone.open + forge.milestone.closed}` : '',
     forge.pulls.length ? `PRs ${forge.pulls.length}${open ? ` (${open} open)` : ''}` : '',
   ].filter(Boolean).join(' · ')
+}
+
+/** `phases 2/5` from the plan; with no plan, `items 18/19 closed` from the milestone; '' with neither. */
+function getThemeProgress(delivery: WpDelivery): string {
+  const items = getItemProgress(delivery.forge)
+  return delivery.summary.total ? `phases ${delivery.summary.done}/${delivery.summary.total}` : items ? `items ${items.done}/${items.total} closed` : ''
 }
 
 /** `▓▓░░░ 2/5`: completed work packages of the current stage; a continuous stage, which has no end, counts them: `3 open · 12 completed`. */
@@ -101,10 +110,67 @@ async function writeBoard($: EngineInterface): Promise<void> {
     .catch(error => $.ui.log(`p2kit: snapshot not written: ${String(error)}`, { to: 'debug' }))
 }
 
-/** Opens the browser board, written afresh first. */
+/** Opens the browser board, written afresh first: served by the desk helper when python3 runs it, else the read-only file. */
 async function openBoard($: EngineInterface): Promise<void> {
   await writeBoard($)
-  await openFile($, await getBoardPath($))
+  const url = await getDeskServer($, () => void reloadAfterWrite($))
+  await openFile($, url || await getBoardPath($))
+}
+
+/** Reads the projects again after the helper wrote a file, once any refresh under way is over: the page waits for it. */
+async function reloadAfterWrite($: EngineInterface): Promise<void> {
+  for (let waited = 0; (await read($, meta)).isLoading && waited < REFRESH_MS; waited += 1000) await $.clock.sleep(1000)
+  await reload($, true)
+}
+
+/** "WP-03 Title" when the file is under .pm/, else the path: what a confirmation names. */
+const getPmName = (path: string): string => path.split('/.pm/')[1] ?? path
+
+/**
+ * One line of a .pm/ file changed from the pane: the dialog shows the line before and after, and the file is written only
+ * if it is still as read. Nothing is committed; the desk is read again after the write.
+ */
+async function editFromPane($: EngineInterface, path: string, summary: string, edit: (text: string) => LineChange, note = ''): Promise<void> {
+  let change: LineChange
+  let text: string
+  try {
+    text = await $.fs.read(path)
+    change = edit(text)
+  } catch (error) {
+    $.ui.toast(`${summary}: ${error instanceof EditError ? error.message : String(error)}`)
+    return
+  }
+  const shown = (line: string) => (line ? `"${line.trim()}"` : 'nothing')
+  const question = `${summary}: ${getPmName(path)} line ${change.line}, ${shown(change.before)} → ${shown(change.after)}.${note ? ` ${note}` : ''} Nothing is committed. Apply?`
+  const answer = await $.ui.ask(question, { options: ['Apply', 'Cancel'], header: 'Desk' }).catch(() => 'Cancel')
+  if (answer !== 'Apply') return
+  if ((await $.fs.read(path)) !== text) {
+    $.ui.toast(`${summary}: the file changed meanwhile, nothing written`)
+    return
+  }
+  await $.fs.write(path, change.text)
+  $.ui.toast(`${summary}: done`)
+  await reload($, true)
+}
+
+const HORIZON_CHOICES = [['Now', 'now'], ['Next', 'next'], ['Later', 'later'], ['Off the roadmap', '']] as const
+
+/** Moves a work package to another horizon, or off the roadmap: the choice is the confirmation, the line is written only if unchanged. */
+async function moveFromPane($: EngineInterface, wp: WorkPackage): Promise<void> {
+  const options = HORIZON_CHOICES.filter(([, value]) => value !== wp.horizon)
+  const now = wp.horizon ? HORIZON_LABEL[wp.horizon as keyof typeof HORIZON_LABEL] : 'off the roadmap'
+  const answer = await $.ui.ask(`Move ${wp.id} ${wp.title} (${now}) to? It writes horizon: in its file; nothing is committed.`,
+    { options: options.map(([label]) => label), header: 'Roadmap' }).catch(() => '')
+  const chosen = options.find(([label]) => label === answer)
+  if (!chosen) return
+  try {
+    const text = await $.fs.read(wp.path)
+    await $.fs.write(wp.path, setFrontmatterKey(text, 'horizon', chosen[1] || null).text)
+    $.ui.toast(`${wp.id}: ${chosen[0]}`)
+    await reload($, true)
+  } catch (error) {
+    $.ui.toast(`${wp.id}: ${error instanceof EditError ? error.message : String(error)}`)
+  }
 }
 
 /** Reads every registered project again. */
@@ -203,10 +269,20 @@ export const register: Register = on => {
     /** One commit note: kind, status, text; red while an open blocker. */
     const getNoteLine = (note: CommitNote, withSha = false) => {
       const isOpenBlocker = note.kind === 'blocker' && note.status === 'open'
+      const value = note.status === 'open' ? 'closed' : 'open'
+      const notes = chosen && `${chosen.path}/.pm/registers/commit-notes.yaml`
       return (
-        <Text color={isOpenBlocker ? 'red' : undefined} dimColor={note.status === 'closed'} wrap="truncate-end">
-          {`  ${withSha ? `${note.sha} ` : ''}${note.kind} · ${note.status} · ${note.text}`}
-        </Text>
+        <Box flexDirection="row" columnGap={1}>
+          <Text color={isOpenBlocker ? 'red' : undefined} dimColor={note.status === 'closed'} wrap="truncate-end">
+            {`  ${withSha ? `${note.sha} ` : ''}${note.kind} · ${note.status} · ${note.text}`}
+          </Text>
+          {notes && (
+            <Button key={`note:${note.sha}:${note.text}`} plain onPress={() =>
+              void editFromPane($, notes, `${value === 'closed' ? 'Close' : 'Reopen'} the note on ${note.sha.slice(0, 7)}`, text => setNoteStatus(text, note.sha, note.text, value))}>
+              {value === 'closed' ? 'close' : 'reopen'}
+            </Button>
+          )}
+        </Box>
       )
     }
     /** One coloured square per phase. */
@@ -257,7 +333,7 @@ export const register: Register = on => {
                     <Box flexDirection="row" columnGap={1}>
                       {getPhaseBar(phases)}
                       <Text wrap="truncate-end">
-                        {[id, summary.total ? `phases ${summary.done}/${summary.total}` : '', summary.current].filter(Boolean).join(' · ')}
+                        {[id, getThemeProgress(delivery!), summary.current].filter(Boolean).join(' · ')}
                       </Text>
                       {summary.failed > 0 && <Text color="red">{`${summary.failed} failed`}</Text>}
                       <Button key={`go:${project.path}:${id}`} plain onPress={() => openTheme(project.path, id)}>Open</Button>
@@ -451,9 +527,19 @@ export const register: Register = on => {
           ? <Text dimColor>No roadmap yet: run /pm-roadmap in the project's repo.</Text>
           : [
             ...placed.map(({ label, wp }) => (
-              <Text wrap="truncate-end">{`${label} · ${wp.id} ${wp.title} · ${wp.status}${wp.due ? ` · due ${wp.due}` : ''}`}</Text>
+              <Box flexDirection="row" columnGap={1}>
+                <Text wrap="truncate-end">{`${label} · ${wp.id} ${wp.title} · ${wp.status}${wp.due ? ` · due ${wp.due}` : ''}`}</Text>
+                <Button key={`move:${wp.id}`} plain onPress={() => void moveFromPane($, wp)}>move</Button>
+              </Box>
             )),
             ...(p.roadmap.unplaced.length ? [<Text dimColor wrap="truncate-end">{`Not on the roadmap: ${p.roadmap.unplaced.join(', ')}`}</Text>] : []),
+            ...(p.roadmap.unplaced.length ? [
+              <Box flexDirection="row" columnGap={1}>
+                {p.workPackages.filter(wp => p.roadmap.unplaced.includes(wp.id)).map(wp => (
+                  <Button key={`place:${wp.id}`} plain onPress={() => void moveFromPane($, wp)}>{`place ${wp.id}`}</Button>
+                ))}
+              </Box>,
+            ] : []),
           ],
       },
       {
@@ -532,7 +618,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    const getThemePanel = ({ id, title, status, delivery }: WorkPackage) => {
+    const getThemePanel = ({ id, title, status, delivery, path }: WorkPackage) => {
       const one = delivery!
       return (
         <Box flexDirection="column">
@@ -540,7 +626,18 @@ export const register: Register = on => {
             {[`${id} ${title}`.trim(), one.issue === null ? '' : `#${one.issue}`, one.milestone && `milestone ${one.milestone}`, one.ref || one.branch, one.base && `over ${one.base}`]
               .filter(Boolean).join(' · ')}
           </Text>
-          <Text dimColor>{status}</Text>
+          <Box flexDirection="row" columnGap={1}>
+            <Text dimColor>{status}</Text>
+            {status === 'completed' && (
+              <Button key={`archive:${id}`} plain onPress={() => void editFromPane($, path, `Archive ${id}`, text => setWpStatus(text, id, 'archived'))}>Archive</Button>
+            )}
+            {(status === 'in-progress' || status === 'authorized') && (
+              <Button key={`complete:${id}`} plain onPress={() =>
+                void editFromPane($, path, `Mark ${id} completed`, text => setWpStatus(text, id, 'completed'), 'A decision of the Project Board: apply only if the Board has taken it.')}>
+                Mark completed
+              </Button>
+            )}
+          </Box>
           {one.forge?.issue && (
             <Text wrap="truncate-end">{`#${one.forge.issue.number} · ${one.forge.issue.state} · ${one.forge.issue.title}`}</Text>
           )}
@@ -565,9 +662,13 @@ export const register: Register = on => {
           ))}
           {one.forge?.isReadyToClose && <Text color="green">ready to close</Text>}
           <Text bold>Phases</Text>
-          {one.phases.length === 0 && <Text dimColor>{one.ref ? 'No phased plan on the branch.' : 'No branch linked.'}</Text>}
+          {one.phases.length === 0 && <Text dimColor>{one.ref ? 'No phased plan on the branch.' : one.branch ? 'Branch not read.' : 'No branch linked.'}</Text>}
+          {one.objective && <Text wrap="wrap">{one.objective}</Text>}
           {one.phases.map(phase => (
-            <Text color={PHASE_COLOR[phase.state]} wrap="truncate-end">{`Phase ${phase.number}: ${phase.title} · ${phase.state}`}</Text>
+            <Box key={`phase:${phase.number}`} flexDirection="column">
+              <Text color={PHASE_COLOR[phase.state]} wrap="truncate-end">{`Phase ${phase.number}: ${phase.title} · ${phase.state}`}</Text>
+              {phase.outcome && <Text dimColor wrap="wrap">{`  ${phase.outcome}`}</Text>}
+            </Box>
           ))}
           <Text bold>Commits and notes</Text>
           {one.commits.length === 0 && <Text dimColor>None.</Text>}
@@ -578,7 +679,7 @@ export const register: Register = on => {
             </Box>
           ))}
           {one.unlinkedNotes.length > 0 && (
-            <Text dimColor>{isOpen({ status }) ? 'Notes on commits not on the branch' : 'Branch not read: the work package is closed'}</Text>
+            <Text dimColor>{one.ref ? 'Notes on commits not on the branch' : 'Branch not read'}</Text>
           )}
           {one.unlinkedNotes.map(note => getNoteLine(note, true))}
         </Box>
@@ -607,7 +708,7 @@ export const register: Register = on => {
           <Box flexDirection="row" columnGap={1} flexWrap="wrap">
             {themes.map(({ id, delivery }) => (
               <Button key={`theme:${id}`} variant={themeId === id ? 'primary' : 'secondary'} onPress={() => show(`theme:${id}`)}>
-                {`${id} ${delivery!.summary.done}/${delivery!.summary.total}`}
+                {[id, getThemeProgress(delivery!)].filter(Boolean).join(' ')}
               </Button>
             ))}
           </Box>

@@ -29,13 +29,19 @@ written from scratch.
   and actual effort in hours: the desk shows each one's deviation and the current stage's, which
   feeds an `effort` tolerance. A Roadmap tab places the open work packages in Now, Next and Later
   (`/pm-roadmap`). The same desk is a local browser page, where
-  checked issues and pull requests open a session on `/pm-package` to group them into a work
-  package.
+  checked issues and pull requests are grouped into a work package.
+- **Actions on the desk.** Archive or complete a work package, place it on the roadmap, link it,
+  close a note, package issues: each shows the change and writes it on Confirm, without opening a
+  session; text — reports, digests, presentations — is still drafted in a session with its skill.
+  In the browser the actions need **Python 3** (a standard-library helper the mod starts); without
+  it the page stays read-only. What acts directly and why: [docs/scope.md](docs/scope.md).
 - **Work themes.** The work packages of a stage run in parallel; one linked with `/pm-link` to an
-  issue, a milestone or a branch shows the phases of the phased-workflow plan found on its branch
-  and its commits, read with local git, with internal notes on them kept in
-  `.pm/registers/commit-notes.yaml`, and the forge state of its issue or milestone and pull
-  requests (GitHub or Forgejo, read-only), flagged `ready to close` when they are all merged.
+  issue, a milestone or a branch shows the phases of the phased-workflow plan found on its branch,
+  each with what it adds, read with local git — or, with no plan, a bar of its milestone's closed
+  items — with internal notes on its commits kept in `.pm/registers/commit-notes.yaml`, and the
+  forge state of its issue or milestone and pull requests (GitHub or Forgejo, read-only), flagged
+  `ready to close` when they are all merged. A completed work package stays a theme until
+  `/pm-archive` sets it `archived`.
 - **Light by default.** The `light` tailoring profile keeps only what a small project needs;
   `full` adds the rest.
 
@@ -53,6 +59,8 @@ Status: phase 1 skeleton, under development.
 | `/pm-iterate` | opens or closes a timeboxed iteration of the stage — goal, dates, work packages, result — after your OK (`.pm/registers/iterations.yaml`) |
 | `/pm-retro` | runs a retrospective: lessons and actions in the Lessons Log after your OK, each action opened as a forge issue after its own OK (`.pm/registers/lessons.yaml`) |
 | `/pm-roadmap` | proposes the Now / Next / Later order of the open work packages, writes `horizon` and `rank` after your OK and generates `.pm/roadmap.md` and `.pm/roadmap-external.md` |
+| `/pm-present` | writes the presentation of a work package for its users and the Board — what is new, what improves, how it works — and saves it after your OK (`.pm/presentations/`) |
+| `/pm-archive` | sets a completed work package `archived` after your OK, so it leaves the desk's work themes |
 | `/pm-note` | adds or closes an internal note on a commit of a work package's branch (`.pm/registers/commit-notes.yaml`) |
 | `/pm-digest` | writes the weekly digest for the alignment meeting from the desk's data (`.pm/digests/`, clipboard on request) |
 | `/pm-report` | drafts the Highlight Report for the Board and, after your OK, saves it and moves the next report date |
@@ -72,6 +80,10 @@ claude plugin validate .
 
 ```bash
 claude plugin test .
+```
+
+```bash
+python3 -m unittest discover -s server
 ```
 
 ## License

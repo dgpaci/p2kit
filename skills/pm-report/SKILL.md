@@ -25,7 +25,7 @@ writes only after the user's OK, and commits nothing.
    - the stage effort, when `effort` is set: `actual`h of `estimate`h, deviation (signed) over
      `counted` work packages;
    - the open high risks of `risks` (`score ≥ 6`), with owner;
-   - the work packages of the current stage with status `completed` — all of them: a work
+   - the work packages of the current stage with status `completed` or `archived` — all of them: a work
      package carries no completion date, so the section says they are the stage's, not the
      period's — and the open ones of the stage with status and due date;
    - the open `milestones` with their due date and `closed`/`open + closed`;

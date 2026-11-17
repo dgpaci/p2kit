@@ -17,7 +17,7 @@ const PROJECT: Project = {
   stage: { current: 2, name: 'Build', start: '2026-10-01', plannedEnd: '' },
   roles: [], team: [], milestones: [], forgeIssues: [], forgePulls: [], flow: null, tolerances: [], light: 'green', progress: { done: 1, total: 3 }, highRisks: 0, openIssues: 0,
   nextReport: { due: '', isOverdue: false }, documents: [],
-  workPackages: [wp('WP-01', 'Open one', 'in-progress'), wp('WP-02', 'Bad </script><b>', 'authorized'), wp('WP-03', 'Closed', 'completed')],
+  workPackages: [wp('WP-01', 'Open one', 'in-progress'), wp('WP-02', 'Bad </script><b>', 'authorized'), wp('WP-03', 'Closed', 'completed'), wp('WP-04', 'Shelved', 'archived')],
   risks: [], issues: [], approvals: [], openBlockers: 0, unthemedNotes: [], errors: [],
 }
 
@@ -25,7 +25,8 @@ test('the board embeds the work themes and holds the form tabs and the page scri
   const page = renderBoard({ projects: [PROJECT], refreshedAt: 0, errors: [] })
   const json = page.slice(page.indexOf('<script type="application/json" id="data">') + 42, page.indexOf('</script>'))
   const data = JSON.parse(json)
-  expect(data.projects[0].themes.map((w: WorkPackage) => w.id)).toEqual(['WP-01', 'WP-02'])
+  // A completed work package stays a work theme until archived.
+  expect(data.projects[0].themes.map((w: WorkPackage) => w.id)).toEqual(['WP-01', 'WP-02', 'WP-03'])
   expect(data.projects[0].themes[1].title).toBe('Bad </script><b>')
   expect(json).not.toContain('</script>')
   for (const label of ['Recap', 'Roles', 'Documents', 'Work packages', 'Risks', 'Issues', 'Approvals', 'Work themes']) expect(page).toContain(label)
