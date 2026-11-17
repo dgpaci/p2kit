@@ -262,8 +262,8 @@ For the work themes — the linked work packages of the current stage whose stat
 `archived` nor `cancelled` — at most every 5 minutes per work package (the Refresh button and `/pm-desk` read it
 at once), the desk reads the forge of the repo's `origin` (`github.com` → GitHub through `gh api`;
 any other host → Forgejo REST with the `fj` token of that host from
-`~/Library/Application Support/forgejo-cli.forgejo-cli/keys.json`). GET only — the desk never
-writes to a forge. `issue` → the issue's title and state; `milestone` → the milestone with that
+`~/Library/Application Support/forgejo-cli.forgejo-cli/keys.json`). GET only — reading never
+writes to a forge; the one desk action that does is *Create package* (see *Desk actions*). `issue` → the issue's title and state; `milestone` → the milestone with that
 title, shown `<title> <closed>/<open+closed>` with its due day — the count covers issues and pull
 requests alike — and every issue and pull request in it, any state (GitHub
 `issues?milestone=<number>&state=all`, Forgejo `issues?state=all&milestones=<id>`, up to 5 pages),
@@ -492,6 +492,43 @@ actions:
 `/pm-report` drafts the Highlight Report for the period `last_highlight` (or `stage.start`) →
 today and, after the user's OK, saves it as `reports/<date>-highlight.md` and sets
 `reporting.last_highlight` to today, which moves the next report date.
+
+## Desk actions
+
+What acts directly and what opens a session is set in [scope.md](scope.md). An action changes one
+line of one `.pm/` file — or, for a package, the forge and one new work package file — only after a
+preview the PM confirms; nothing is committed.
+
+| Action | Change | Allowed |
+|---|---|---|
+| Archive | `status: completed` → `archived` | a `completed` work package |
+| Mark completed | `status:` → `completed`, the Board's decision stated by the PM | `authorized` or `in-progress` |
+| Horizon, rank | `horizon:` (`now` / `next` / `later`, or removed), `rank:` (1–999, or removed) | any work package |
+| Link | `issue:` (a number), `milestone:` (a title, quoted within the YAML subset), `branch:` | any work package |
+| Close / reopen a note | `status:` of the note of `commit-notes.yaml` with that `sha` and that exact `text` | a flow-map note line |
+| Create package | the milestone (created or reused), its items, a new `WP-<nn>.md` (`status: draft`) | open issues and pull requests |
+| Create work package | a new `WP-<nn>.md` for an existing milestone, listing its open items | a milestone no work package carries |
+
+A missing key is added before the closing `---`; a key written twice, a value already set, or a note
+matching no line or more than one is refused, and so is a change to a file that changed since its
+preview. Items already in another milestone move only when ticked in the preview.
+
+**Browser page.** `server/desk_server.py`, standard-library Python 3, serves the page on
+`127.0.0.1` at a random port. The mod starts it on *Open in browser* (or reuses one another session
+started) and writes nothing else; the helper writes `~/.claude/p2kit/desk-server.json`
+(`{ port, pid }`). `GET /` is the page with a per-session token, `GET /desk.json` the snapshot;
+`POST /action` returns `{ preview, hash }`, and the same request with `confirm: <hash>` applies it
+only if the preview, computed again, has the same hash. A request is refused (403) unless its
+`Host` is `127.0.0.1:<port>` or `localhost:<port>`, its `Origin` the same, and its `X-P2kit-Token`
+the page's token; only projects of the registry are touched. After a write the helper prints
+`changed <path>`, the mod reads the projects again, and the page reloads once the snapshot's
+`refreshedAt` moves. Forge writes use `gh api` on GitHub and the `fj` token on Forgejo. With no
+`python3`, *Open in browser* opens the file: Archive, Link, Create package and note buttons become
+links to a session with their skill, and the others are not offered.
+
+**Pane.** The Desktop pane writes the file itself (`hooks/edits.ts`, the helper's rules, checked
+by both suites on `server/edit-cases.mjs`): Archive and Mark completed in a work theme, close /
+reopen on a note, move / place in the Roadmap tab, each confirmed in a dialog showing the line.
 
 ## The desk snapshot
 

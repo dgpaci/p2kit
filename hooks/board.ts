@@ -1,4 +1,4 @@
-import { getPackageLink, getSessionLink } from './actions'
+import { getLinkBase, getPackageLink, getSessionLink } from './actions'
 import { getMilestonePackage } from './milestones'
 import { getWorkThemes } from './project'
 import type { Project } from '../types'
@@ -37,7 +37,7 @@ export function renderBoard(input: BoardInput): string {
   const data = {
     projects: input.projects.map(project => ({
       ...project, sessionLink: getSessionLink(project), themes: getWorkThemes(project), blockers: getOpenBlockers(project),
-      packageLink: getPackageLink(project, []), milestonePackages: getMilestonePackages(project),
+      packageLink: getPackageLink(project, []), linkBase: getLinkBase(project), milestonePackages: getMilestonePackages(project),
     })),
     refreshedAt: new Date(input.refreshedAt).toISOString(),
     errors: input.errors,
@@ -162,6 +162,19 @@ tr.checked td { background: color-mix(in srgb, var(--on) 8%, transparent); }
 .nowp { color: var(--dim); font-style: italic; margin-right: 8px; }
 .group-head { padding: 6px 12px; background: var(--chip); font-size: 13px; border-top: 1px solid var(--line); }
 .group-head:first-child { border-top: 0; }
+button.primary, button.btn-primary { background: var(--on); border-color: var(--on); color: #fff; font-weight: 600; }
+.act { font-size: 12px; padding: 1px 8px; margin-left: 6px; }
+.place select, .place input { font: inherit; font-size: 12px; margin-left: 6px; }
+.place input { width: 52px; }
+.dialog { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 60px 16px; }
+.dialog-box { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; width: min(640px, 100%); max-height: calc(100vh - 120px); overflow: auto; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
+.dialog-box h3 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--fg); margin: 0 0 10px; }
+.dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.dialog-row { display: flex; gap: 8px; } .dialog-row input { flex: 1; }
+.dialog input[type=text], .dialog select { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.diff { font-family: ui-monospace, monospace; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff .del { color: var(--red); } .diff .add { color: var(--green); }
+.warn { color: var(--amber); }
 @media (max-width: 720px) {
   .theme-row { grid-template-columns: 18px 1fr; } .theme-row .forge { grid-column: 2; justify-content: flex-start; }
   .theme-row > :nth-child(3) { grid-column: 2; }
@@ -212,6 +225,131 @@ const iterationFact = it => el('span', { className: it.isOverdue ? 'err' : '', t
 const missingOf = (p, number) => (p.forgeIssues.find(i => i.number === number) || {}).missing || []
 const notReadyPill = missing => missing.length ? Object.assign(pill('notready', 'notready'), { title: 'missing: ' + missing.join(', ') }) : null
 
+// Desk actions. Served by the desk helper (server/desk_server.py), the page carries its token: every action is previewed, then
+// applied on Confirm only while its file is still as previewed. Opened from disk the page cannot write: an action becomes the
+// link to a session with its skill, or is not offered. Nothing is committed.
+const server = window.P2KIT_SERVER || null
+let dialogOpen = false
+let current = null
+const skillLink = (p, skill, args) => p.linkBase + encodeURIComponent('[p2kit] Use the p2kit:' + skill + ' skill with: ' + args)
+async function post(body) {
+  const res = await fetch('/action', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-P2kit-Token': server.token }, body: JSON.stringify(body) })
+  const answer = await res.json().catch(() => ({ error: 'HTTP ' + res.status }))
+  if (!res.ok) throw new Error(answer.error || 'HTTP ' + res.status)
+  return answer
+}
+const snapshotTime = () => fetch('/desk.json', { cache: 'no-store' }).then(r => r.json()).then(s => s.refreshedAt).catch(() => '')
+function closeDialog() {
+  const open = document.getElementById('dialog')
+  if (open) open.remove()
+  dialogOpen = false
+  draw()
+}
+function openDialog(title, ...content) {
+  const open = document.getElementById('dialog')
+  if (open) open.remove()
+  dialogOpen = true
+  const box = el('div', { className: 'dialog-box' }, el('h3', { textContent: title }), ...content)
+  const back = el('div', { className: 'dialog', id: 'dialog' }, box)
+  back.onclick = e => { if (e.target === back) closeDialog() }
+  document.body.append(back)
+  return box
+}
+// replaceChildren with el's rule: null, undefined and false are left out.
+const fill = (box, ...children) => box.replaceChildren(...children.filter(c => c !== null && c !== undefined && c !== false))
+const buttons = (...list) => el('div', { className: 'dialog-buttons' }, ...list)
+const closeButton = (label = 'Close') => el('button', { textContent: label, onclick: closeDialog })
+const failed = (box, title, error) => fill(box, el('h3', { textContent: title }), el('p', { className: 'err', textContent: error.message }), buttons(closeButton()))
+// An action button with the helper; without it, the session link of its skill when there is one.
+function actionButton(label, run, fallback) {
+  if (server) return el('button', { className: 'act', textContent: label, onclick: e => { e.stopPropagation(); run() } })
+  return fallback ? el('a', { className: 'btn act', href: fallback, textContent: label, title: 'opens a Claude session: the desk helper is not running', onclick: e => e.stopPropagation() }) : null
+}
+// What an action will change: the line before and after, or the plan of a package with the items to move picked here.
+function previewOf(preview, extra) {
+  if (preview.kind !== 'package') return [el('p', { className: 'dim mono', textContent: preview.file }),
+    ...preview.changes.map(c => el('div', { className: 'diff' }, el('div', { className: 'dim', textContent: 'line ' + c.line }),
+      c.before ? el('div', { className: 'del', textContent: '- ' + c.before }) : null, c.after ? el('div', { className: 'add', textContent: '+ ' + c.after }) : null))]
+  const m = preview.milestone
+  extra.move = []
+  const item = i => el('div', { textContent: i.ref + ' ' + i.title })
+  return [
+    el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
+    el('p', {}, el('strong', { textContent: (m.action === 'create' ? 'Create' : 'Reuse') + ' milestone ' }), m.title, m.closed ? el('span', { className: 'warn', textContent: ' (closed)' }) : null),
+    preview.assign.length ? el('div', {}, el('h3', { textContent: 'Assign to it' }), ...preview.assign.map(item)) : null,
+    preview.others.length ? el('div', {}, el('h3', { textContent: 'In another milestone: tick to move' }), ...preview.others.map(i => el('label', { style: 'display:block' },
+      el('input', { type: 'checkbox', onchange: e => { e.target.checked ? extra.move.push(i.ref) : extra.move.splice(extra.move.indexOf(i.ref), 1) } }), ' ' + i.ref + ' ' + i.title + ' · ' + i.milestone))) : null,
+    preview.skipped.length ? el('div', {}, el('h3', { textContent: 'Left out' }), ...preview.skipped.map(i => el('div', { className: 'dim', textContent: i.ref + ' · ' + i.reason }))) : null,
+    el('h3', { textContent: 'Work package' }),
+    preview.wp.action === 'create' ? el('div', {}, el('p', { className: 'dim mono', textContent: preview.wp.file }), el('div', { className: 'diff add', textContent: preview.wp.text }))
+      : el('p', { textContent: preview.wp.id + ' already carries the milestone: nothing written' }),
+  ]
+}
+// Preview, then Confirm: the helper applies it only if the preview, computed again, is the same; then the desk is read again.
+async function act(p, request, note) {
+  const box = openDialog('Preview', el('p', { className: 'dim', textContent: 'Reading…' }))
+  const extra = {}
+  let answer
+  try { answer = await post(Object.assign({ project: p.path }, request)) } catch (error) { return failed(box, 'Not possible', error) }
+  fill(box, el('h3', { textContent: answer.preview.summary }), note ? el('p', { className: 'warn', textContent: note }) : null, ...previewOf(answer.preview, extra),
+    buttons(closeButton('Cancel'), el('button', { className: 'primary', textContent: 'Confirm', onclick: () => apply(p, request, answer.hash, extra, box) })))
+}
+async function apply(p, request, hash, extra, box) {
+  fill(box, el('p', { className: 'dim', textContent: 'Writing…' }))
+  const before = await snapshotTime()
+  let result
+  try { result = await post(Object.assign({ project: p.path }, request, extra, { confirm: hash })) } catch (error) { return failed(box, 'Not applied', error) }
+  fill(box, el('h3', { textContent: result.summary }), el('p', { className: 'ok', textContent: 'Done: ' + result.done.join(', ') }),
+    el('p', { className: 'dim', textContent: 'Nothing is committed. Reading the desk again…' }))
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 1500))
+    const now = await snapshotTime()
+    if (now && now !== before) return location.reload()
+  }
+  box.append(el('p', { className: 'dim', textContent: 'The desk is not read again yet: reload the page later.' }), buttons(closeButton()))
+}
+// Archive a completed work package; completing one is the Board's decision, which the PM confirms.
+function statusAction(p, w) {
+  if (w.status === 'completed') return actionButton('Archive', () => act(p, { kind: 'wp-status', target: w.id, value: 'archived' }), skillLink(p, 'pm-archive', w.id))
+  if (w.status === 'in-progress' || w.status === 'authorized') return actionButton('Mark completed', () => act(p, { kind: 'wp-status', target: w.id, value: 'completed' },
+    'Completing a work package is a decision of the Project Board: confirm only if the Board has taken it.'), null)
+  return null
+}
+function linkAction(p, w) {
+  return actionButton('Link…', () => {
+    const field = el('select', {}, ...['issue', 'milestone', 'branch'].map(f => el('option', { value: f, textContent: f })))
+    const value = el('input', { type: 'text', placeholder: '498, a milestone title or a branch' })
+    const preview = () => act(p, { kind: 'wp-link', target: w.id, field: field.value, value: field.value === 'issue' ? Number(value.value.replace('#', '')) : value.value.trim() })
+    value.onkeydown = e => { if (e.key === 'Enter') preview() }
+    openDialog('Link ' + w.id + ' ' + w.title, el('div', { className: 'dialog-row' }, field, value), buttons(closeButton('Cancel'), el('button', { className: 'primary', textContent: 'Preview', onclick: preview })))
+    value.focus()
+  }, skillLink(p, 'pm-link', w.id))
+}
+function noteAction(n) {
+  const p = current
+  if (!p) return null
+  const value = n.status === 'open' ? 'closed' : 'open'
+  return actionButton(value === 'closed' ? 'Close' : 'Reopen', () => act(p, { kind: 'note-status', target: { sha: n.sha, text: n.text }, value }),
+    skillLink(p, 'pm-note', (value === 'closed' ? 'close' : 'reopen') + ' the note on ' + n.sha + ': ' + n.text))
+}
+// Horizon and rank of a work package, each change previewed; only with the helper.
+function placeControls(p, w) {
+  if (!server) return null
+  const horizon = el('select', { title: 'horizon', onchange: () => act(p, { kind: 'wp-horizon', target: w.id, value: horizon.value }) },
+    ...[['', '—'], ['now', 'Now'], ['next', 'Next'], ['later', 'Later']].map(([v, l]) => el('option', { value: v, textContent: l, selected: w.horizon === v })))
+  const rank = el('input', { type: 'number', min: 1, title: 'rank', value: w.rank === null ? '' : String(w.rank),
+    onchange: () => act(p, { kind: 'wp-rank', target: w.id, value: rank.value === '' ? '' : Number(rank.value) }) })
+  return el('span', { className: 'place' }, horizon, rank)
+}
+function packageDialog(p, refs) {
+  const title = el('input', { type: 'text', placeholder: 'one to three words' })
+  const preview = () => title.value.trim() && act(p, { kind: 'package', refs, title: title.value.trim() })
+  title.onkeydown = e => { if (e.key === 'Enter') preview() }
+  openDialog('Package ' + refs.join(' '), el('p', { className: 'dim', textContent: 'The title names the milestone and the work package.' }), el('div', { className: 'dialog-row' }, title),
+    buttons(closeButton('Cancel'), el('button', { className: 'primary', textContent: 'Preview', onclick: preview })))
+  title.focus()
+}
+
 let route = decodeURIComponent(location.hash.slice(1))
 const go = r => { route = r; history.replaceState(null, '', r ? '#' + encodeURIComponent(r) : location.pathname); draw() }
 const link = (text, r, className = '') => el('a', { href: '#', className, textContent: text, onclick: e => { e.preventDefault(); go(r) } })
@@ -241,7 +379,7 @@ function tableOf(head, rows) {
 
 function noteLine(n) {
   const open = n.kind === 'blocker' && n.status === 'open'
-  return el('div', { className: 'note ' + (open ? 'err' : 'dim'), textContent: n.kind + ' · ' + n.status + ' · ' + n.text + (n.date ? ' (' + n.date + ')' : '') })
+  return el('div', { className: 'note ' + (open ? 'err' : 'dim') }, n.kind + ' · ' + n.status + ' · ' + n.text + (n.date ? ' (' + n.date + ')' : ''), noteAction(n))
 }
 const shaNote = n => el('div', {}, el('span', { className: 'mono', textContent: n.sha.slice(0, 7) + ' ' }), noteLine(n))
 
@@ -344,7 +482,7 @@ function themePanel(p, w) {
   const noted = d.commits.filter(c => c.notes.length)
   return [
     el('p', {}, el('strong', { textContent: w.id + ' ' + w.title }), ' ',
-      el('span', { className: 'dim', textContent: [w.status, d.issue === null ? '' : '#' + d.issue, d.milestone && 'milestone ' + d.milestone, d.ref || d.branch, d.base && 'over ' + d.base].filter(Boolean).join(' · ') })),
+      el('span', { className: 'dim', textContent: [w.status, d.issue === null ? '' : '#' + d.issue, d.milestone && 'milestone ' + d.milestone, d.ref || d.branch, d.base && 'over ' + d.base].filter(Boolean).join(' · ') }), statusAction(p, w)),
     el('div', { className: 'forge' }, ...forgePills(d)),
     el('h3', { textContent: 'Phases' }),
     phaseTable(d),
@@ -360,7 +498,7 @@ function themePanel(p, w) {
   ]
 }
 
-const wpLink = (p, w) => w.delivery ? link([w.delivery.issue === null ? '' : '#' + w.delivery.issue, w.delivery.milestone, w.delivery.branch].filter(Boolean).join(' · ') || 'theme', p.path + '/theme/' + w.id) : el('span', { className: 'dim', textContent: '—' })
+const wpLink = (p, w) => w.delivery ? link([w.delivery.issue === null ? '' : '#' + w.delivery.issue, w.delivery.milestone, w.delivery.branch].filter(Boolean).join(' · ') || 'theme', p.path + '/theme/' + w.id) : linkAction(p, w) || el('span', { className: 'dim', textContent: '—' })
 
 const STATUS_LABEL = { review: 'review asked', inprogress: 'in progress', todo: 'to do', waiting: 'waiting for review', stalled: 'stalled' }
 // Member filter of the Team tab: page-local, everyone shown when none is picked; another project starts unfiltered.
@@ -405,9 +543,10 @@ function activity(p) {
   const refs = [...pickedItems.values()]
   const selectionBar = refs.length
     ? el('div', { className: 'activity-bar' }, el('strong', { textContent: refs.length + ' selected' }), el('span', { className: 'refs', textContent: refs.join(' ') }),
-        el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: 'Create package' }),
+        server ? el('button', { className: 'btn-primary', textContent: 'Create package', onclick: () => packageDialog(p, refs) })
+          : el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: 'Create package' }),
         el('a', { href: '#', textContent: 'clear', onclick: e => { e.preventDefault(); pickedItems.clear(); draw() } }),
-        el('span', { className: 'dim hint', textContent: 'opens a Claude session on ' + p.name + ' with the pm-package skill: ' + refs.join(' ') }))
+        el('span', { className: 'dim hint', textContent: server ? 'previews the milestone and the work package, then writes them on Confirm' : 'opens a Claude session on ' + p.name + ' with the pm-package skill: ' + refs.join(' ') }))
     : el('div', { className: 'activity-bar idle dim', textContent: 'Check issues or pull requests to group them into a work package.' })
 
   const milestoneRow = m => {
@@ -423,7 +562,8 @@ function activity(p) {
       el('div', { className: 'wp' }, wp
         ? el('a', { href: '#', className: 'wp-link', onclick: e => { e.preventDefault(); go(p.path + '/theme/' + wp.id) } }, el('span', { className: 'mono', textContent: wp.id + ' ' }), wp.title)
         : el('span', {}, el('span', { className: 'nowp', textContent: 'no work package' }),
-            el('a', { className: 'btn', href: packageLink(p, ['--milestone', "'" + m.title + "'"]), textContent: 'Create work package' }))))
+            server ? el('button', { textContent: 'Create work package', onclick: () => act(p, { kind: 'package', title: m.title, fromMilestone: true }) })
+              : el('a', { className: 'btn', href: packageLink(p, ['--milestone', "'" + m.title + "'"]), textContent: 'Create work package' }))))
   }
 
   const pullRow = pr => el('tr', { className: rowClass('p' + pr.number) }, pick('p' + pr.number, 'PR #' + pr.number),
@@ -532,9 +672,10 @@ function roadmap(p) {
   const wps = ids => ids.map(id => p.workPackages.find(w => w.id === id)).filter(Boolean)
   return el('div', {},
     ...HORIZONS.map(([key, label]) => el('div', {}, el('h3', { textContent: label }), p.roadmap[key].length
-      ? tableOf(['', 'Title', 'Stage', 'Status', 'Due'], wps(p.roadmap[key]).map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.due]))
+      ? tableOf(['', 'Title', 'Stage', 'Status', 'Due'], wps(p.roadmap[key]).map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, el('span', {}, w.due, placeControls(p, w))]))
       : el('p', { className: 'dim', textContent: 'Nothing planned.' }))),
-    p.roadmap.unplaced.length ? el('p', { className: 'dim', textContent: 'Not on the roadmap: ' + p.roadmap.unplaced.join(', ') }) : null)
+    p.roadmap.unplaced.length ? el('p', { className: 'dim', textContent: 'Not on the roadmap: ' + p.roadmap.unplaced.join(', ') }) : null,
+    server && p.roadmap.unplaced.length ? tableOf(['', 'Title', 'Place'], wps(p.roadmap.unplaced).map(w => [w.id, w.title, placeControls(p, w)])) : null)
 }
 
 // One entry per tab: [id, label, count(p), render(p)].
@@ -548,7 +689,7 @@ const TABS = [
   ['metrics', 'Metrics', p => p.flow ? p.flow.windows[0].merge.count : 0, metrics],
   ['documents', 'Documents', p => p.documents.length, documents],
   ['wps', 'Work packages', p => p.workPackages.length, p => el('div', {}, p.effort ? el('p', { textContent: stageEffort(p.effort) }) : null, tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Estimate', 'Actual', 'Deviation', 'Link'],
-    p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, w.teamManager, w.due, hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation), wpLink(p, w)])))],
+    p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), el('span', {}, w.status, statusAction(p, w)), w.teamManager, w.due, hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation), wpLink(p, w)])))],
   ['iterations', 'Iterations', p => p.iterations.length, iterations],
   ['lessons', 'Lessons', p => openActions(p).length, lessons],
   ['roadmap', 'Roadmap', placedCount, roadmap],
@@ -585,10 +726,12 @@ function form(p, sub) {
 
 function draw() {
   const p = data.projects.filter(x => route === x.path || route.startsWith(x.path + '/')).sort((a, b) => b.path.length - a.path.length)[0]
+  current = p || null
   document.getElementById('app').replaceChildren(...(p ? form(p, route.slice(p.path.length + 1)) : overview()))
 }
 
 draw()
 // A reload would drop the picked issues and pull requests: it waits until nothing is picked.
-setInterval(() => { if (!pickedItems.size) location.reload() }, data.reloadMs)
+// An open dialog holds it too.
+setInterval(() => { if (dialogOpen) return; if (!pickedItems.size) location.reload() }, data.reloadMs)
 `

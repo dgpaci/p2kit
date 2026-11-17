@@ -31,6 +31,15 @@ export function getPackageLink(project: Project, refs: string[]): string {
   return `${DEEP_LINK}?${params.toString().replaceAll('+', '%20')}${tail}`
 }
 
+/**
+ * The Claude Desktop link that opens a new session in the project's repo, ending in `&q=`: the browser page appends the
+ * URI-encoded prompt naming a skill, the session link of an action when the desk helper is not running.
+ */
+export function getLinkBase(project: Project): string {
+  const params = new URLSearchParams({ folder: project.path })
+  return `${DEEP_LINK}?${params.toString().replaceAll('+', '%20')}&q=`
+}
+
 /** Opens a new Desktop session in the project's repo; the log says why when it does not open. */
 export async function openSession($: EngineInterface, project: Project): Promise<void> {
   const { exitCode, stderr } = await $.process.run(['open', getSessionLink(project)])

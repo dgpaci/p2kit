@@ -87,3 +87,7 @@ allowed.
   two `wps` lines; a new tab goes after an existing line, never between `wps` and `iterations` or `iterations` and `lessons`.
 - `claude plugin test` does not typecheck: the hand-built `Project` fixtures of `tests/board.test.ts` and `tests/team-desk.test.tsx`
   keep passing when `Project` gains a field, so board and pane code must tolerate the field missing (`p.effort ? … : null`).
+- A hooks module and its tests import only code files (`.ts`, `.mjs`, …), never `.json`: data shared with the Python helper is
+  `server/edit-cases.mjs`, one JSON array behind `export default`, which `server/test_desk_server.py` reads by splitting it off.
+- The browser actions go through `server/desk_server.py` (stdlib only, its tests `python3 -m unittest discover -s server`); keep its
+  rules and messages equal to `hooks/edits.ts`, the pane's copy, and add a shared case for any change.

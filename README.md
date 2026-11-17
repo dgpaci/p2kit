@@ -29,8 +29,12 @@ written from scratch.
   and actual effort in hours: the desk shows each one's deviation and the current stage's, which
   feeds an `effort` tolerance. A Roadmap tab places the open work packages in Now, Next and Later
   (`/pm-roadmap`). The same desk is a local browser page, where
-  checked issues and pull requests open a session on `/pm-package` to group them into a work
-  package.
+  checked issues and pull requests are grouped into a work package.
+- **Actions on the desk.** Archive or complete a work package, place it on the roadmap, link it,
+  close a note, package issues: each shows the change and writes it on Confirm, without opening a
+  session; text — reports, digests, presentations — is still drafted in a session with its skill.
+  In the browser the actions need **Python 3** (a standard-library helper the mod starts); without
+  it the page stays read-only. What acts directly and why: [docs/scope.md](docs/scope.md).
 - **Work themes.** The work packages of a stage run in parallel; one linked with `/pm-link` to an
   issue, a milestone or a branch shows the phases of the phased-workflow plan found on its branch,
   each with what it adds, read with local git — or, with no plan, a bar of its milestone's closed
@@ -76,6 +80,10 @@ claude plugin validate .
 
 ```bash
 claude plugin test .
+```
+
+```bash
+python3 -m unittest discover -s server
 ```
 
 ## License
