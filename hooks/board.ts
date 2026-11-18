@@ -218,7 +218,15 @@ const data = JSON.parse(document.getElementById('data').textContent)
 // A link to the web (forge issues and pull requests) or to a file (documents) opens in a new tab, so the desk stays open.
 const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); if (tag === 'a' && /^(https?|file):/.test(node.getAttribute('href') || '')) Object.assign(node, { target: '_blank', rel: 'noopener' }); node.append(...children.filter(c => c !== null && c !== undefined && c !== false)); return node }
 const dot = light => el('span', { className: 'dot', title: 'tolerances: ' + light, style: 'background: var(--' + light + ')' })
-const fileLink = (path, label) => el('a', { href: 'file://' + encodeURI(path), textContent: label })
+// Served over http the page cannot follow a file:// link (the browser drops the click): the desk helper opens the file in its
+// default application. Opened from disk, the file:// link works as it is.
+const fileLink = (path, label) => el('a', { href: 'file://' + encodeURI(path), textContent: label, onclick: e => {
+  if (!window.P2KIT_SERVER) return
+  e.preventDefault()
+  e.stopPropagation()
+  fetch('/open', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-P2kit-Token': window.P2KIT_SERVER.token }, body: JSON.stringify({ path }) })
+    .then(r => r.ok ? null : r.json().catch(() => ({})).then(a => alert('Cannot open ' + path + ': ' + (a.error || 'HTTP ' + r.status))))
+} })
 const sessionLink = p => el('a', { href: p.sessionLink, textContent: 'Open session', onclick: e => e.stopPropagation() })
 const bar = (done, total) => el('span', {}, el('span', { className: 'bar' }, el('i', { style: 'width:' + (total ? Math.round(100 * done / total) : 0) + '%' })), done + '/' + total)
 // The milestone's items closed over all of them, from its item list when read, else from its counts; null without a milestone.
@@ -615,9 +623,6 @@ function overview() {
             p.effort ? effortFact(p) : null,
             el('span', { className: p.highRisks ? 'err' : '', textContent: 'high risks ' + p.highRisks }),
             el('span', { className: p.openBlockers ? 'err' : '', textContent: 'blockers ' + p.openBlockers }),
-            el('span', { textContent: 'open issues ' + p.openIssues }),
-            el('span', { className: p.nextReport.isOverdue ? 'err' : '', textContent: 'next report ' + (p.nextReport.due || '—') + (p.nextReport.isOverdue ? ' overdue' : '') }),
-            el('span', { textContent: 'last retro ' + (p.lastRetro || '—') }),
             p.errors.length ? el('span', { className: 'err', textContent: '⚠ ' + p.errors.length + ' errors' }) : null,
             p.notReady ? pill('notready ' + p.notReady, 'notready') : null,
             ...wipBadges(p))),
@@ -680,9 +685,6 @@ function recap(p) {
     el('div', { className: 'grid2' },
       el('div', {}, el('h3', { textContent: 'Tolerances' }), tableOf(['', 'Area', 'Used / limit'], p.tolerances.map(t => [dot(t.light), t.area, t.used + ' / ' + t.limit + ' ' + t.unit + (t.isComputed ? ' · from work packages' : '')]))),
       el('div', {}, el('h3', { textContent: 'Needs attention' }), ...attention(p))),
-    el('h3', { textContent: 'Work themes' }),
-    tableOf(['', 'Theme', 'Progress', 'Forge'], p.themes.map(w => [link(w.id, p.path + '/theme/' + w.id, 'mono'), el('span', {}, w.title, completedPill(w)),
-      el('span', {}, phaseBar(w.delivery), el('span', { className: 'dim', textContent: w.delivery.summary.current })), el('span', { className: 'forge' }, ...forgePills(w.delivery))])),
     ...(p.unthemedNotes.length ? [el('h3', { textContent: 'Notes without a work theme' }), ...p.unthemedNotes.map(shaNote)] : []),
   ]
 }
@@ -747,6 +749,9 @@ function team(p) {
   const shown = picked.size ? p.team.filter(m => picked.has(m.person)) : p.team
   const toggle = name => { picked.has(name) ? picked.delete(name) : picked.add(name); draw() }
   return el('div', {},
+    // The roles on top, one chip each with its people; each person's card below names their own roles.
+    el('div', { className: 'members' }, el('span', { className: 'label', textContent: 'Roles' }),
+      ...(p.roles.length ? p.roles.map(r => pill(r.label + ' · ' + (r.people.join(', ') || '—'), r.people.length ? '' : 'notready')) : [el('span', { className: 'dim', textContent: 'none set' })])),
     el('div', { className: 'members' }, el('span', { className: 'label', textContent: 'Members' }),
       ...p.team.map(m => el('button', { className: 'member-chip' + (picked.has(m.person) ? ' sel' : ''), onclick: () => toggle(m.person) }, m.person)),
       picked.size ? el('a', { href: '#', textContent: 'all', onclick: e => { e.preventDefault(); picked.clear(); draw() } }) : null),
@@ -873,12 +878,16 @@ function metrics(p) {
 function documents(p) {
   const own = p.documents.filter(d => !d.folder)
   const folders = [...new Set(p.documents.filter(d => d.folder).map(d => d.folder))]
-  if (!p.documents.length) return el('p', { className: 'dim', textContent: 'None yet.' })
+  const open = openLogActions(p).length
   return el('div', {},
+    p.documents.length ? null : el('p', { className: 'dim', textContent: 'None yet.' }),
     own.length ? tableOf(['Document', 'Status', 'Version'], own.map(d => [fileLink(d.path, d.title), d.status, d.version])) : null,
     ...folders.map(f => el('div', {},
       el('h3', { textContent: f }),
-      tableOf(['Document', 'File'], p.documents.filter(d => d.folder === f).map(d => [fileLink(d.path, d.title), el('span', { className: 'dim mono', textContent: d.path.split('/').pop() })])))))
+      tableOf(['Document', 'File'], p.documents.filter(d => d.folder === f).map(d => [fileLink(d.path, d.title), el('span', { className: 'dim mono', textContent: d.path.split('/').pop() })])))),
+    // The Daily Log closes the tab.
+    blockTitle('Daily log', open ? open + ' open actions' : ''),
+    dailyLog(p))
 }
 
 // The Lessons Log: the last retrospective, the actions open first, the lessons newest first.
@@ -908,18 +917,48 @@ function iterations(p) {
   return tableOf(['#', 'Goal', 'Dates', 'WPs', 'Status', 'Result'], p.iterations.slice().reverse().map(it => [String(it.number), it.goal, (it.start || '—') + ' → ' + (it.end || '—'), wps(it), it.status, it.result]))
 }
 
-// The roadmap: a block per horizon in p.roadmap order, then the open work packages with no horizon.
+// Work packages grouped by roadmap horizon: Now, Next, Later in p.roadmap order, then every other one as Not placed (open with
+// no horizon, or closed). Estimate, actual and deviation are columns only when some work package carries one of them.
 const HORIZONS = [['now', 'Now'], ['next', 'Next'], ['later', 'Later']]
-const placedCount = p => p.roadmap.now.length + p.roadmap.next.length + p.roadmap.later.length
-function roadmap(p) {
-  if (!placedCount(p) && !p.roadmap.unplaced.length) return el('p', { className: 'dim', textContent: "No roadmap yet: run /pm-roadmap in the project's repo." })
-  const wps = ids => ids.map(id => p.workPackages.find(w => w.id === id)).filter(Boolean)
+function workPackages(p) {
+  if (!p.workPackages.length) return el('p', { className: 'dim', textContent: "None yet: run /pm-initiate or /pm-package in the project's repo." })
+  const byId = ids => ids.map(id => p.workPackages.find(w => w.id === id)).filter(Boolean)
+  const placed = new Set(HORIZONS.flatMap(([key]) => p.roadmap[key]))
+  const hasEffort = p.workPackages.some(w => w.estimate !== null || w.actual !== null)
+  const head = ['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', ...(hasEffort ? ['Estimate', 'Actual', 'Deviation'] : []), 'Link', server ? 'Place' : '']
+  // The id opens the work package's own page when it has one (a delivery to follow), else its file.
+  const row = w => [w.delivery ? link(w.id, p.path + '/theme/' + w.id) : fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), el('span', {}, w.status, statusAction(p, w)), w.teamManager, w.due,
+    ...(hasEffort ? [hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation)] : []), wpLink(p, w), placeControls(p, w)]
+  const groups = [...HORIZONS.map(([key, label]) => [label, byId(p.roadmap[key])]), ['Not placed', p.workPackages.filter(w => !placed.has(w.id))]]
+  const empty = groups.filter(g => !g[1].length).map(g => g[0])
   return el('div', {},
-    ...HORIZONS.map(([key, label]) => el('div', {}, el('h3', { textContent: label }), p.roadmap[key].length
-      ? tableOf(['', 'Title', 'Stage', 'Status', 'Due'], wps(p.roadmap[key]).map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), w.status, el('span', {}, w.due, placeControls(p, w))]))
-      : el('p', { className: 'dim', textContent: 'Nothing planned.' }))),
-    p.roadmap.unplaced.length ? el('p', { className: 'dim', textContent: 'Not on the roadmap: ' + p.roadmap.unplaced.join(', ') }) : null,
-    server && p.roadmap.unplaced.length ? tableOf(['', 'Title', 'Place'], wps(p.roadmap.unplaced).map(w => [w.id, w.title, placeControls(p, w)])) : null)
+    p.effort ? el('p', { textContent: stageEffort(p.effort) }) : null,
+    ...groups.filter(g => g[1].length).map(([label, list]) => el('div', {}, blockTitle(label, String(list.length)), tableOf(head, list.map(row)))),
+    empty.length ? el('p', { className: 'dim', textContent: 'Empty: ' + empty.join(' · ') + (placed.size ? '' : " — run /pm-roadmap in the project's repo to place them") }) : null)
+}
+
+// Registers: one section per PRINCE2 register, the non-empty ones first; the empty ones share one line naming the skill that starts
+// each. The PRINCE2 issue register is called Problems here, next to the forge's issues. Risks and problems list every entry, the
+// open ones first; a closed one is dimmed. Entry: [id, label, size(p), subtitle(p), skill that starts it, render(p)].
+const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
+const dimUnlessOpen = (status, cells) => isOpen(status) ? cells : cells.map(c => el('span', { className: 'dim' }, c))
+const REGISTERS = [
+  ['risks', 'Risks', p => p.risks.length, p => p.risks.filter(r => isOpen(r.status)).length + ' open', '/pm-log',
+    p => tableOf(['', 'Risk', 'P × I', 'Status'], openFirst(p.risks).map(r => dimUnlessOpen(r.status, [r.id, r.title, r.probability + ' × ' + r.impact + ' = ' + r.score, r.status])))],
+  ['approvals', 'Approvals', p => p.approvals.length, p => String(p.approvals.length), '/pm-start-up',
+    p => tableOf(['Date', 'Decision', 'By', 'Note'], p.approvals.map(a => [a.date, a.decision, a.by, a.note]))],
+  ['problems', 'Problems', p => p.issues.length, p => p.issues.filter(i => isOpen(i.status)).length + ' open', '/pm-log',
+    p => tableOf(['', 'Problem', 'Type', 'Priority', 'Status'], openFirst(p.issues).map(i => dimUnlessOpen(i.status, [i.id, i.title, i.type, i.priority, i.status])))],
+  ['lessons', 'Lessons', p => p.actions.length + p.lessons.length + (p.lastRetro ? 1 : 0), p => openActions(p).length + ' open actions', '/pm-retro', lessons],
+  ['iterations', 'Iterations', p => p.iterations.length, p => String(p.iterations.length), '/pm-iterate', iterations],
+]
+const registersCount = p => p.risks.filter(r => isOpen(r.status)).length + p.issues.filter(i => isOpen(i.status)).length + openActions(p).length
+function registers(p) {
+  const full = REGISTERS.filter(r => r[2](p))
+  const empty = REGISTERS.filter(r => !r[2](p))
+  return el('div', {},
+    ...full.map(([id, label, , sub, , render]) => el('div', { id: 'register-' + id }, blockTitle(label, sub(p)), render(p))),
+    empty.length ? el('p', { className: 'dim', textContent: 'Empty: ' + empty.map(r => r[1] + ' (' + r[4] + ')').join(' · ') }) : null)
 }
 
 // The Daily Log: a block per day, newest first, its entries in file order; an open action past its due is red.
@@ -980,26 +1019,15 @@ function board(p) {
     ...lanes.map(l => boardLane(p, l)))
 }
 
-// One entry per tab: [id, label, count(p), render(p)].
-// Risks and issues list every entry, the open ones first; a closed one is dimmed.
-const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
-const dimUnlessOpen = (status, cells) => isOpen(status) ? cells : cells.map(c => el('span', { className: 'dim' }, c))
+// One entry per tab after Recap: [id, label, count(p), render(p)].
 const TABS = [
-  ['roles', 'Roles', p => p.roles.length, p => tableOf(['Role', 'People'], p.roles.map(r => [r.label, r.people.join(', ') || '—']))],
-  ['team', 'Team', p => p.team.length, team],
-  ['activity', 'Activity', p => p.forgeIssues.length + p.forgePulls.length, activity],
-  ['metrics', 'Metrics', p => p.flow ? p.flow.windows[0].merge.count : 0, metrics],
   ['board', 'Board', unplannedCount, board],
+  ['activity', 'Activity', p => p.forgeIssues.length + p.forgePulls.length, activity],
+  ['team', 'Team', p => p.team.length, team],
+  ['wps', 'Work packages', p => p.workPackages.length, workPackages],
   ['documents', 'Documents', p => p.documents.length, documents],
-  ['wps', 'Work packages', p => p.workPackages.length, p => el('div', {}, p.effort ? el('p', { textContent: stageEffort(p.effort) }) : null, tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Estimate', 'Actual', 'Deviation', 'Link'],
-    p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), el('span', {}, w.status, statusAction(p, w)), w.teamManager, w.due, hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation), wpLink(p, w)])))],
-  ['iterations', 'Iterations', p => p.iterations.length, iterations],
-  ['lessons', 'Lessons', p => openActions(p).length, lessons],
-  ['roadmap', 'Roadmap', placedCount, roadmap],
-  ['log', 'Daily log', p => openLogActions(p).length, dailyLog],
-  ['risks', 'Risks', p => p.risks.filter(r => isOpen(r.status)).length, p => tableOf(['', 'Risk', 'P × I', 'Status'], openFirst(p.risks).map(r => dimUnlessOpen(r.status, [r.id, r.title, r.probability + ' × ' + r.impact + ' = ' + r.score, r.status])))],
-  ['issues', 'Issues', p => p.issues.filter(i => isOpen(i.status)).length, p => tableOf(['', 'Issue', 'Type', 'Priority', 'Status'], openFirst(p.issues).map(i => dimUnlessOpen(i.status, [i.id, i.title, i.type, i.priority, i.status])))],
-  ['approvals', 'Approvals', p => p.approvals.length, p => tableOf(['Date', 'Decision', 'By', 'Note'], p.approvals.map(a => [a.date, a.decision, a.by, a.note]))],
+  ['registers', 'Registers', registersCount, registers],
+  ['metrics', 'Metrics', p => p.flow ? p.flow.windows[0].merge.count : 0, metrics],
 ]
 
 function form(p, sub) {

@@ -31,9 +31,9 @@ const PANE = {
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } } as const
 
 test('the desk shows the date of the last retrospective and a Lessons tab, in the page and the pane', async ($, on) => {
-  // wf:contract: Overview row, browser page and pane: "last retro <lastRetro>", or "last retro —" when there is none, after the "next report" fact.
+  // wf:contract: Overview row, browser page and pane: no "last retro", "next report" or "open issues" fact; the pane row reads "high risks <n>".
   // wf:contract: Recap, page and pane: in Needs attention one line per open action, "<id> <text>" followed by " #<issue>" when it has one.
-  // wf:contract: A tab with id "lessons", label "Lessons", right after "Iterations" (board.ts TABS and register.tsx tabs), its count the open actions.
+  // wf:contract: A "Lessons" section of the Registers tab (board.ts REGISTERS and register.tsx tabs), its subtitle "<n> open actions".
   // wf:contract: Its body, in this order: "Last retrospective <date>" (or "No retrospective yet."); the actions, open first, with id, text,
   // wf:contract: issue (a link to the forge issue on the page when the origin is a forge, "#<n>" in the pane) and status; then the lessons,
   // wf:contract: newest first, with date, iteration, kind (keep | change) and text. The pane shows one line per action and per lesson with the same fields.
@@ -47,10 +47,10 @@ test('the desk shows the date of the last retrospective and a Lessons tab, in th
   expect(data.projects[0].actions).toEqual(agile.actions)
   expect(data.projects[1].lastRetro).toBe('')
   const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
-  expect(script).toMatch(/'next report ' [^\n]*\n\s+el\('span', \{ textContent: 'last retro ' \+ \(p\.lastRetro \|\| '—'\) \}\),/)
+  for (const gone of ["'last retro '", "'next report '", "'open issues '"]) expect(script).not.toContain(gone)
   expect(script).toContain("...openActions(p).map(a => el('div', { textContent: actionText(a) })),")
   expect(script).toContain("a.id + ' ' + a.text + (a.issue === null ? '' : ' #' + a.issue)")
-  expect(script).toMatch(/\['iterations', 'Iterations', [^\n]*\n {2}\['lessons', 'Lessons', p => openActions\(p\)\.length, lessons\],/)
+  expect(script).toContain("p => openActions(p).length + ' open actions', '/pm-retro', lessons],")
   for (const label of ["'Last retrospective '", "'No retrospective yet.'", "'', 'Action', 'Issue', 'Status'", "'Date', 'Iteration', 'Kind', 'Lesson'", "'/issues/' + number"]) expect(script).toContain(label)
   expect(script).not.toContain('${')
 
@@ -68,14 +68,13 @@ test('the desk shows the date of the last retrospective and a Lessons tab, in th
   await $.command.run(RUN)
 
   const ui = await $.ui.mount(PANE)
-  expect(await ui.find({ type: 'Text', text: 'high risks 0 · open issues 0 · next report — · last retro 2026-11-21' })).toBeTruthy()
-  expect(await ui.find({ type: 'Text', text: 'high risks 0 · open issues 0 · next report — · last retro —' })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: 'high risks 0' })).toBeTruthy()
   await ui.press({ key: 'open:/t/agile' })
   expect(await ui.find({ type: 'Text', text: 'A-002 split the checkout work package #520' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'A-003 pair on the payment API' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'A-001 add a review reminder #512' })).toBeFalsy()
-  expect(await ui.find({ type: 'Button', key: 'tab:lessons', text: 'Lessons 2' })).toBeTruthy()
-  await ui.press({ key: 'tab:lessons' })
+  await ui.press({ key: 'tab:registers' })
+  expect(await ui.find({ type: 'Text', text: 'Lessons · 2 open actions' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'Last retrospective 2026-11-21' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'A-002 · split the checkout work package · #520 · open' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'A-001 · add a review reminder · #512 · done' })).toBeTruthy()
@@ -83,8 +82,7 @@ test('the desk shows the date of the last retrospective and a Lessons tab, in th
   expect(await ui.find({ type: 'Text', text: '2026-11-07 · iteration 1 · keep · short daily sync' })).toBeTruthy()
   await ui.press({ key: 'back' })
   await ui.press({ key: 'open:/t/plain' })
-  expect(await ui.find({ type: 'Button', key: 'tab:lessons', text: 'Lessons 0' })).toBeTruthy()
-  await ui.press({ key: 'tab:lessons' })
-  expect(await ui.find({ type: 'Text', text: 'No retrospective yet.' })).toBeTruthy()
+  await ui.press({ key: 'tab:registers' })
+  expect(await ui.find({ type: 'Text', text: /^Empty: .*Lessons \(\/pm-retro\)/ })).toBeTruthy()
   await ui.unmount()
 })

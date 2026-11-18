@@ -29,7 +29,7 @@ const PANE = {
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 
 test('the browser page has an Activity tab right after Team', () => {
-  // wf:contract: renderBoard embeds each project's milestones and forgeIssues; the TABS list has an "Activity" tab right after "Team",
+  // wf:contract: renderBoard embeds each project's milestones and forgeIssues; the TABS list has an "Activity" tab right after "Board",
   // wf:contract: its count the open issues and pull requests. Its body shows, per milestone, a closed/total bar, the due day, "stalled", "in review"
   // wf:contract: and the milestone's open issues; then a "No milestone" group; with nothing at all, "No open milestone.". The script still compiles.
   const project: Project = {
@@ -44,7 +44,7 @@ test('the browser page has an Activity tab right after Team', () => {
   expect(data.projects[0].forgeIssues).toEqual(project.forgeIssues)
   const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
   // The test sandbox forbids new Function: the tab list and the labels are read from the script text.
-  expect(script).toMatch(/\['team', 'Team', p => p\.team\.length, team\],\n  \['activity', 'Activity', p => p\.forgeIssues\.length \+ p\.forgePulls\.length, /)
+  expect(script).toMatch(/\['board', 'Board', unplannedCount, board\],\n  \['activity', 'Activity', p => p\.forgeIssues\.length \+ p\.forgePulls\.length, /)
   for (const label of ["'No milestone'", "'No open milestone.'", "'stalled '", "'in review '", "'due '", "'overdue'"]) expect(script).toContain(label)
   expect(script).toContain('function draw()')
   expect(script).not.toContain('${')

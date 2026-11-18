@@ -48,9 +48,9 @@ test('the overview lists the registered projects and the name opens one: recap, 
   await ui.press({ key: 'open:/src/portal' })
   expect(await ui.find({ type: 'Text', text: 'cost: 12 / 10 EUR' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /R-1 \[9\] API change/, color: 'red' })).toBeTruthy()
-  await ui.press({ key: 'tab:roles' })
-  expect(await ui.find({ type: 'Text', text: 'Executive: Anna' })).toBeTruthy()
-  await ui.press({ key: 'tab:risks' })
+  await ui.press({ key: 'tab:team' })
+  expect(await ui.find({ type: 'Text', text: /^Roles: Executive · Anna/ })).toBeTruthy()
+  await ui.press({ key: 'tab:registers' })
   expect(await ui.find({ type: 'Text', text: /R-1 \[9\] API change/ })).toBeTruthy()
 
   await ui.press({ key: 'tab:documents' })

@@ -555,6 +555,20 @@ class Server(unittest.TestCase):
         status, body = self.request('POST', '/action', {**action, 'confirm': digest})
         self.assertEqual(status, 409)
 
+    def test_open_needs_the_token_and_a_path_inside_a_project(self):
+        doc = os.path.join(self.p.root, '.pm', 'project.yaml')
+        with unittest.mock.patch.object(ds.subprocess, 'run') as run:
+            self.assertEqual(self.request('POST', '/open', {'path': doc}, **{ds.TOKEN_HEADER: 'x'})[0], 403)
+            self.assertEqual(self.request('POST', '/open', {'path': doc}, Origin='https://evil.example')[0], 403)
+            self.assertEqual(self.request('POST', '/open', {'path': '/etc/hosts'})[0], 409)
+            self.assertEqual(self.request('POST', '/open', {'path': self.p.root + '/../repo-x'})[0], 409)
+            self.assertEqual(self.request('POST', '/open', {'path': os.path.join(self.p.root, 'missing.md')})[0], 409)
+            run.assert_not_called()
+            status, body = self.request('POST', '/open', {'path': doc})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['opened'], doc)
+        self.assertEqual(run.call_args[0][0][1], doc)
+
 
 if __name__ == '__main__':
     unittest.main()

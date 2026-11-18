@@ -354,7 +354,7 @@ export const register: Register = on => {
               {getIterationFact(project)}
               {getEffortFact(project)}
               <Text dimColor wrap="truncate-end">
-                {`high risks ${project.highRisks} · open issues ${project.openIssues} · next report ${project.nextReport.due || '—'} · last retro ${project.lastRetro || '—'}`}
+                {`high risks ${project.highRisks}`}
               </Text>
               {getWipLines(project)}
               {getNotReadyLine(project)}
@@ -396,6 +396,7 @@ export const register: Register = on => {
     // A project held by older code has no dailyLog: read as empty.
     const log = p.dailyLog ?? []
     const logDays = [...new Set(log.map(one => one.date))].sort().reverse()
+    const openLogCount = log.filter(one => one.status === 'open').length
     const openIssues = p.issues.filter(issue => issue.status === 'open')
     // Risks and issues list every entry, the open ones first; a closed one is dimmed.
     const allRisks = [...openRisks, ...p.risks.filter(risk => risk.status !== 'open')]
@@ -413,31 +414,18 @@ export const register: Register = on => {
     const lanes = getBoardLanes(p)
     const tabs: { id: string; label: string; count: number; render: () => unknown }[] = [
       {
-        id: 'roles', label: 'Roles', count: p.roles.length,
-        render: () => p.roles.map(role => <Text wrap="truncate-end">{`${role.label}: ${role.people.join(', ') || '—'}`}</Text>),
-      },
-      {
-        id: 'team', label: 'Team', count: p.team.length,
-        render: () => [
-          <Box flexDirection="row" columnGap={1} flexWrap="wrap">
-            {p.team.map(member => (
-              <Button key={`member:${member.person}`} variant={pickedMembers.includes(member.person) ? 'primary' : 'secondary'} onPress={() => togglePerson(member.person)}>
-                {member.person}
-              </Button>
-            ))}
-          </Box>,
-          ...(pickedMembers.length ? p.team.filter(member => pickedMembers.includes(member.person)) : p.team).map(member => (
-            <Box key={`person:${member.person}`} flexDirection="column">
-              {member.login
-                ? <Text color={member.isOverLimit ? 'red' : undefined} bold wrap="truncate-end">{`${member.person} · @${member.login} · ${member.roles.join(', ')} · WIP ${member.wip}/${member.wipLimit}`}</Text>
-                : <Text dimColor wrap="truncate-end">{`${member.person} · no forge login`}</Text>}
-              {member.items.map(item => (
-                <Text wrap="truncate-end">{`  ${item.kind === 'pr' ? 'PR ' : ''}#${item.number} ${item.title} · ${STATUS_LABEL[item.status]}${item.kind === 'issue' ? notReadySuffix(item.number) : ''}`}</Text>
-              ))}
-              {member.login && member.items.length === 0 && <Text dimColor>{'  No open item.'}</Text>}
-            </Box>
-          )),
-        ],
+        // Board: one block per work package with a milestone, a line per column; the count is the open items in no work package.
+        id: 'board', label: 'Board', count: lanes.at(-1)?.cards.length ?? 0,
+        render: () => lanes.flatMap(lane => {
+          const head = lane.wp
+            ? `${lane.wp} ${lane.title} · ${lane.status || 'no status'}${lane.progress ? ` · ${lane.progress.closed}/${lane.progress.total}` : ''}${lane.reopened ? ` · reopened: ${lane.reopened} open` : ''}`
+            : `Unplanned · ${lane.cards.length} open`
+          const columns = BOARD_COLUMNS.flatMap(([column, label]) => {
+            const list = lane.cards.filter(card => card.column === column)
+            return list.length ? [<Text wrap="truncate-end">{`  ${label}: ${list.map(card => `${card.kind === 'pr' ? 'PR ' : ''}#${card.number} ${card.assignees.length ? card.assignees.map(login => `@${login}`).join(' ') : 'unassigned'}`).join(', ')}`}</Text>] : []
+          })
+          return [<Text bold color={lane.reopened ? 'warning' : undefined} wrap="truncate-end">{head}</Text>, ...(columns.length ? columns : [<Text dimColor>{'  No open item.'}</Text>])]
+        }),
       },
       {
         // Activity: the open milestones with their work package, the open pull requests, the open issues grouped by milestone.
@@ -487,6 +475,131 @@ export const register: Register = on => {
         },
       },
       {
+        id: 'team', label: 'Team', count: p.team.length,
+        render: () => [
+          <Text wrap="wrap">{`Roles: ${p.roles.map(role => `${role.label} · ${role.people.join(', ') || '—'}`).join(' | ') || 'none set'}`}</Text>,
+          <Box flexDirection="row" columnGap={1} flexWrap="wrap">
+            {p.team.map(member => (
+              <Button key={`member:${member.person}`} variant={pickedMembers.includes(member.person) ? 'primary' : 'secondary'} onPress={() => togglePerson(member.person)}>
+                {member.person}
+              </Button>
+            ))}
+          </Box>,
+          ...(pickedMembers.length ? p.team.filter(member => pickedMembers.includes(member.person)) : p.team).map(member => (
+            <Box key={`person:${member.person}`} flexDirection="column">
+              {member.login
+                ? <Text color={member.isOverLimit ? 'red' : undefined} bold wrap="truncate-end">{`${member.person} · @${member.login} · ${member.roles.join(', ')} · WIP ${member.wip}/${member.wipLimit}`}</Text>
+                : <Text dimColor wrap="truncate-end">{`${member.person} · no forge login`}</Text>}
+              {member.items.map(item => (
+                <Text wrap="truncate-end">{`  ${item.kind === 'pr' ? 'PR ' : ''}#${item.number} ${item.title} · ${STATUS_LABEL[item.status]}${item.kind === 'issue' ? notReadySuffix(item.number) : ''}`}</Text>
+              ))}
+              {member.login && member.items.length === 0 && <Text dimColor>{'  No open item.'}</Text>}
+            </Box>
+          )),
+        ],
+      },
+      {
+        // Work packages by roadmap horizon: Now, Next, Later, then every other one as Not placed (open with no horizon, or closed).
+        id: 'wps', label: 'Work packages', count: p.workPackages.length,
+        render: () => {
+          const placedIds = new Set(placed.map(one => one.wp.id))
+          const groups: [string, WorkPackage[]][] = [
+            ...(['now', 'next', 'later'] as const).map(horizon => [HORIZON_LABEL[horizon], placed.filter(one => one.label === HORIZON_LABEL[horizon]).map(one => one.wp)] as [string, WorkPackage[]]),
+            ['Not placed', p.workPackages.filter(wp => !placedIds.has(wp.id))],
+          ]
+          return [
+            <Text mono>{getProgressBar(p)}</Text>,
+            ...(p.effort ? [<Text wrap="truncate-end">{getStageEffortLine(p.effort)}</Text>] : []),
+            ...(p.workPackages.length === 0 ? [<Text dimColor>None yet.</Text>] : groups.filter(([, list]) => list.length).flatMap(([label, list]) => [
+              <Text bold>{`${label} · ${list.length}`}</Text>,
+              ...list.map(wp => (
+                <Box key={`wp:${wp.path}`} flexDirection="row" columnGap={1}>
+                  <Text color={WP_COLOR[wp.status] ?? 'white'} mono>{wp.status.padEnd(11)}</Text>
+                  <Button plain onPress={() => void openFile($, wp.path)}>{`${wp.id} ${wp.title}`}</Button>
+                  <Text dimColor>{[wp.stage === null ? '' : `stage ${wp.stage}`, wp.due && `due ${wp.due}`].filter(Boolean).join(' · ')}</Text>
+                  {wp.delivery && !themes.some(one => one.id === wp.id) && (
+                    <Button key={`theme:${wp.id}`} plain onPress={() => show(`theme:${wp.id}`)}>work theme</Button>
+                  )}
+                  {getWpEffortText(wp) && <Text dimColor>{getWpEffortText(wp)}</Text>}
+                  {!['completed', 'archived', 'cancelled'].includes(wp.status) && (
+                    <Button key={`move:${wp.id}`} plain onPress={() => void moveFromPane($, wp)}>{placedIds.has(wp.id) ? 'move' : `place ${wp.id}`}</Button>
+                  )}
+                </Box>
+              )),
+            ])),
+          ]
+        },
+      },
+      {
+        // Documents, then the Daily Log.
+        id: 'documents', label: 'Documents', count: p.documents.length,
+        render: () => [
+          ...(p.documents.length === 0 ? [<Text dimColor>None yet.</Text>] : p.documents.map(doc => (
+            <Button key={`doc:${doc.path}`} plain onPress={() => void openFile($, doc.path)}>
+              {doc.folder ? `${doc.folder} · ${doc.title}` : `${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
+            </Button>
+          ))),
+          <Text bold>{`Daily log${openLogCount ? ` · ${openLogCount} open actions` : ''}`}</Text>,
+          ...(log.length === 0 ? [<Text dimColor>No daily log yet: run /pm-log in the project's repo.</Text>] : logDays.flatMap(day => [
+            <Text bold>{day}</Text>,
+            ...log.filter(one => one.date === day).map(one => (
+              <Text color={one.isOverdue ? 'red' : undefined} dimColor={one.status === 'done'} wrap="truncate-end">
+                {[one.id, one.kind, one.text, one.ref, one.register ? `→ ${one.register}` : '', one.issue === null ? '' : `#${one.issue}`, one.owner,
+                  one.due ? `due ${one.due}` : '', one.status].filter(Boolean).join(' · ')}
+              </Text>
+            )),
+          ])),
+        ],
+      },
+      {
+        // Registers: one section per PRINCE2 register, the non-empty ones first; the empty ones share a line naming the skill that
+        // starts each. The PRINCE2 issue register is called Problems here, next to the forge's issues.
+        id: 'registers', label: 'Registers', count: openRisks.length + openIssues.length + openActions.length,
+        render: () => {
+          const registers = [
+            { id: 'risks', label: 'Risks', size: p.risks.length, sub: `${openRisks.length} open`, skill: '/pm-log', render: () => allRisks.length === 0 ? <Text dimColor>None.</Text> : allRisks.map(risk => (
+          <Text color={risk.status === 'open' && risk.score >= 6 ? 'red' : undefined} dimColor={risk.status !== 'open'} wrap="truncate-end">
+            {`${risk.id} [${risk.score}] ${risk.title}${risk.status === 'open' ? '' : ` · ${risk.status}`}`}
+          </Text>
+        )) },
+            { id: 'approvals', label: 'Approvals', size: p.approvals.length, sub: String(p.approvals.length), skill: '/pm-start-up', render: () => p.approvals.length === 0 ? <Text dimColor>None recorded.</Text>
+          : p.approvals.map(one => <Text wrap="truncate-end">{`${one.date} ${one.decision} — ${one.by}`}</Text>) },
+            { id: 'problems', label: 'Problems', size: p.issues.length, sub: `${openIssues.length} open`, skill: '/pm-log', render: () => allIssues.length === 0 ? <Text dimColor>None.</Text>
+          : allIssues.map(issue => (
+            <Text dimColor={issue.status !== 'open'} wrap="truncate-end">
+              {`${issue.id} ${issue.priority} · ${issue.title}${issue.status === 'open' ? '' : ` · ${issue.status}`}`}
+            </Text>
+          )) },
+            { id: 'lessons', label: 'Lessons', size: p.actions.length + p.lessons.length + (p.lastRetro ? 1 : 0), sub: `${openActions.length} open actions`, skill: '/pm-retro', render: () => [
+          <Text dimColor={!p.lastRetro}>{p.lastRetro ? `Last retrospective ${p.lastRetro}` : 'No retrospective yet.'}</Text>,
+          ...openActions.concat(p.actions.filter(one => one.status !== 'open')).map(one => (
+            <Text dimColor={one.status !== 'open'} wrap="truncate-end">
+              {[one.id, one.text, one.issue === null ? '' : `#${one.issue}`, one.status].filter(Boolean).join(' · ')}
+            </Text>
+          )),
+          ...p.lessons.slice().reverse().sort((a, b) => b.date.localeCompare(a.date)).map(one => (
+            <Text wrap="truncate-end">
+              {[one.date, one.iteration === null ? '' : `iteration ${one.iteration}`, one.kind, one.text].filter(Boolean).join(' · ')}
+            </Text>
+          )),
+        ] },
+            { id: 'iterations', label: 'Iterations', size: p.iterations.length, sub: String(p.iterations.length), skill: '/pm-iterate', render: () => p.iterations.length === 0 ? <Text dimColor>No iteration.</Text> : p.iterations.slice().reverse().map(one => {
+          const wps = p.iteration?.number === one.number ? `${p.iteration.done}/${p.iteration.planned}` : String(one.delivered.length)
+          return (
+            <Text dimColor={one.status !== 'open'} wrap="truncate-end">
+              {[`#${one.number}`, one.goal, `${one.start || '—'} → ${one.end || '—'}`, `WPs ${wps}`, one.status, one.result].filter(Boolean).join(' · ')}
+            </Text>
+          )
+        }) },
+          ]
+          const empty = registers.filter(one => !one.size)
+          return [
+            ...registers.filter(one => one.size).flatMap(one => [<Text bold>{`${one.label} · ${one.sub}`}</Text>, ...[one.render()].flat()]),
+            ...(empty.length ? [<Text dimColor wrap="wrap">{`Empty: ${empty.map(one => `${one.label} (${one.skill})`).join(' · ')}`}</Text>] : []),
+          ]
+        },
+      },
+      {
         // Metrics: lead, review and merge time over 30 and 90 days, then one line per week of the 90 days.
         id: 'metrics', label: 'Metrics', count: p.flow?.windows[0]?.merge.count ?? 0,
         render: () => {
@@ -503,128 +616,6 @@ export const register: Register = on => {
             )),
           ]
         },
-      },
-      {
-        // Board: one block per work package with a milestone, a line per column; the count is the open items in no work package.
-        id: 'board', label: 'Board', count: lanes.at(-1)?.cards.length ?? 0,
-        render: () => lanes.flatMap(lane => {
-          const head = lane.wp
-            ? `${lane.wp} ${lane.title} · ${lane.status || 'no status'}${lane.progress ? ` · ${lane.progress.closed}/${lane.progress.total}` : ''}${lane.reopened ? ` · reopened: ${lane.reopened} open` : ''}`
-            : `Unplanned · ${lane.cards.length} open`
-          const columns = BOARD_COLUMNS.flatMap(([column, label]) => {
-            const list = lane.cards.filter(card => card.column === column)
-            return list.length ? [<Text wrap="truncate-end">{`  ${label}: ${list.map(card => `${card.kind === 'pr' ? 'PR ' : ''}#${card.number} ${card.assignees.length ? card.assignees.map(login => `@${login}`).join(' ') : 'unassigned'}`).join(', ')}`}</Text>] : []
-          })
-          return [<Text bold color={lane.reopened ? 'warning' : undefined} wrap="truncate-end">{head}</Text>, ...(columns.length ? columns : [<Text dimColor>{'  No open item.'}</Text>])]
-        }),
-      },
-      {
-        id: 'documents', label: 'Documents', count: p.documents.length,
-        render: () => p.documents.length === 0 ? <Text dimColor>None yet.</Text> : p.documents.map(doc => (
-          <Button key={`doc:${doc.path}`} plain onPress={() => void openFile($, doc.path)}>
-            {doc.folder ? `${doc.folder} · ${doc.title}` : `${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
-          </Button>
-        )),
-      },
-      {
-        id: 'wps', label: 'Work packages', count: p.workPackages.length,
-        render: () => [
-          <Text mono>{getProgressBar(p)}</Text>,
-          ...(p.effort ? [<Text wrap="truncate-end">{getStageEffortLine(p.effort)}</Text>] : []),
-          ...(p.workPackages.length === 0 ? [<Text dimColor>None yet.</Text>] : p.workPackages.map(wp => (
-            <Box key={`wp:${wp.path}`} flexDirection="row" columnGap={1}>
-              <Text color={WP_COLOR[wp.status] ?? 'white'} mono>{wp.status.padEnd(11)}</Text>
-              <Button plain onPress={() => void openFile($, wp.path)}>{`${wp.id} ${wp.title}`}</Button>
-              <Text dimColor>{[wp.stage === null ? '' : `stage ${wp.stage}`, wp.due && `due ${wp.due}`].filter(Boolean).join(' · ')}</Text>
-              {wp.delivery && !themes.some(one => one.id === wp.id) && (
-                <Button key={`theme:${wp.id}`} plain onPress={() => show(`theme:${wp.id}`)}>work theme</Button>
-              )}
-              {getWpEffortText(wp) && <Text dimColor>{getWpEffortText(wp)}</Text>}
-            </Box>
-          ))),
-        ],
-      },
-      {
-        id: 'iterations', label: 'Iterations', count: p.iterations.length,
-        render: () => p.iterations.length === 0 ? <Text dimColor>No iteration.</Text> : p.iterations.slice().reverse().map(one => {
-          const wps = p.iteration?.number === one.number ? `${p.iteration.done}/${p.iteration.planned}` : String(one.delivered.length)
-          return (
-            <Text dimColor={one.status !== 'open'} wrap="truncate-end">
-              {[`#${one.number}`, one.goal, `${one.start || '—'} → ${one.end || '—'}`, `WPs ${wps}`, one.status, one.result].filter(Boolean).join(' · ')}
-            </Text>
-          )
-        }),
-      },
-      {
-        id: 'lessons', label: 'Lessons', count: openActions.length,
-        render: () => [
-          <Text dimColor={!p.lastRetro}>{p.lastRetro ? `Last retrospective ${p.lastRetro}` : 'No retrospective yet.'}</Text>,
-          ...openActions.concat(p.actions.filter(one => one.status !== 'open')).map(one => (
-            <Text dimColor={one.status !== 'open'} wrap="truncate-end">
-              {[one.id, one.text, one.issue === null ? '' : `#${one.issue}`, one.status].filter(Boolean).join(' · ')}
-            </Text>
-          )),
-          ...p.lessons.slice().reverse().sort((a, b) => b.date.localeCompare(a.date)).map(one => (
-            <Text wrap="truncate-end">
-              {[one.date, one.iteration === null ? '' : `iteration ${one.iteration}`, one.kind, one.text].filter(Boolean).join(' · ')}
-            </Text>
-          )),
-        ],
-      },
-      {
-        id: 'roadmap', label: 'Roadmap', count: placed.length,
-        render: () => placed.length === 0 && p.roadmap.unplaced.length === 0
-          ? <Text dimColor>No roadmap yet: run /pm-roadmap in the project's repo.</Text>
-          : [
-            ...placed.map(({ label, wp }) => (
-              <Box flexDirection="row" columnGap={1}>
-                <Text wrap="truncate-end">{`${label} · ${wp.id} ${wp.title} · ${wp.status}${wp.due ? ` · due ${wp.due}` : ''}`}</Text>
-                <Button key={`move:${wp.id}`} plain onPress={() => void moveFromPane($, wp)}>move</Button>
-              </Box>
-            )),
-            ...(p.roadmap.unplaced.length ? [<Text dimColor wrap="truncate-end">{`Not on the roadmap: ${p.roadmap.unplaced.join(', ')}`}</Text>] : []),
-            ...(p.roadmap.unplaced.length ? [
-              <Box flexDirection="row" columnGap={1}>
-                {p.workPackages.filter(wp => p.roadmap.unplaced.includes(wp.id)).map(wp => (
-                  <Button key={`place:${wp.id}`} plain onPress={() => void moveFromPane($, wp)}>{`place ${wp.id}`}</Button>
-                ))}
-              </Box>,
-            ] : []),
-          ],
-      },
-      {
-        id: 'log', label: 'Daily log', count: log.filter(one => one.status === 'open').length,
-        render: () => log.length === 0 ? <Text dimColor>No daily log yet: run /pm-log in the project's repo.</Text> : logDays.flatMap(day => [
-          <Text bold>{day}</Text>,
-          ...log.filter(one => one.date === day).map(one => (
-            <Text color={one.isOverdue ? 'red' : undefined} dimColor={one.status === 'done'} wrap="truncate-end">
-              {[one.id, one.kind, one.text, one.ref, one.register ? `→ ${one.register}` : '', one.issue === null ? '' : `#${one.issue}`, one.owner,
-                one.due ? `due ${one.due}` : '', one.status].filter(Boolean).join(' · ')}
-            </Text>
-          )),
-        ]),
-      },
-      {
-        id: 'risks', label: 'Risks', count: openRisks.length,
-        render: () => allRisks.length === 0 ? <Text dimColor>None.</Text> : allRisks.map(risk => (
-          <Text color={risk.status === 'open' && risk.score >= 6 ? 'red' : undefined} dimColor={risk.status !== 'open'} wrap="truncate-end">
-            {`${risk.id} [${risk.score}] ${risk.title}${risk.status === 'open' ? '' : ` · ${risk.status}`}`}
-          </Text>
-        )),
-      },
-      {
-        id: 'issues', label: 'Issues', count: openIssues.length,
-        render: () => allIssues.length === 0 ? <Text dimColor>None.</Text>
-          : allIssues.map(issue => (
-            <Text dimColor={issue.status !== 'open'} wrap="truncate-end">
-              {`${issue.id} ${issue.priority} · ${issue.title}${issue.status === 'open' ? '' : ` · ${issue.status}`}`}
-            </Text>
-          )),
-      },
-      {
-        id: 'approvals', label: 'Approvals', count: p.approvals.length,
-        render: () => p.approvals.length === 0 ? <Text dimColor>None recorded.</Text>
-          : p.approvals.map(one => <Text wrap="truncate-end">{`${one.date} ${one.decision} — ${one.by}`}</Text>),
       },
     ]
     const tab = chosenView.startsWith('tab:') ? tabs.find(one => `tab:${one.id}` === chosenView) : undefined

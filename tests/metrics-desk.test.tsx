@@ -26,7 +26,7 @@ const PANE = {
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 
 test('the Metrics tab shows lead, review and merge time for 30 and 90 days and the weekly throughput, in the page and the pane', async ($, on) => {
-  // wf:contract: The project form has a Metrics tab after Activity, in the browser page (hooks/board.ts TABS) and in the pane (hooks/register.tsx tabs);
+  // wf:contract: The project form has a Metrics tab, the last one, in the browser page (hooks/board.ts TABS) and in the pane (hooks/register.tsx tabs);
   // wf:contract: its count is the number of pulls merged in the last 30 days.
   // wf:contract: It shows three rows — Lead time, Review (opened -> first review), Merge (opened -> merged) — each with the 30- and the
   // wf:contract: 90-day figure as `median · p90 (n)`, or `—` when the count is 0.
@@ -39,7 +39,7 @@ test('the Metrics tab shows lead, review and merge time for 30 and 90 days and t
   const data = JSON.parse(page.slice(page.indexOf('<script type="application/json" id="data">') + 42, page.indexOf('</script>')))
   expect(data.projects[0].flow).toEqual(project.flow)
   const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
-  expect(script).toMatch(/\['activity', 'Activity', [^\n]*\],\n {2}\['metrics', 'Metrics', p => p\.flow \? p\.flow\.windows\[0\]\.merge\.count : 0, metrics\],/)
+  expect(script).toMatch(/\['metrics', 'Metrics', p => p\.flow \? p\.flow\.windows\[0\]\.merge\.count : 0, metrics\],\n\]/)
   for (const label of ["'Lead time'", "'Review'", "'Merge'", "'30 days'", "'90 days'", "'No forge data.'", "'—'", "className: 'stack'"]) expect(script).toContain(label)
   expect(script).not.toMatch(/chart\.js|<canvas|<svg/i)
   expect(script).not.toContain('${')

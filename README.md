@@ -10,12 +10,12 @@ written from scratch.
   git: `project.yaml`, Markdown products with frontmatter, YAML registers. Stage baselines are git
   tags `pm/stage-<n>-approved`. Schema: [docs/pm-schema.md](docs/pm-schema.md).
 - **Project desk.** A side pane in the Claude Desktop Code tab with every registered project as a
-  card — stage, progress, open high risks, next report due — with its work themes beneath. A
+  card — stage, objectives, progress, open high risks, blockers — with its work themes beneath. A
   project with no fixed end runs a continuous stage (`stage.continuous: true`), shown as open and
   completed work packages, with no percentage and no end date. A
-  project opens on a form: a header, a bar of its work themes and the tabs Recap, Roles, Team,
-  Activity, Metrics, Documents, Work packages, Risks, Issues and Approvals; picking a theme shows its phases, issue
-  and pull requests, commits with notes. The Team tab lists each person of the roles with the
+  project opens on a form: a header, a bar of its work themes and the tabs Recap, Board,
+  Activity, Team, Work packages, Documents, Registers and Metrics; picking a theme shows its phases, issue
+  and pull requests, commits with notes. The Team tab shows the roles on top, then each person with the
   open issues and pull requests that are theirs — to do, in progress, review asked, waiting for
   review, stalled — filterable by member; a red `WIP <person> n/limit` badge on the card and in
   the recap flags anyone over their work-in-progress limit. Logins and limits come from the
@@ -27,8 +27,9 @@ written from scratch.
   90 days from the repo's closed issues and merged pull requests — lead time, time to first review
   and to merge as median and p90 — and the weekly throughput. Work packages may carry estimated
   and actual effort in hours: the desk shows each one's deviation and the current stage's, which
-  feeds an `effort` tolerance. A Roadmap tab places the open work packages in Now, Next and Later
-  (`/pm-roadmap`). The same desk is a local browser page, where
+  feeds an `effort` tolerance. The Work packages tab groups them in Now, Next, Later and Not placed
+  (`/pm-roadmap`); Documents ends with the Daily log, and Registers holds risks, approvals,
+  problems (the PRINCE2 issue register), lessons and iterations. The same desk is a local browser page, where
   checked issues and pull requests are grouped into a work package.
 - **Actions on the desk.** Archive or complete a work package, place it on the roadmap, link it,
   close a note, package issues: each shows the change and writes it on Confirm, without opening a
