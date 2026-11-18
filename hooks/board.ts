@@ -183,6 +183,8 @@ select.assign { font: inherit; font-size: 12px; }
 .drop-over { outline: 2px solid var(--on); outline-offset: -2px; background: color-mix(in srgb, var(--on) 10%, transparent); }
 .dock { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; max-width: min(900px, calc(100vw - 32px)); padding: 10px 14px; border: 1px solid var(--on); border-radius: 10px; background: var(--bg); box-shadow: 0 8px 30px rgba(0,0,0,.25); font-size: 13px; }
 .dock .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-left: 6px; }
+.dock-target { margin-left: auto; color: var(--on); }
+.drag-ghost { position: fixed; top: -100px; left: 0; padding: 2px 8px; border: 1px solid var(--on); border-radius: 999px; background: var(--bg); color: var(--fg); font: 12px ui-monospace, monospace; }
 .drop-chip { border: 1px dashed var(--line); border-radius: 999px; padding: 4px 10px; background: var(--chip); }
 /* Board tab: one swimlane per work package, four columns; cards carry data-number and lanes data-wp for drag and drop. */
 .lane { border: 1px solid var(--line); border-radius: 8px; margin-top: 12px; overflow: hidden; }
@@ -439,10 +441,21 @@ function endDrag() {
   if (dock) dock.remove()
   document.querySelectorAll('.drop-over').forEach(n => n.classList.remove('drop-over'))
 }
-// A drop target: highlighted while a dragged item it accepts is over it; the drop opens the preview of request(item).
-function dropTarget(p, node, request) {
-  node.addEventListener('dragover', e => { if (dragging && request(dragging)) { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; node.classList.add('drop-over') } })
-  node.addEventListener('dragleave', e => { if (!node.contains(e.relatedTarget)) node.classList.remove('drop-over') })
+// The dock names the target under the pointer: the dragged image may cover it.
+const showTarget = text => { const shown = document.getElementById('dock-target'); if (shown) shown.textContent = text }
+// A drop target: highlighted, and named in the dock, while a dragged item it accepts is over it; the drop opens the preview
+// of request(item).
+function dropTarget(p, node, request, label) {
+  node.addEventListener('dragover', e => {
+    const wanted = dragging && request(dragging)
+    if (!wanted) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'link'
+    node.classList.add('drop-over')
+    showTarget('→ ' + (wanted.kind === 'assign' ? 'assign to ' : wanted.kind === 'wp-link' ? 'link to ' : 'attach to ') + label)
+  })
+  node.addEventListener('dragleave', e => { if (!node.contains(e.relatedTarget)) { node.classList.remove('drop-over'); showTarget('') } })
   node.addEventListener('drop', e => {
     const wanted = dragging && request(dragging)
     endDrag()
@@ -454,7 +467,7 @@ function dropTarget(p, node, request) {
   return node
 }
 function showDock(p, item) {
-  const chip = (label, request) => dropTarget(p, el('span', { className: 'drop-chip', textContent: label }), request)
+  const chip = (label, request) => dropTarget(p, el('span', { className: 'drop-chip', textContent: label }), request, label)
   const members = item.kind === 'milestone' ? [] : p.team.filter(m => assignRequest(item, m))
   const packages = p.workPackages.filter(w => wpRequest(p, item, w))
   const dock = el('div', { className: 'dock', id: 'dock' }, el('strong', { textContent: 'Drop ' + item.ref + ' on' }),
@@ -462,7 +475,8 @@ function showDock(p, item) {
     ...members.map(m => chip(m.person, x => assignRequest(x, m))),
     packages.length ? el('span', { className: 'label', textContent: item.kind === 'milestone' ? 'Link to' : 'Attach to' }) : null,
     ...packages.map(w => chip(w.id + ' ' + w.title, x => wpRequest(p, x, w))),
-    members.length || packages.length ? null : el('span', { className: 'dim', textContent: 'no member or work package accepts it' }))
+    members.length || packages.length ? null : el('span', { className: 'dim', textContent: 'no member or work package accepts it' }),
+    el('strong', { className: 'dock-target', id: 'dock-target' }))
   document.body.append(dock)
 }
 // Makes a row or a card draggable; item: { kind: 'issue' | 'pr' | 'milestone', ref, number, title, milestone, logins }.
@@ -474,6 +488,11 @@ function draggable(p, node, item) {
     dragging = item
     e.dataTransfer.effectAllowed = 'link'
     e.dataTransfer.setData('text/plain', item.ref)
+    // A small image of the reference, not the whole row: a wide row would hide the target under the pointer.
+    const ghost = el('div', { className: 'drag-ghost', textContent: item.ref })
+    document.body.append(ghost)
+    e.dataTransfer.setDragImage(ghost, 0, 0)
+    setTimeout(() => ghost.remove(), 0)
     // Changing the page inside dragstart can cancel the drag: the dock comes on the next turn.
     setTimeout(() => { if (dragging === item) showDock(p, item) }, 0)
   })
@@ -657,7 +676,7 @@ function team(p) {
             el('td', { style: 'width:150px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status)),
             el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, i.number, i.assignees || assigneesOf(p, i)))),
           dragItem(i.kind, Object.assign({}, (i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => x.number === i.number), { number: i.number, assignees: i.assignees || assigneesOf(p, i) }))))))
-        : el('div', { className: 'empty dim', textContent: 'No open item.' })), x => assignRequest(x, m))))
+        : el('div', { className: 'empty dim', textContent: 'No open item.' })), x => assignRequest(x, m), m.person)))
 }
 
 // Activity tab: the open milestones with their work package, the open pull requests, the open issues grouped by milestone.
@@ -863,7 +882,7 @@ function boardLane(p, l) {
         l.progress ? el('div', { className: 'lane-done', textContent: l.progress.closed + ' closed' }) : el('div', { className: 'dim', textContent: '—' }))))
   lane.dataset.wp = l.wp
   const w = l.wp && p.workPackages.find(x => x.id === l.wp)
-  return w ? dropTarget(p, lane, x => wpRequest(p, x, w)) : lane
+  return w ? dropTarget(p, lane, x => wpRequest(p, x, w), w.id + ' ' + w.title) : lane
 }
 function board(p) {
   const lanes = lanesOf(p)
