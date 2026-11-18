@@ -725,6 +725,7 @@ function form(p, sub) {
     el('div', { className: 'form-head' },
       el('div', {}, el('h2', {}, dot(p.light), ' ', p.name, ' ', el('span', { className: 'dim', textContent: p.code })),
         el('div', { className: 'dim' }, stageOf(p) + ' · ' + (p.status || 'no status') + ' · profile ' + p.profile + ' · ', fileLink(p.path, p.path))),
+      p.pmRef ? el('p', { className: 'warn', textContent: '.pm/ read from ' + p.pmRef + ' — the checkout has no .pm/, so the desk is read-only until it does' }) : null,
       el('div', {}, sessionLink(p))),
     ...p.errors.map(e => el('p', { className: 'err', textContent: e })),
     el('div', { className: 'themebar' }, el('span', { className: 'label', textContent: 'Work themes' }),

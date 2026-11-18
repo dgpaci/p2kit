@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { buildProject, getLight, parseRegistry } from '../hooks/project'
+import { buildProject, getLight, getTreeEntries, parseRegistry, parseRegistryEntries } from '../hooks/project'
 
 const PROJECT = `
 name: Portal
@@ -54,7 +54,7 @@ test('a project without .pm is listed with the error', async () => {
   const project = buildProject({ path: '/src/empty', products: [], workPackages: [] }, '2026-11-03')
 
   expect(project.name).toBe('empty')
-  expect(project.errors).toEqual(['.pm/project.yaml not found'])
+  expect(project.errors).toEqual(['.pm/project.yaml not found — in the working tree, nor on pm_branch or origin/HEAD (docs/pm-schema.md → The project registry)'])
 })
 
 test('the traffic light: green under 75 %, amber under 100 %, red at the limit; a zero limit is red on any use', async () => {
@@ -63,4 +63,23 @@ test('the traffic light: green under 75 %, amber under 100 %, red at the limit; 
 
 test('the registry expands ~ and keeps the order', async () => {
   expect(parseRegistry('projects:\n  - path: ~/a\n  - path: /b\n', '/h')).toEqual(['/h/a', '/b'])
+})
+
+test('a registry entry may name the branch to read .pm/ from', async () => {
+  expect(parseRegistryEntries('projects:\n  - path: ~/a\n    pm_branch: develop\n  - path: /b\n', '/h'))
+    .toEqual([{ path: '/h/a', pmBranch: 'develop' }, { path: '/b', pmBranch: '' }])
+})
+
+test('a git tree lists the direct children of a folder, each subfolder once', async () => {
+  const files = ['.pm/project.yaml', '.pm/brief.md', '.pm/stages/2/plan.md', '.pm/stages/3/plan.md', '.pm/work-packages/WP-01.md', '.pmx/a.md']
+  expect(getTreeEntries(files, '.pm')).toEqual([
+    { name: 'project.yaml', kind: 'file' }, { name: 'brief.md', kind: 'file' }, { name: 'stages', kind: 'dir' }, { name: 'work-packages', kind: 'dir' },
+  ])
+  expect(getTreeEntries(files, '.pm/stages/')).toEqual([{ name: '2', kind: 'dir' }, { name: '3', kind: 'dir' }])
+  expect(getTreeEntries(files, '.pm/reports')).toEqual([])
+})
+
+test('a project read from a git ref carries the ref; from the working tree, none', async () => {
+  expect(buildProject({ path: '/p', pmRef: 'origin/develop', project: PROJECT, products: [], workPackages: [] }, '2026-11-18').pmRef).toBe('origin/develop')
+  expect(buildProject({ path: '/p', project: PROJECT, products: [], workPackages: [] }, '2026-11-18').pmRef).toBe('')
 })

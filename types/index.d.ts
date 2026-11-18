@@ -140,6 +140,8 @@ export type Flow = { windows: FlowWindow[]; closedIssues: ClosedItem[]; mergedPu
 
 export type Project = {
   path: string
+  // The git ref .pm/ was read from when the working tree has none: the desk shows it read-only; '' = the working tree.
+  pmRef: string
   name: string
   code: string
   profile: string

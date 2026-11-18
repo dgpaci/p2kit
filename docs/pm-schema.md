@@ -604,3 +604,10 @@ projects:
   - path: /Users/me/src/customer-portal
     added: 2026-11-03
 ```
+
+`.pm/` is read from the working tree of `path`. When the checkout has no `.pm/` — a branch cut
+before `.pm/` was committed, a hotfix branch — the desk reads it from git instead: from
+`pm_branch` when the entry sets it (`pm_branch: develop`; the local branch, else `origin/<name>`),
+otherwise from the branch `origin/HEAD` points to. Read from a ref, the project is **read-only**:
+the form says so and the actions that write `.pm/` fail, since they write the working tree. Commit
+`.pm/` to the default branch so every checkout carries it.
