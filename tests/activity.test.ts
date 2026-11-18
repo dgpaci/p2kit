@@ -88,6 +88,13 @@ test('the browser page embeds the package link, the pull requests and the work p
   expect(script.indexOf("blockTitle('Pull requests'")).toBeLessThan(script.indexOf("blockTitle('Issues'"))
   // The page's own reload would drop a selection in progress: it waits until nothing is picked.
   expect(script).toContain('if (!pickedItems.size) location.reload()')
+  // A drag in progress holds it too, and a drop only opens the preview: it never writes without Confirm.
+  expect(script).toContain('if (dialogOpen || dragging) return')
+  const drag = script.slice(script.indexOf('let dragging = null'), script.indexOf('const dragItem'))
+  expect(drag).toContain('act(p, wanted)')
+  expect(drag).not.toContain('post(')
+  expect(drag).not.toContain('apply(')
+  for (const kind of ["kind: 'assign'", "kind: 'issue-milestone'", "kind: 'wp-link'"]) expect(drag).toContain(kind)
   expect(script).toContain('function draw()')
   expect(script).not.toContain('${')
 })

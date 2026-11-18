@@ -178,6 +178,12 @@ select.assign { font: inherit; font-size: 12px; }
 .diff { font-family: ui-monospace, monospace; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diff .del { color: var(--red); } .diff .add { color: var(--green); }
 .warn { color: var(--amber); }
+/* Drag and drop: rows and cards that can be dragged, the targets under a dragged item, the dock of targets. */
+.drag { cursor: grab; }
+.drop-over { outline: 2px solid var(--on); outline-offset: -2px; background: color-mix(in srgb, var(--on) 10%, transparent); }
+.dock { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; max-width: min(900px, calc(100vw - 32px)); padding: 10px 14px; border: 1px solid var(--on); border-radius: 10px; background: var(--bg); box-shadow: 0 8px 30px rgba(0,0,0,.25); font-size: 13px; }
+.dock .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-left: 6px; }
+.drop-chip { border: 1px dashed var(--line); border-radius: 999px; padding: 4px 10px; background: var(--chip); }
 /* Board tab: one swimlane per work package, four columns; cards carry data-number and lanes data-wp for drag and drop. */
 .lane { border: 1px solid var(--line); border-radius: 8px; margin-top: 12px; overflow: hidden; }
 .lane.reopened { border-color: var(--amber); }
@@ -410,6 +416,72 @@ function packageDialog(p, refs) {
   title.focus()
 }
 
+// Drag and drop: the same actions as the selects, through the same preview and Confirm. An issue or pull request dropped on a
+// member is assigned to them, on a work package attached to its milestone; a milestone dropped on a work package is linked to it.
+// While a drag is on, a dock lists the members and work packages that accept it, from any tab; Board lanes and Team members
+// accept a drop too. Only with the helper, and never on a project whose .pm/ is read from git. dragging holds the reload.
+let dragging = null
+const loginsOf = assignees => assignees ? assignees.map(a => (a.login || a).toLowerCase()) : null
+// The request a drop of item on a member or a work package makes; null when that target does not accept it.
+function assignRequest(item, m) {
+  if (item.kind === 'milestone' || !m.login || (item.logins && item.logins.includes(m.login.toLowerCase()))) return null
+  return { kind: 'assign', number: item.number, login: m.login, op: 'add' }
+}
+function wpRequest(p, item, w) {
+  if (['archived', 'cancelled'].includes(w.status)) return null
+  const milestone = w.delivery ? w.delivery.milestone : ''
+  if (item.kind === 'milestone') return milestone === item.title ? null : { kind: 'wp-link', target: w.id, field: 'milestone', value: item.title }
+  return milestone && milestone !== item.milestone ? { kind: 'issue-milestone', number: item.number, wp: w.id } : null
+}
+function endDrag() {
+  dragging = null
+  const dock = document.getElementById('dock')
+  if (dock) dock.remove()
+  document.querySelectorAll('.drop-over').forEach(n => n.classList.remove('drop-over'))
+}
+// A drop target: highlighted while a dragged item it accepts is over it; the drop opens the preview of request(item).
+function dropTarget(p, node, request) {
+  node.addEventListener('dragover', e => { if (dragging && request(dragging)) { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; node.classList.add('drop-over') } })
+  node.addEventListener('dragleave', e => { if (!node.contains(e.relatedTarget)) node.classList.remove('drop-over') })
+  node.addEventListener('drop', e => {
+    const wanted = dragging && request(dragging)
+    endDrag()
+    if (!wanted) return
+    e.preventDefault()
+    e.stopPropagation()
+    act(p, wanted)
+  })
+  return node
+}
+function showDock(p, item) {
+  const chip = (label, request) => dropTarget(p, el('span', { className: 'drop-chip', textContent: label }), request)
+  const members = item.kind === 'milestone' ? [] : p.team.filter(m => assignRequest(item, m))
+  const packages = p.workPackages.filter(w => wpRequest(p, item, w))
+  const dock = el('div', { className: 'dock', id: 'dock' }, el('strong', { textContent: 'Drop ' + item.ref + ' on' }),
+    members.length ? el('span', { className: 'label', textContent: 'Assign to' }) : null,
+    ...members.map(m => chip(m.person, x => assignRequest(x, m))),
+    packages.length ? el('span', { className: 'label', textContent: item.kind === 'milestone' ? 'Link to' : 'Attach to' }) : null,
+    ...packages.map(w => chip(w.id + ' ' + w.title, x => wpRequest(p, x, w))),
+    members.length || packages.length ? null : el('span', { className: 'dim', textContent: 'no member or work package accepts it' }))
+  document.body.append(dock)
+}
+// Makes a row or a card draggable; item: { kind: 'issue' | 'pr' | 'milestone', ref, number, title, milestone, logins }.
+function draggable(p, node, item) {
+  if (!server || p.pmRef) return node
+  node.draggable = true
+  node.classList.add('drag')
+  node.addEventListener('dragstart', e => {
+    dragging = item
+    e.dataTransfer.effectAllowed = 'link'
+    e.dataTransfer.setData('text/plain', item.ref)
+    // Changing the page inside dragstart can cancel the drag: the dock comes on the next turn.
+    setTimeout(() => { if (dragging === item) showDock(p, item) }, 0)
+  })
+  node.addEventListener('dragend', endDrag)
+  return node
+}
+const dragItem = (kind, x) => ({ kind, ref: (kind === 'pr' ? 'PR #' : '#') + x.number, number: x.number, milestone: x.milestone || '', logins: loginsOf(x.assignees) })
+
 let route = decodeURIComponent(location.hash.slice(1))
 const go = r => { route = r; history.replaceState(null, '', r ? '#' + encodeURIComponent(r) : location.pathname); draw() }
 const link = (text, r, className = '') => el('a', { href: '#', className, textContent: text, onclick: e => { e.preventDefault(); go(r) } })
@@ -573,18 +645,19 @@ function team(p) {
     el('div', { className: 'members' }, el('span', { className: 'label', textContent: 'Members' }),
       ...p.team.map(m => el('button', { className: 'member-chip' + (picked.has(m.person) ? ' sel' : ''), onclick: () => toggle(m.person) }, m.person)),
       picked.size ? el('a', { href: '#', textContent: 'all', onclick: e => { e.preventDefault(); picked.clear(); draw() } }) : null),
-    ...shown.map(m => el('div', { className: 'person' + (m.isOverLimit ? ' over' : '') },
+    ...shown.map(m => dropTarget(p, el('div', { className: 'person' + (m.isOverLimit ? ' over' : '') },
       el('div', { className: 'person-head' },
         el('div', { className: 'who' }, el('strong', { textContent: m.person }), el('small', { textContent: (m.login ? '@' + m.login : 'no forge login') + ' · ' + m.roles.join(', ') })),
         m.login ? pill('WIP ' + m.wip + '/' + m.wipLimit, m.isOverLimit ? 'wip-over' : '') : el('span', { className: 'dim', textContent: 'add team.people in project.yaml' })),
       !m.login ? null : m.items.length
-        ? el('table', {}, el('tbody', {}, ...m.items.map(i => el('tr', {},
+        ? el('table', {}, el('tbody', {}, ...m.items.map(i => draggable(p, el('tr', {},
             el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: (i.kind === 'pr' ? 'PR #' : '#') + i.number })),
             el('td', { textContent: i.title }),
             el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
             el('td', { style: 'width:150px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status)),
-            el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, i.number, i.assignees || assigneesOf(p, i)))))))
-        : el('div', { className: 'empty dim', textContent: 'No open item.' }))))
+            el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, i.number, i.assignees || assigneesOf(p, i)))),
+          dragItem(i.kind, Object.assign({}, (i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => x.number === i.number), { number: i.number, assignees: i.assignees || assigneesOf(p, i) }))))))
+        : el('div', { className: 'empty dim', textContent: 'No open item.' })), x => assignRequest(x, m))))
 }
 
 // Activity tab: the open milestones with their work package, the open pull requests, the open issues grouped by milestone.
@@ -613,7 +686,7 @@ function activity(p) {
 
   const milestoneRow = m => {
     const wp = p.milestonePackages[m.title]
-    return el('div', { className: 'ms-row' },
+    return draggable(p, el('div', { className: 'ms-row' },
       el('div', {}, el('strong', { textContent: m.title })),
       el('div', {}, bar(m.closed, m.open + m.closed)),
       el('div', { className: 'pills' },
@@ -625,22 +698,23 @@ function activity(p) {
         ? el('a', { href: '#', className: 'wp-link', onclick: e => { e.preventDefault(); go(p.path + '/theme/' + wp.id) } }, el('span', { className: 'mono', textContent: wp.id + ' ' }), wp.title)
         : el('span', {}, el('span', { className: 'nowp', textContent: 'no work package' }),
             server ? el('button', { textContent: 'Create work package', onclick: () => act(p, { kind: 'package', title: m.title, fromMilestone: true }) })
-              : el('a', { className: 'btn', href: packageLink(p, ['--milestone', "'" + m.title + "'"]), textContent: 'Create work package' }))))
+              : el('a', { className: 'btn', href: packageLink(p, ['--milestone', "'" + m.title + "'"]), textContent: 'Create work package' })))),
+      { kind: 'milestone', ref: 'milestone ' + m.title, title: m.title })
   }
 
-  const pullRow = pr => el('tr', { className: rowClass('p' + pr.number) }, pick('p' + pr.number, 'PR #' + pr.number),
+  const pullRow = pr => draggable(p, el('tr', { className: rowClass('p' + pr.number) }, pick('p' + pr.number, 'PR #' + pr.number),
     el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: pr.url, className: 'mono', textContent: 'PR #' + pr.number })),
     el('td', { textContent: pr.title }),
     el('td', { style: 'width:220px; text-align:right' }, pr.milestone ? pill(pr.milestone) : null, ' ', pr.draft ? pill('draft') : pr.inReview ? pill('in review', 'review') : null),
     el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: pr.updatedAt }),
-    el('td', { style: 'width:1%; white-space:nowrap' }, attachControl(p, pr), ' ', assignControl(p, pr.number, pr.assignees)))
+    el('td', { style: 'width:1%; white-space:nowrap' }, attachControl(p, pr), ' ', assignControl(p, pr.number, pr.assignees))), dragItem('pr', pr))
 
-  const issueRow = i => el('tr', { className: rowClass('i' + i.number) }, pick('i' + i.number, '#' + i.number),
+  const issueRow = i => draggable(p, el('tr', { className: rowClass('i' + i.number) }, pick('i' + i.number, '#' + i.number),
     el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: '#' + i.number })),
     el('td', { textContent: i.title }),
     el('td', { style: 'width:100px; text-align:right' }, notReadyPill(i.missing || [])),
     el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
-    el('td', { style: 'width:1%; white-space:nowrap' }, attachControl(p, i), ' ', assignControl(p, i.number, i.assignees)))
+    el('td', { style: 'width:1%; white-space:nowrap' }, attachControl(p, i), ' ', assignControl(p, i.number, i.assignees))), dragItem('issue', i))
 
   // Issues by milestone: the open ones in their order, then any other title (closed, or past the one-page read), then "No milestone".
   const shown = notReadyOnly ? p.forgeIssues.filter(i => (i.missing || []).length) : p.forgeIssues
@@ -767,8 +841,8 @@ function boardCard(c) {
     c.milestone && !c.inLane ? el('span', { className: 'ms', textContent: ' · ' + c.milestone }) : null,
     c.assignees.length ? el('span', { className: 'who', textContent: c.assignees.map(a => '@' + a).join(' ') }) : el('span', { className: 'who none', textContent: 'unassigned' }))
 }
-function boardLane(l) {
-  const cardOf = c => boardCard(Object.assign({ inLane: Boolean(l.wp) }, c))
+function boardLane(p, l) {
+  const cardOf = c => draggable(p, boardCard(Object.assign({ inLane: Boolean(l.wp) }, c)), dragItem(c.kind, c))
   const column = (key, label) => {
     const list = l.cards.filter(c => c.column === key)
     const col = el('div', { className: 'lane-col' }, el('h4', { textContent: label + ' · ' + list.length }), ...list.map(c => { const node = cardOf(c); node.dataset.number = String(c.number); node.dataset.kind = c.kind; return node }))
@@ -788,13 +862,14 @@ function boardLane(l) {
       el('div', { className: 'lane-col' }, el('h4', { textContent: 'Done' }),
         l.progress ? el('div', { className: 'lane-done', textContent: l.progress.closed + ' closed' }) : el('div', { className: 'dim', textContent: '—' }))))
   lane.dataset.wp = l.wp
-  return lane
+  const w = l.wp && p.workPackages.find(x => x.id === l.wp)
+  return w ? dropTarget(p, lane, x => wpRequest(p, x, w)) : lane
 }
 function board(p) {
   const lanes = lanesOf(p)
   if (lanes.length <= 1 && !unplannedCount(p)) return el('p', { className: 'dim', textContent: "No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo." })
   return el('div', {}, el('p', { className: 'dim', textContent: "Open items by work package: To do, In progress, In review; Done is the milestone's closed count. The tab count is the open items in no work package." }),
-    ...lanes.map(boardLane))
+    ...lanes.map(l => boardLane(p, l)))
 }
 
 // One entry per tab: [id, label, count(p), render(p)].
@@ -854,6 +929,6 @@ function draw() {
 
 draw()
 // A reload would drop the picked issues and pull requests: it waits until nothing is picked.
-// An open dialog holds it too.
-setInterval(() => { if (dialogOpen) return; if (!pickedItems.size) location.reload() }, data.reloadMs)
+// An open dialog holds it too, and so does a drag in progress.
+setInterval(() => { if (dialogOpen || dragging) return; if (!pickedItems.size) location.reload() }, data.reloadMs)
 `
