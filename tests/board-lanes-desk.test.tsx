@@ -64,14 +64,14 @@ test('the board lanes: a lane per work package with a milestone, the delivered o
 })
 
 test('the browser page has a Board tab after Metrics, its count the Unplanned items, lanes and cards marked for drag and drop', () => {
-  // wf:contract: renderBoard embeds each project's `lanes`; TABS has ['board', 'Board', unplannedCount, board] right after Metrics.
+  // wf:contract: renderBoard embeds each project's `lanes`; TABS has ['board', 'Board', unplannedCount, board] first, right after Recap.
   // wf:contract: Lanes carry data-wp, cards data-number; an unassigned card says "unassigned"; a reopened lane "reopened: N open".
   const page = renderBoard({ projects: [PROJECT], refreshedAt: 0, errors: [] })
   const json = page.slice(page.indexOf('<script type="application/json" id="data">') + 42, page.indexOf('</script>'))
   const data = JSON.parse(json)
   expect(data.projects[0].lanes).toEqual(getBoardLanes(PROJECT))
   const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
-  expect(script).toMatch(/\['metrics', 'Metrics', [^\n]*\],\n {2}\['board', 'Board', unplannedCount, board\],/)
+  expect(script).toMatch(/const TABS = \[\n {2}\['board', 'Board', unplannedCount, board\],/)
   for (const text of ["'unassigned'", "'reopened: '", "'Unplanned'", 'dataset.wp', 'dataset.number', "'To do'", "'In progress'", "'In review'", "'Done'"]) expect(script).toContain(text)
   expect(script).not.toContain('${')
   // A hand-built project without lanes still renders: the count reads them as empty.

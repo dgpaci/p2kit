@@ -45,9 +45,9 @@ test('the desk shows the current iteration in the row, the recap, Needs attentio
   // wf:contract: Recap: a card "Iteration" in the browser page, value "<n> · <done>/<planned>", sub "<goal> · ends <end>" (class err when overdue);
   // wf:contract: in the pane a recap line "Iteration <n> · <done>/<planned> WPs · ends <end> · <goal>", red when overdue. No card or line without an iteration.
   // wf:contract: Needs attention, page and pane: "Iteration <n> past its end (<end>)" when the current iteration is overdue.
-  // wf:contract: A tab with id "iterations", label "Iterations", right after "Work packages" (board.ts TABS and register.tsx tabs), its count the
+  // wf:contract: An "Iterations" section of the Registers tab (board.ts REGISTERS and register.tsx tabs), its subtitle the
   // wf:contract: number of iterations; newest first, columns #, Goal, Dates ("<start> → <end>"), WPs (done/planned for the open one, delivered
-  // wf:contract: count for a closed one), Status, Result; with none, "No iteration." in both. The pane shows one line per iteration with the same fields.
+  // wf:contract: count for a closed one), Status, Result; with none, the register is named on the "Empty: …" line with /pm-iterate. The pane shows one line per iteration with the same fields.
   // wf:contract: The page script still contains no "${" and passes node --check; the pane state shape becomes projects-10.
   // The page: the open iteration is embedded with its progress; the row fact, card, attention line and tab are in the script.
   const files = (path: string) => ({
@@ -66,7 +66,7 @@ test('the desk shows the current iteration in the row, the recap, Needs attentio
   expect(script).toContain("' overdue'")
   expect(script).toContain("p.iteration ? card('Iteration', p.iteration.number + ' · ' + p.iteration.done + '/' + p.iteration.planned, p.iteration.goal + ' · ends '")
   expect(script).toContain("'Iteration ' + p.iteration.number + ' past its end (' + p.iteration.end + ')'")
-  expect(script).toMatch(/\['wps', 'Work packages', [^\n]*\n[^\n]*\n {2}\['iterations', 'Iterations', p => p\.iterations\.length, iterations\],/)
+  expect(script).toContain("['iterations', 'Iterations', p => p.iterations.length, p => String(p.iterations.length), '/pm-iterate', iterations],")
   for (const label of ["'#', 'Goal', 'Dates', 'WPs', 'Status', 'Result'", "' → '", "'No iteration.'", 'it.delivered.length']) expect(script).toContain(label)
   expect(script).not.toContain('${')
 
@@ -88,15 +88,14 @@ test('the desk shows the current iteration in the row, the recap, Needs attentio
   await ui.press({ key: 'open:/t/agile' })
   expect(await ui.find({ type: 'Text', text: 'Iteration 2 · 1/2 WPs · ends 2026-11-21 · Checkout' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'Iteration 2 past its end (2026-11-21)' })).toBeTruthy()
-  expect(await ui.find({ type: 'Button', key: 'tab:iterations', text: 'Iterations 2' })).toBeTruthy()
-  await ui.press({ key: 'tab:iterations' })
+  await ui.press({ key: 'tab:registers' })
+  expect(await ui.find({ type: 'Text', text: 'Iterations · 2' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: '#2 · Checkout · 2026-11-10 → 2026-11-21 · WPs 1/2 · open' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: '#1 · Login · 2026-10-27 → 2026-11-07 · WPs 1 · closed · login shipped' })).toBeTruthy()
   await ui.press({ key: 'back' })
   await ui.press({ key: 'open:/t/plain' })
-  expect(await ui.find({ type: 'Button', key: 'tab:iterations', text: 'Iterations 0' })).toBeTruthy()
-  expect(await ui.find({ type: 'Text', text: 'Iteration 2 · 1/2 WPs · ends 2026-11-21 · Checkout' })).toBeFalsy()
-  await ui.press({ key: 'tab:iterations' })
-  expect(await ui.find({ type: 'Text', text: 'No iteration.' })).toBeTruthy()
+    expect(await ui.find({ type: 'Text', text: 'Iteration 2 · 1/2 WPs · ends 2026-11-21 · Checkout' })).toBeFalsy()
+  await ui.press({ key: 'tab:registers' })
+  expect(await ui.find({ type: 'Text', text: /^Empty: .*Iterations \(\/pm-iterate\)/ })).toBeTruthy()
   await ui.unmount()
 })

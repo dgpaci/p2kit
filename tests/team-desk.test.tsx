@@ -34,7 +34,8 @@ const PANE = {
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 
 test('the browser page shows the Team tab and a WIP badge for each person over the limit', async () => {
-  // wf:contract: renderBoard embeds each project's team; the project form has a "Team" tab right after "Roles", its count the team's length.
+  // wf:contract: renderBoard embeds each project's team; the project form has a "Team" tab right after "Activity", its count the team's length,
+  // wf:contract: the roles on top as one chip each ("<role> · <people>").
   // wf:contract: The Team tab shows one block per person: name, "@<login>" or "no forge login", role labels, "WIP <wip>/<wipLimit>",
   // wf:contract: and their items with the labels "review asked", "in progress", "to do", "waiting for review", "stalled".
   // wf:contract: The overview card head and the recap's "Needs attention" show "WIP <person> <wip>/<wipLimit>" for each person with isOverLimit,
@@ -53,7 +54,8 @@ test('the browser page shows the Team tab and a WIP badge for each person over t
   expect(data.projects.map((one: Project) => one.team)).toEqual([busy.team, calm.team])
   const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
   // The test sandbox forbids new Function: the tab list, the labels and the WIP lines are read from the script text.
-  expect(script).toMatch(/\['roles', 'Roles'[^\n]*\n  \['team', 'Team', p => p\.team\.length, team\]/)
+  expect(script).toMatch(/\['activity', 'Activity'[^\n]*\n  \['team', 'Team', p => p\.team\.length, team\]/)
+  expect(script).toContain("pill(r.label + ' · ' + (r.people.join(', ') || '—')")
   for (const label of ["'@' + m.login : 'no forge login'", "'WIP ' + m.wip + '/' + m.wipLimit", 'm.roles.join', "review: 'review asked'", "inprogress: 'in progress'", "todo: 'to do'", "waiting: 'waiting for review'", "stalled: 'stalled'"]) {
     expect(script).toContain(label)
   }

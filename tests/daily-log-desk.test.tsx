@@ -26,7 +26,7 @@ const PANE = {
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 140 } } as const
 
 test('the desk shows a Daily log tab and the overdue actions, in the page and the pane', async ($, on) => {
-  // wf:contract: A tab with id "log", label "Daily log", right after "Roadmap" (board.ts TABS and register.tsx tabs), its count the open actions.
+  // wf:contract: The Daily log is the last section of the Documents tab (board.ts documents, register.tsx tabs), headed "Daily log · <n> open actions".
   // wf:contract: Its body: a block per day, newest first, the entries in file order; with no log "No daily log yet: run /pm-log in the project's repo."
   // wf:contract: Recap, page and pane: in Needs attention one red line per overdue action, "<id> <text> · <owner> · due <due>" (owner part only when set).
   // wf:contract: The page script still contains no "${"; the pane state shape becomes projects-15.
@@ -36,7 +36,7 @@ test('the desk shows a Daily log tab and the overdue actions, in the page and th
   const data = JSON.parse(page.slice(page.indexOf('<script type="application/json" id="data">') + 42, page.indexOf('</script>')))
   expect(data.projects[0].dailyLog).toEqual(logged.dailyLog)
   const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
-  expect(script).toMatch(/\['roadmap', 'Roadmap', placedCount, roadmap\],\n {2}\['log', 'Daily log', p => openLogActions\(p\)\.length, dailyLog\],/)
+  expect(script).toContain("blockTitle('Daily log', open ? open + ' open actions' : ''),\n    dailyLog(p))")
   expect(script).toContain("...logOf(p).filter(d => d.isOverdue)")
   expect(script).toContain("No daily log yet: run /pm-log in the project's repo.")
   expect(script).not.toContain('${')
@@ -57,8 +57,8 @@ test('the desk shows a Daily log tab and the overdue actions, in the page and th
   const ui = await $.ui.mount(PANE)
   await ui.press({ key: 'open:/t/logged' })
   expect(await ui.find({ type: 'Text', text: 'D-002 send the price list · Marco Bianchi · due 2026-11-19' })).toBeTruthy()
-  expect(await ui.find({ type: 'Button', key: 'tab:log', text: 'Daily log 1' })).toBeTruthy()
-  await ui.press({ key: 'tab:log' })
+  await ui.press({ key: 'tab:documents' })
+  expect(await ui.find({ type: 'Text', text: 'Daily log · 1 open actions' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: '2026-11-18' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'D-001 · event · issue closed: Fix login · #41' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'D-002 · action · send the price list · Marco Bianchi · due 2026-11-19 · open' })).toBeTruthy()
@@ -66,8 +66,8 @@ test('the desk shows a Daily log tab and the overdue actions, in the page and th
   expect(await ui.find({ type: 'Text', text: 'D-004 · problem · test server down · → I-004' })).toBeTruthy()
   await ui.press({ key: 'back' })
   await ui.press({ key: 'open:/t/plain' })
-  expect(await ui.find({ type: 'Button', key: 'tab:log', text: 'Daily log 0' })).toBeTruthy()
-  await ui.press({ key: 'tab:log' })
+  await ui.press({ key: 'tab:documents' })
+  expect(await ui.find({ type: 'Text', text: 'Daily log' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: "No daily log yet: run /pm-log in the project's repo." })).toBeTruthy()
   await ui.unmount()
 })

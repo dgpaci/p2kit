@@ -433,9 +433,9 @@ horizon are *not on the roadmap*, by id.
 - `roadmap-external.md`, title `Roadmap (external)` — per horizon title, status and due only: no
   ids, no risks, no effort.
 
-Nothing reads them back but the Documents list. The desk's Roadmap tab shows the Now, Next and
-Later blocks from the work packages, and the open ones not on the roadmap; the snapshot carries
-`roadmap: { now, next, later, unplaced }` (ids).
+Nothing reads them back but the Documents list. The desk's Work packages tab groups the work
+packages in Now, Next and Later blocks, then *Not placed* with every other one (open with no
+horizon, or closed); the snapshot carries `roadmap: { now, next, later, unplaced }` (ids).
 
 ## Registers
 
@@ -522,7 +522,7 @@ iterations:
   <id>`.
 - The desk: `iteration <n> · <done>/<planned> WPs · ends <end>` in the overview row after the WPs
   fact (red and `overdue` past its end), an Iteration card in the recap, `Iteration <n> past its
-  end (<end>)` in Needs attention, and an Iterations tab after Work packages, newest first.
+  end (<end>)` in Needs attention, and an Iterations section of the Registers tab, newest first.
 
 ### `registers/lessons.yaml`
 
@@ -545,10 +545,9 @@ actions:
 - The **last retrospective** is the latest `retrospectives[].date`.
 - Errors: the file is parsed once, a parse failure is one error `lessons.yaml: <reason>` and the
   three lists stay empty.
-- The desk: `last retro <date>` (or `—`) in the overview row after the next report fact, one line
-  per open action in Needs attention (`<id> <text> #<issue>`), and a Lessons tab after Iterations,
-  its count the open actions: the last retrospective, the actions open first, the lessons newest
-  first. On the page an action's issue links to the forge.
+- The desk: one line per open action in Needs attention (`<id> <text> #<issue>`), and a Lessons
+  section of the Registers tab, headed by the open actions: the last retrospective, the actions
+  open first, the lessons newest first. On the page an action's issue links to the forge.
 
 ### `registers/daily-log.yaml`
 
@@ -575,7 +574,7 @@ entries:
   closed on the same day shows only as closed. The **last log** is the latest `date`.
 - Errors: a parse failure is one error `daily-log.yaml: <reason>` and the list stays empty.
 - The desk: one red line per overdue action in Needs attention (`<id> <text> · <owner> · due
-  <due>`), and a Daily log tab after Roadmap, its count the open actions: a block per day, newest
+  <due>`), and a Daily log section closing the Documents tab, headed by the open actions: a block per day, newest
   first, the entries in file order with kind and source, text and ref, issue, owner, due and
   status; an overdue due is red, a done action dimmed.
 
@@ -671,7 +670,25 @@ links to a session with their skill, and the others are not offered.
 
 **Pane.** The Desktop pane writes the file itself (`hooks/edits.ts`, the helper's rules, checked
 by both suites on `server/edit-cases.mjs`): Archive and Mark completed in a work theme, close /
-reopen on a note, move / place in the Roadmap tab, each confirmed in a dialog showing the line.
+reopen on a note, move / place in the Work packages tab, each confirmed in a dialog showing the line.
+
+## Desk layout
+
+The overview row of a project: stage, objectives, work packages, iteration and effort when set,
+high risks, blockers, errors, `notready` and WIP badges; the next report shows only in Needs
+attention, once overdue. A project's form has eight tabs, in this order:
+
+- **Recap** — stage, objectives, tolerances, Needs attention, notes of no work theme.
+- **Board** — a swimlane per work package with a milestone (see Work themes).
+- **Activity** — open milestones, pull requests and issues, with the selection bar.
+- **Team** — the roles as chips on top, then one card per person.
+- **Work packages** — grouped Now / Next / Later / Not placed; estimate, actual and deviation
+  only when some work package has them.
+- **Documents** — the `.pm/` products and the `documents` folders, then the Daily log.
+- **Registers** — Risks, Approvals, Problems (the PRINCE2 issue register, renamed next to the
+  forge's issues), Lessons, Iterations; the empty ones share one line naming the skill that
+  starts each. Its count: open risks, open problems and open lesson actions.
+- **Metrics** — the flow of the last 30 and 90 days.
 
 ## The desk snapshot
 

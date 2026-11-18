@@ -32,10 +32,10 @@ test('the desk shows the stage effort in the row, the computed tolerance in the 
   // wf:contract: "effort <actual>/<estimate>h <deviation>h", the deviation signed ("+4h", "0h", "-3h"), placed right after the iteration fact;
   // wf:contract: red (class err on the page, red text in the pane) when the "effort" tolerance is red. No fact without project.effort.
   // wf:contract: Recap Tolerances, page and pane: a tolerance with isComputed true reads "<used> / <limit> <unit> · from work packages".
-  // wf:contract: Work packages tab, page: columns "Estimate", "Actual", "Deviation" after "Due" (hours, '' when null, the deviation signed);
+  // wf:contract: Work packages tab, page: columns "Estimate", "Actual", "Deviation" after "Due" (hours, '' when null, the deviation signed),
+  // wf:contract: only when some work package has an estimate or an actual;
   // wf:contract: above the table, when project.effort is set, "Stage <stage> effort: <actual>h of <estimate>h, deviation <signed>h over <counted> work packages".
   // wf:contract: Pane: the same stage line under the progress bar, and each work package line ends "est <e>h · act <a>h · <signed>h" for the figures it has.
-  // wf:contract: The ['wps', 'Work packages', …] entry of board.ts TABS stays exactly two lines (tests/iterations-desk.test.tsx matches it).
   // wf:contract: The page script still contains no "${" and passes node --check; the pane state shape becomes projects-12.
   const files = (path: string) => ({
     path, project: FILES[`${path}/.pm/project.yaml`], products: [],
@@ -56,9 +56,8 @@ test('the desk shows the stage effort in the row, the computed tolerance in the 
   expect(script).toContain("t.area === 'effort' && t.light === 'red'")
   expect(script).toContain("(n > 0 ? '+' : '') + n + 'h'")
   expect(script).toContain("(t.isComputed ? ' · from work packages' : '')")
-  expect(script).toContain("'Due', 'Estimate', 'Actual', 'Deviation', 'Link'")
+  expect(script).toContain("'Due', ...(hasEffort ? ['Estimate', 'Actual', 'Deviation'] : []), 'Link'")
   expect(script).toContain("'Stage ' + e.stage + ' effort: ' + e.actual + 'h of ' + e.estimate + 'h, deviation ' + signed(e.deviation) + ' over ' + e.counted + ' work packages'")
-  expect(script).toMatch(/\['wps', 'Work packages', [^\n]*\n[^\n]*\n {2}\['iterations', /)
   expect(script).not.toContain('${')
 
   // The pane, from a real read.

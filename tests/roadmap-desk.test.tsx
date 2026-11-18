@@ -29,15 +29,11 @@ const PANE = {
 } as const
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } } as const
 
-test('the desk shows the roadmap in a Roadmap tab and the generated roadmaps under Documents, in the page and the pane', async ($, on) => {
-  // wf:contract: A tab with id "roadmap", label "Roadmap", right after "Lessons" (board.ts TABS and register.tsx tabs), its count the
-  // wf:contract: work packages placed in a horizon (now + next + later).
-  // wf:contract: Page body: three blocks titled "Now", "Next", "Later", in that order, each a table with columns '', Title, Stage, Status, Due
-  // wf:contract: (the id links to the work package file), in project.roadmap order; an empty horizon reads "Nothing planned.";
-  // wf:contract: then, when project.roadmap.unplaced is not empty, "Not on the roadmap: <id>, <id>"; with no work package in any list,
-  // wf:contract: "No roadmap yet: run /pm-roadmap in the project's repo."
-  // wf:contract: Pane: one line per placed work package "<Now|Next|Later> · <id> <title> · <status>" followed by " · due <due>" when it has one,
-  // wf:contract: the same "Not on the roadmap: …" and "No roadmap yet: run /pm-roadmap in the project's repo." lines.
+test('the Work packages tab groups the work packages by horizon and the generated roadmaps are under Documents, in the page and the pane', async ($, on) => {
+  // wf:contract: No Roadmap tab: the Work packages tab groups them in blocks "Now", "Next", "Later" in project.roadmap order, then
+  // wf:contract: "Not placed" with every other work package (open with no horizon, or closed); empty groups share one "Empty: …" line,
+  // wf:contract: which points to /pm-roadmap while nothing is placed.
+  // wf:contract: Pane: a bold "<group> · <n>" line per non-empty group, then its work packages, each with a move (placed) or place button.
   // wf:contract: .pm/roadmap.md and .pm/roadmap-external.md, when present, are listed under Documents like every other .pm product.
   // wf:contract: The page script still contains no "${" and passes node --check; the pane state shape becomes projects-13.
   const files = (path: string) => ({
@@ -53,13 +49,11 @@ test('the desk shows the roadmap in a Roadmap tab and the generated roadmaps und
   expect(data.projects[0].roadmap).toEqual(road.roadmap)
   expect(data.projects[1].roadmap).toEqual({ now: [], next: [], later: [], unplaced: [] })
   const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
-  expect(script).toMatch(/\['lessons', 'Lessons', [^\n]*\n {2}\['roadmap', 'Roadmap', placedCount, roadmap\],/)
+  expect(script).not.toContain("['roadmap', ")
+  expect(script).toContain("['wps', 'Work packages', p => p.workPackages.length, workPackages],")
   expect(script).toContain("const HORIZONS = [['now', 'Now'], ['next', 'Next'], ['later', 'Later']]")
-  expect(script).toContain('p.roadmap.now.length + p.roadmap.next.length + p.roadmap.later.length')
-  expect(script).toContain("tableOf(['', 'Title', 'Stage', 'Status', 'Due'], wps(p.roadmap[key]).map(w => [fileLink(w.path, w.id),")
-  expect(script).toContain("'Nothing planned.'")
-  expect(script).toContain("'Not on the roadmap: ' + p.roadmap.unplaced.join(', ')")
-  expect(script).toContain(`"No roadmap yet: run /pm-roadmap in the project's repo."`)
+  expect(script).toContain("['Not placed', p.workPackages.filter(w => !placed.has(w.id))]")
+  expect(script).toContain(`" — run /pm-roadmap in the project's repo to place them"`)
   expect(script).not.toContain('${')
 
   // The pane, from a real read.
@@ -77,19 +71,20 @@ test('the desk shows the roadmap in a Roadmap tab and the generated roadmaps und
 
   const ui = await $.ui.mount(PANE)
   await ui.press({ key: 'open:/t/road' })
-  expect(await ui.find({ type: 'Button', key: 'tab:roadmap', text: 'Roadmap 3' })).toBeTruthy()
-  await ui.press({ key: 'tab:roadmap' })
-  expect(await ui.find({ type: 'Text', text: 'Now · WP-02 WP-02 title · authorized' })).toBeTruthy()
-  expect(await ui.find({ type: 'Text', text: 'Now · WP-01 WP-01 title · in-progress · due 2026-12-01' })).toBeTruthy()
-  expect(await ui.find({ type: 'Text', text: 'Later · WP-03 WP-03 title · draft' })).toBeTruthy()
-  expect(await ui.find({ type: 'Text', text: 'Not on the roadmap: WP-04' })).toBeTruthy()
+  expect(await ui.find({ type: 'Button', key: 'tab:roadmap' })).toBeFalsy()
+  await ui.press({ key: 'tab:wps' })
+  expect(await ui.find({ type: 'Text', text: 'Now · 2' })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: 'Later · 1' })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: 'Not placed · 1' })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: 'Next · 0' })).toBeFalsy()
+  expect(await ui.find({ type: 'Button', key: 'move:WP-01' })).toBeTruthy()
+  expect(await ui.find({ type: 'Button', key: 'move:WP-04', text: 'place WP-04' })).toBeTruthy()
   await ui.press({ key: 'tab:documents' })
   expect(await ui.find({ type: 'Button', text: 'Roadmap · draft' })).toBeTruthy()
   expect(await ui.find({ type: 'Button', text: 'Roadmap (external) · draft' })).toBeTruthy()
   await ui.press({ key: 'back' })
   await ui.press({ key: 'open:/t/plain' })
-  expect(await ui.find({ type: 'Button', key: 'tab:roadmap', text: 'Roadmap 0' })).toBeTruthy()
-  await ui.press({ key: 'tab:roadmap' })
-  expect(await ui.find({ type: 'Text', text: "No roadmap yet: run /pm-roadmap in the project's repo." })).toBeTruthy()
+  await ui.press({ key: 'tab:wps' })
+  expect(await ui.find({ type: 'Text', text: 'None yet.' })).toBeTruthy()
   await ui.unmount()
 })
