@@ -20,6 +20,8 @@ const REFRESH_MS = 60 * 1000
 // The browser board, under the home folder.
 const BOARD_PATH = '.claude/p2kit/desk.html'
 const SNAPSHOT_PATH = '.claude/p2kit/desk.json'
+// Stamped by the desk helper after each write (server/desk_server.py mark_changed): `{ at }` in epoch ms.
+const CHANGED_PATH = '.claude/p2kit/desk-changed.json'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
@@ -176,12 +178,27 @@ async function moveFromPane($: EngineInterface, wp: WorkPackage): Promise<void> 
   }
 }
 
-/** Reads every registered project again. */
+/** When the desk helper last wrote, in epoch ms; 0 when it never did or the stamp cannot be read. */
+async function getChangedAt($: EngineInterface): Promise<number> {
+  try {
+    const at = (JSON.parse(await $.fs.read(`${await $.env.get('HOME')}/${CHANGED_PATH}`)) as { at?: unknown }).at
+    return typeof at === 'number' ? at : 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Reads every registered project again. Forced as well when the desk helper wrote after this session's last read: only the
+ * session that started the helper hears its `changed`, and every other one would write its cached forge state over the change.
+ */
 async function reload($: EngineInterface, isForced = false): Promise<{ count: number; errors: string[] }> {
-  if ((await read($, meta)).isLoading) return { count: (await read($, projects)).length, errors: [] }
+  const state = await read($, meta)
+  if (state.isLoading) return { count: (await read($, projects)).length, errors: [] }
+  const isStale = state.refreshedAt > 0 && (await getChangedAt($)) > state.refreshedAt
   await update($, meta, now => ({ ...now, isLoading: true }))
   try {
-    const found = await loadProjects($, isForced)
+    const found = await loadProjects($, isForced || isStale)
     await update($, projects, () => found.projects)
     const refreshedAt = await $.clock.now()
     await update($, meta, () => ({ refreshedAt, errors: found.errors, isLoading: false }))

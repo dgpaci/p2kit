@@ -618,8 +618,10 @@ started) and writes nothing else; the helper writes `~/.claude/p2kit/desk-server
 only if the preview, computed again, has the same hash. A request is refused (403) unless its
 `Host` is `127.0.0.1:<port>` or `localhost:<port>`, its `Origin` the same, and its `X-P2kit-Token`
 the page's token; only projects of the registry are touched. After a write the helper prints
-`changed <path>`, the mod reads the projects again, and the page reloads once the snapshot's
-`refreshedAt` moves. Forge writes use `gh api` on GitHub and the `fj` token on Forgejo. With no
+`changed <path>` and stamps `~/.claude/p2kit/desk-changed.json` (`{ at, project }`, `at` in epoch ms);
+the mod reads the projects again, and the page reloads once the snapshot's `refreshedAt` moves.
+Every other session reads the forge again, past its cache, when the stamp is newer than its last
+read, so none writes the desk back with the state before the change. Forge writes use `gh api` on GitHub and the `fj` token on Forgejo. With no
 `python3`, *Open in browser* opens the file: Archive, Link, Create package and note buttons become
 links to a session with their skill, and the others are not offered.
 
