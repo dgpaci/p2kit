@@ -106,5 +106,5 @@ both at the same time. Take issue #12 of WP-02, *Three-step checkout*.
   `gh` or `fj`, already authenticated on your machine.
 - It does not commit `.pm/`: you commit it with the code, when you decide.
 
-Installation and the list of skills: [README](../README.md). The `.pm/` format:
+Installation and the list of skills: [README](https://github.com/dgpaci/p2kit#readme). The `.pm/` format:
 [pm-schema.md](pm-schema.md). Scope and desk actions: [scope.md](scope.md).

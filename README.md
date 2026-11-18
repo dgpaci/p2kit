@@ -4,7 +4,7 @@ Project management for Claude Code, **aligned with PRINCE2®** — not affiliate
 by PeopleCert or AXELOS. PRINCE2® is a registered trademark of PeopleCert. All templates here are
 written from scratch.
 
-**New here? Read the [guide](docs/guide.md)** — what p2kit is for, the desk with screenshots, and a
+**New here? Read the [guide](docs/index.md)** — what p2kit is for, the desk with screenshots, and a
 task's journey from assignment to merge.
 
 - **Skills, one per process.** Claude drafts the management products (Project Brief, PID, plans,
