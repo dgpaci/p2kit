@@ -1,0 +1,13 @@
+site_name: p2kit
+site_description: Project management for Claude Code, aligned with PRINCE2®
+repo_url: https://github.com/dgpaci/p2kit
+edit_uri: edit/main/docs/
+theme:
+  name: material
+docs_dir: docs
+exclude_docs: |
+  demo/
+nav:
+  - Guide: index.md
+  - Scope and desk actions: scope.md
+  - The .pm/ schema: pm-schema.md
