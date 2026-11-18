@@ -138,6 +138,17 @@ def shared_cases():
         return json.loads(handle.read().split('export default', 1)[1])
 
 
+class ChangedStamp(unittest.TestCase):
+    def test_a_write_stamps_when_and_where(self):
+        with tempfile.TemporaryDirectory() as home:
+            before = int(ds.time.time() * 1000)
+            ds.mark_changed(home, '/p')
+            with open(os.path.join(home, ds.DESK_DIR, ds.CHANGED_FILE)) as handle:
+                stamp = json.load(handle)
+            self.assertEqual(stamp['project'], '/p')
+            self.assertGreaterEqual(stamp['at'], before)
+
+
 class SharedCases(unittest.TestCase):
     def test_the_pane_and_the_helper_edit_alike(self):
         for case in shared_cases():

@@ -8,6 +8,7 @@ It edits files of the projects listed in ~/.config/p2kit/projects.yaml, never co
 and writes to a forge only through the CLI or token the user has already set up.
 
 stdout, read by the mod: `listening <port>` once, then `changed <project path>` per write.
+Each write also stamps ~/.claude/p2kit/desk-changed.json, so every session reads the forge again.
 """
 
 import argparse
@@ -19,12 +20,14 @@ import secrets
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DESK_DIR = '.claude/p2kit'
 INFO_FILE = 'desk-server.json'
+CHANGED_FILE = 'desk-changed.json'
 REGISTRY = '.config/p2kit/projects.yaml'
 FJ_KEYS = 'Library/Application Support/forgejo-cli.forgejo-cli/keys.json'
 TOKEN_HEADER = 'X-P2kit-Token'
@@ -653,6 +656,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError, subprocess.SubprocessError) as error:
             return self.refuse(500, f'{type(error).__name__}: {error}')
         if changed:
+            mark_changed(self.server.home, request['project'])
             print('changed ' + request['project'], flush=True)
         return self.answer(200, result)
 
@@ -672,6 +676,16 @@ def write_info(home, server):
     descriptor = os.open(path + '.tmp', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, 'w') as handle:
         json.dump({'port': server.server_address[1], 'pid': os.getpid()}, handle)
+    os.replace(path + '.tmp', path)
+
+
+def mark_changed(home, project):
+    """Stamps the last write, `{ at, project }` with `at` in epoch ms: a session whose read is older reads the forge again."""
+    folder = os.path.join(home, DESK_DIR)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, CHANGED_FILE)
+    with open(path + '.tmp', 'w') as handle:
+        json.dump({'at': int(time.time() * 1000), 'project': project}, handle)
     os.replace(path + '.tmp', path)
 
 
