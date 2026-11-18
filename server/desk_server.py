@@ -33,6 +33,9 @@ FJ_KEYS = 'Library/Application Support/forgejo-cli.forgejo-cli/keys.json'
 TOKEN_HEADER = 'X-P2kit-Token'
 MAX_BODY = 64 * 1024
 FORGE_TIMEOUT = 30
+MAX_TITLE = 200
+MAX_ISSUE_BODY = 20000
+MAX_ASSIGN_MANY = 50
 
 WP_ID = re.compile(r'^WP-\d{2,}$')
 BRANCH = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$')
@@ -494,6 +497,50 @@ def apply_assign(preview, forge):
     return [f"{preview['item']['ref']} assignees: {', '.join(preview['after']) or 'none'}"]
 
 
+def plan_assign_many(root, home, request, forge=None):
+    """Assigning one team member to several issues or pull requests: each item with its assignees before and after; the closed
+    ones and those the member already holds are left out, so one stale row does not block the rest."""
+    numbers, login = request.get('numbers'), request.get('login')
+    if not isinstance(numbers, list) or not numbers or len(numbers) > MAX_ASSIGN_MANY:
+        raise ActionError(f'pick from 1 to {MAX_ASSIGN_MANY} issues or pull requests')
+    if not all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in numbers):
+        raise ActionError('an issue or pull request is a number')
+    people = team_logins(root)
+    if not isinstance(login, str) or login not in people:
+        raise ActionError(f'{login} is not a login of team.people in .pm/project.yaml')
+    forge = forge or Forge(root, home)
+    items, skipped = [], []
+    for number in dict.fromkeys(numbers):
+        item = forge.call('GET', f'repos/{forge.repo}/issues/{number}')
+        ref = item_ref(item)
+        before = [a['login'] for a in item.get('assignees') or [] if a.get('login')]
+        if item.get('state') != 'open':
+            skipped.append({'ref': ref, 'reason': 'closed'})
+        elif login.lower() in (a.lower() for a in before):
+            skipped.append({'ref': ref, 'reason': f'{login} already assigned'})
+        else:
+            items.append({'ref': ref, 'number': number, 'title': item.get('title', ''), 'before': before, 'after': before + [login]})
+    if not items:
+        raise ActionError(f'nothing to assign: {", ".join(s["ref"] + " " + s["reason"] for s in skipped)}')
+    return {
+        'kind': 'assign-many', 'project': root, 'forge': f'{forge.host}/{forge.repo}',
+        'summary': f'Assign {people[login]} to {len(items)} item' + ('s' if len(items) > 1 else ''),
+        'items': items, 'skipped': skipped,
+    }, forge
+
+
+def apply_assign_many(preview, forge):
+    """Patches the items in order, stopping at the first failure; says what was done."""
+    done = []
+    try:
+        for item in preview['items']:
+            forge.call('PATCH', f"repos/{forge.repo}/issues/{item['number']}", {'assignees': item['after']})
+            done.append(f"{item['ref']} assignees: {', '.join(item['after'])}")
+    except ActionError as error:
+        raise ActionError(f"{error} — done before it: {', '.join(done) or 'nothing'}") from None
+    return done
+
+
 def plan_issue_milestone(root, home, request, forge=None):
     """Attaching one issue or pull request to the milestone of a work package: the item, its milestone now and the new one."""
     number, wp = request.get('number'), request.get('wp')
@@ -525,6 +572,45 @@ def plan_issue_milestone(root, home, request, forge=None):
 def apply_issue_milestone(preview, forge):
     forge.call('PATCH', f"repos/{forge.repo}/issues/{preview['item']['number']}", {'milestone': preview['milestone']['key']})
     return [f"{preview['item']['ref']} in milestone {preview['milestone']['title']}"]
+
+
+def plan_issue_create(root, home, request, forge=None):
+    """A new issue: its title and body, the milestone of a work package and a team member to assign, all optional but the title."""
+    title, body, wp, login = request.get('title'), request.get('body', ''), request.get('wp') or '', request.get('login') or ''
+    if not isinstance(title, str) or not title.strip() or len(title.strip()) > MAX_TITLE or '\n' in title:
+        raise ActionError(f'the issue needs a title of one line, at most {MAX_TITLE} characters')
+    if not isinstance(body, str) or len(body) > MAX_ISSUE_BODY:
+        raise ActionError(f'the body is text of at most {MAX_ISSUE_BODY} characters')
+    people = team_logins(root)
+    if login and (not isinstance(login, str) or login not in people):
+        raise ActionError(f'{login} is not a login of team.people in .pm/project.yaml')
+    milestone_title = read_key(read_text(wp_path(root, wp)), 'milestone') if wp else None
+    if wp and not milestone_title:
+        raise ActionError(f'{wp} has no milestone: link one with /pm-link, or create the issue without a work package')
+    forge = forge or Forge(root, home)
+    milestone = None
+    if milestone_title:
+        found = next((m for m in forge.milestones() if m.get('title') == milestone_title), None)
+        if not found:
+            raise ActionError(f'milestone {milestone_title} of {wp} is not on {forge.host}/{forge.repo}')
+        milestone = {'title': milestone_title, 'key': forge.milestone_key(found), 'closed': found.get('state') == 'closed'}
+    return {
+        'kind': 'issue-create', 'project': root, 'forge': f'{forge.host}/{forge.repo}', 'wp': wp,
+        'summary': f'Create issue {title.strip()}',
+        'issue': {'title': title.strip(), 'body': body.strip()}, 'milestone': milestone,
+        'assignee': {'login': login, 'person': people[login]} if login else None,
+    }, forge
+
+
+def apply_issue_create(preview, forge):
+    payload = dict(preview['issue'])
+    if preview['milestone']:
+        payload['milestone'] = preview['milestone']['key']
+    if preview['assignee']:
+        payload['assignees'] = [preview['assignee']['login']]
+    created = forge.call('POST', f'repos/{forge.repo}/issues', payload) or {}
+    return [f"#{created.get('number', '?')} created" + (f" in {preview['milestone']['title']}" if preview['milestone'] else '')
+            + (f", assigned to {preview['assignee']['person']}" if preview['assignee'] else '')]
 
 
 def apply_package(root, preview, forge, existing, move):
@@ -567,9 +653,15 @@ def run_action(home, request, forge=None):
     if request.get('kind') == 'assign':
         preview, forge = plan_assign(root, home, request, forge)
         apply = lambda: apply_assign(preview, forge)
+    elif request.get('kind') == 'assign-many':
+        preview, forge = plan_assign_many(root, home, request, forge)
+        apply = lambda: apply_assign_many(preview, forge)
     elif request.get('kind') == 'issue-milestone':
         preview, forge = plan_issue_milestone(root, home, request, forge)
         apply = lambda: apply_issue_milestone(preview, forge)
+    elif request.get('kind') == 'issue-create':
+        preview, forge = plan_issue_create(root, home, request, forge)
+        apply = lambda: apply_issue_create(preview, forge)
     elif request.get('kind') == 'package':
         preview, forge, existing = plan_package(root, home, request, forge)
         apply = lambda: apply_package(root, preview, forge, existing, request.get('move') or [])

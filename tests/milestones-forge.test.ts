@@ -26,7 +26,8 @@ const PULLS = [
   { number: 3, title: 'Pull 3', html_url: 'https://h/pulls/3', updated_at: '2026-11-12T10:00:00Z', draft: false, user: { login: 'a' }, assignees: [], requested_reviewers: [{ login: 'b' }], milestone: { title: 'v1' } },
 ]
 // The closed-item reads of the flow metrics answer empty and are left out of the counts: tests/flow-forge.test.ts covers them.
-const isFlowRead = (path: string): boolean => path.includes('state=closed') || path.includes('/reviews')
+// The flow reads and the issue timelines are pinned in tests of their own.
+const isFlowRead = (path: string): boolean => path.includes('state=closed') || path.includes('/reviews') || path.includes('/timeline')
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 
 test('the repo of every forge project is read once, GET only, into its milestones and open issues', async ($, on) => {

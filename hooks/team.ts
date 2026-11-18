@@ -1,4 +1,4 @@
-import type { RoleLine, TeamItem, TeamMember, TeamStatus } from '../types'
+import type { IssueState, RoleLine, TeamItem, TeamMember, TeamStatus } from '../types'
 import { isDoc } from './yaml'
 import type { Value } from './yaml'
 
@@ -12,6 +12,8 @@ type RestMilestoneRef = { title: string } | null
 export type RestIssue = {
   number: number; title: string; html_url: string; updated_at: string; assignees?: RestUser[] | null; pull_request?: unknown; state?: string
   milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null
+  // Not from the list: set by the desk from the issue's timeline, true once a commit references the issue.
+  has_commits?: boolean
 }
 export type RestPull = {
   number: number; title: string; html_url: string; updated_at: string; draft?: boolean
@@ -22,6 +24,37 @@ export type RestPull = {
 export const logins = (users: RestUser[] | null | undefined): string[] => (users ?? []).map(user => user.login)
 /** An issue, not a pull request: GitHub omits `pull_request` on issues, Forgejo sends it as null. */
 export const isPlainIssue = (issue: RestIssue): boolean => issue.pull_request == null
+
+// An event of an issue's timeline: GitHub marks a commit referencing the issue `referenced` with its `commit_id`,
+// Forgejo `commit_ref`.
+export type TimelineEvent = { event?: string; commit_id?: string | null; type?: string }
+const CLOSING_REF = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)/gi
+
+/** The issue numbers a pull request body closes — `closes|fixes|resolves #n` and their tenses, any case — once each, in order. */
+export function getClosedRefs(body: string | null | undefined): number[] {
+  const refs = [...(body ?? '').matchAll(CLOSING_REF)].map(match => Number(match[1]))
+  return [...new Set(refs)]
+}
+
+/** Whether a commit references the issue: the work on it has started. Forgejo answers `null` for an empty timeline. */
+export const hasCommitRef = (events: TimelineEvent[] | null): boolean =>
+  (events ?? []).some(event => (event.event === 'referenced' && Boolean(event.commit_id)) || event.type === 'commit_ref')
+
+/**
+ * Where an issue stands: `done` closed; `review` an open non-draft pull closes it; `inprogress` a commit references it
+ * (its first commit: the developer has started), or an open draft pull closes it; else `todo`, assigned or not.
+ * Assigning alone is the PM's plan, not work in progress. The same rule as forge-desk's.
+ */
+export function getIssueState(issue: RestIssue, pulls: RestPull[]): IssueState {
+  if (issue.state === 'closed') return 'done'
+  const closing = pulls.filter(pull => getClosedRefs(pull.body).includes(issue.number))
+  if (closing.some(pull => !pull.draft)) return 'review'
+  if (issue.has_commits || closing.length > 0) return 'inprogress'
+  return 'todo'
+}
+
+// An assigned issue as its assignee's work: its pull request in review is waiting on others.
+const ISSUE_STATUS: Record<IssueState, TeamStatus> = { todo: 'todo', inprogress: 'inprogress', review: 'waiting', done: 'todo' }
 const limitOf = (value: Value | undefined): number | null => (typeof value === 'number' ? value : null)
 
 /** The people of the roles, once each in role order, with the login and WIP limit `team.people` gives them; items empty. */
@@ -55,7 +88,7 @@ export function toTeamItems(login: string, issues: RestIssue[], pulls: RestPull[
   const add = (kind: TeamItem['kind'], one: RestIssue | RestPull, status: TeamStatus) =>
     found.push({ item: { kind, number: one.number, title: one.title, status, url: one.html_url, updatedAt: one.updated_at.slice(0, 10) }, at: one.updated_at })
   for (const issue of issues) {
-    if (isPlainIssue(issue) && logins(issue.assignees).includes(login)) add('issue', issue, 'todo')
+    if (isPlainIssue(issue) && logins(issue.assignees).includes(login)) add('issue', issue, ISSUE_STATUS[getIssueState(issue, pulls)])
   }
   for (const pull of pulls) {
     const author = pull.user?.login ?? ''

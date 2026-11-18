@@ -9,8 +9,8 @@ import type { RestMilestoneItem } from './milestones'
 import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
 import { findPlanPath, getPhaseSummary, parseObjective, parsePhaseOutcomes, parsePhases } from './stage'
 import { readReadiness } from './readiness'
-import { readTeam, toTeamItems, withItems } from './team'
-import type { RestIssue, RestPull } from './team'
+import { getClosedRefs, hasCommitRef, isPlainIssue, logins, readTeam, toTeamItems, withItems } from './team'
+import type { RestIssue, RestPull, TimelineEvent } from './team'
 import { isDoc, parseFrontmatter, parseYaml } from './yaml'
 import type { Doc, Value } from './yaml'
 
@@ -49,6 +49,8 @@ const MILESTONE_PAGES = 5
 // The reviews of at most this many merged pulls are read per read of the closed lists, this many at a time.
 const REVIEWS_PER_READ = 100
 const REVIEW_BATCH = 10
+// Timelines read per refresh of a repo, the most recently updated assigned issues first.
+const TIMELINES_PER_READ = 50
 
 // The raw text of a project's .pm/ files, as the loader found them; paths are absolute.
 export type ProjectFiles = {
@@ -777,6 +779,36 @@ async function readMilestones($: EngineInterface, target: ForgeTarget, errors: s
   }
 }
 
+// Per `<repo>#<issue>`, a commit referencing it was seen: kept for the module's life, a commit does not go away.
+const startedIssues = new Set<string>()
+
+/**
+ * The open issues, each assigned one with no pull request closing it marked `has_commits` once its timeline shows a commit
+ * referencing it. A timeline is read until it shows one, at most TIMELINES_PER_READ per read; a failure goes to `errors`.
+ */
+async function markStarted($: EngineInterface, target: ForgeTarget, issues: RestIssue[], pulls: RestPull[], errors: string[]): Promise<RestIssue[]> {
+  const closed = new Set(pulls.flatMap(pull => getClosedRefs(pull.body)))
+  const key = (issue: RestIssue) => `${target.repo}#${issue.number}`
+  const unknown = issues
+    .filter(issue => isPlainIssue(issue) && logins(issue.assignees).length > 0 && !closed.has(issue.number) && !startedIssues.has(key(issue)))
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    .slice(0, TIMELINES_PER_READ)
+  let failed = ''
+  for (let n = 0; n < unknown.length; n += REVIEW_BATCH) {
+    await Promise.all(unknown.slice(n, n + REVIEW_BATCH).map(async issue => {
+      const page = target.forge === 'github' ? `per_page=${GITHUB_PAGE}` : 'limit=100'
+      try {
+        const events = await getForgeJson($, target, `repos/${target.repo}/issues/${issue.number}/timeline?${page}`)
+        if (hasCommitRef(events as TimelineEvent[] | null)) startedIssues.add(key(issue))
+      } catch (error) {
+        failed ||= error instanceof Error ? error.message : String(error)
+      }
+    }))
+  }
+  if (failed) errors.push(`team: ${target.forge} timeline: ${failed}`)
+  return issues.map(issue => (startedIssues.has(key(issue)) ? { ...issue, has_commits: true } : issue))
+}
+
 /** The project with its team items, milestones, open issues and open pull requests, from one read of its repo; a project whose origin is not a forge reads nothing. */
 async function addRepoState($: EngineInterface, project: Project, isForced: boolean, originTarget: OriginTarget): Promise<Project> {
   const target = await originTarget()
@@ -785,11 +817,12 @@ async function addRepoState($: EngineInterface, project: Project, isForced: bool
   let read = repoCache.get(project.path)
   if (!read || isForced || now - read.at >= FORGE_TTL_MS) {
     const errors: string[] = []
-    const [issues, pulls, milestones] = await Promise.all([
+    const [listed, pulls, milestones] = await Promise.all([
       readOpenList<RestIssue>($, target, 'issues', errors),
       readOpenList<RestPull>($, target, 'pulls', errors),
       readMilestones($, target, errors),
     ])
+    const issues = await markStarted($, target, listed, pulls, errors)
     read = { at: now, issues, pulls, milestones, errors }
     repoCache.set(project.path, read)
   }

@@ -138,8 +138,9 @@ their point of view:
 |---|---|
 | `review` | open pull request authored by someone else, review requested from them |
 | `inprogress` | open pull request they authored or are assigned: draft, or no review requested from others |
-| `todo` | open issue assigned to them |
-| `waiting` | their open pull request with a review requested from someone else |
+| `inprogress` | open issue assigned to them whose `state` (below) is `inprogress`: the work has started |
+| `todo` | open issue assigned to them, not started yet |
+| `waiting` | their open pull request with a review requested from someone else; their issue whose `state` is `review` |
 | `stalled` | the same, untouched for more than 7 days |
 
 Items are listed in that order, most recently updated first within one status. The WIP of a
@@ -176,8 +177,16 @@ first that holds:
 |---|---|
 | `done` | closed (only when a closed issue is in the list) |
 | `review` | an open non-draft pull request closes it |
-| `inprogress` | it has an assignee, or an open draft pull request closes it |
-| `todo` | otherwise |
+| `inprogress` | a commit references it (its timeline shows one), or an open draft pull request closes it |
+| `todo` | otherwise, assigned or not |
+
+Assigning is the PM's plan, not work in progress: an issue becomes `inprogress` with its first
+commit, the rule forge-desk reads too, so both desks agree on what is in progress. The desk reads
+the timeline (`issues/<n>/timeline`, `per_page=100` on GitHub, `limit=100` on Forgejo) of each open
+assigned issue no pull request closes, the most recently updated first, at most 50 per read of the
+repo, in batches of 10; a commit is a `referenced` event with a `commit_id` on GitHub, a
+`commit_ref` on Forgejo. An issue once seen started is not read again for the module's life. A
+failed read is one error, `team: <forge> timeline: <message>`, and leaves the issue as it was.
 
 A pull request closing an issue of another repo with `owner/repo#n` is not read as closing it.
 
@@ -584,6 +593,8 @@ preview the PM confirms; nothing is committed.
 | Create package | the milestone (created or reused), its items, a new `WP-<nn>.md` (`status: draft`) | open issues and pull requests |
 | Create work package | a new `WP-<nn>.md` for an existing milestone, listing its open items | a milestone no work package carries |
 | Assign / unassign | `PATCH issues/<n>` with the full `assignees` list, the login added or removed (pull requests too, both forges) | an open item; a login of `team.people` |
+| Assign to many | one `PATCH issues/<n>` per picked item, the login added to its `assignees` | open items not already held by that login (1–50); a login of `team.people` |
+| New issue | `POST issues` with `title`, `body`, and optionally `milestone` (the work package's, `number` on GitHub, `id` on Forgejo) and `assignees` (one login) | a title; a work package whose `milestone:` exists on the forge; a login of `team.people` |
 | Attach to a work package | `PATCH issues/<n>` with `milestone:` the key of the work package's milestone (`number` on GitHub, `id` on Forgejo) | an open item; a work package whose `milestone:` exists on the forge |
 
 A missing key is added before the closing `---`; a key written twice, a value already set, or a note
@@ -599,6 +610,13 @@ pull requests of the Activity and Team tabs: each team member with a login, `+` 
 remove by the item's assignees (both when they are not known). No action is accepted — and no
 select is shown — when the checkout has no `.pm/` (`.pm/` read from git: the desk is read-only).
 
+**Assign to many.** `{ kind: 'assign-many', numbers: [<n>, …], login }`, from the *Assign to…*
+select of the Activity tab's selection bar (the checked issues and pull requests). The preview reads
+every item and lists each with its assignees before and after; closed items and those the login
+already holds are listed as *Left out* instead of refusing the whole action, which is refused only
+when nothing is left. Confirm patches the items in order and stops at the first failure, saying
+which were done. Only `add`: unassigning stays per item.
+
 **Attach to a work package.** `{ kind: 'issue-milestone', number, wp: 'WP-<nn>' }`. The preview
 reads the work package's `milestone:`, finds that milestone on the forge and reads the item; it
 shows the item's reference, title and kind, its milestone now and the new one, and the forge. An
@@ -609,6 +627,15 @@ refused. Refused: a closed item, an item already in that milestone, a work packa
 missing on the forge. The browser page offers it as an *Attach to…* select on the open issues and
 pull requests of the Activity tab, listing the work packages with a milestone that are not
 archived or cancelled, less the one the item is already in; hidden on a read-only project.
+
+**New issue.** `{ kind: 'issue-create', title, body?, wp?, login? }`, from the *New issue* button of
+the Board tab or a lane's *+ issue* (its work package picked). The preview shows the forge, the
+title and body, the milestone and the assignee, and says that an issue cannot be deleted once
+created. Refused: a title empty, longer than 200 characters or of more than one line, a body over
+20000 characters, a login outside `team.people`, a work package without `milestone:` or whose
+milestone is missing on the forge; a closed milestone is allowed and flagged. The dialog links the
+`pm-issue` skill for an issue drafted with the readiness headings. Starting the work is not a desk
+action: the developer does it from their forge desk's Solve. Hidden on a read-only project.
 
 **Browser page.** `server/desk_server.py`, standard-library Python 3, serves the page on
 `127.0.0.1` at a random port. The mod starts it on *Open in browser* (or reuses one another session
