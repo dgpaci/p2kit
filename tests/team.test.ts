@@ -110,6 +110,13 @@ test('the project carries its team, with no item before the forge is read', asyn
   ])
 })
 
+test('an assigned issue is todo until its developer takes it: the in-progress label, or a pull request closing it', async () => {
+  const issues = [issue(30, ['dgpaci']), issue(31, ['dgpaci'], { labels: [{ name: 'in-progress' }] }), issue(32, ['dgpaci'])]
+  const pulls = [pull(40, 'lverdi', '2026-11-12T08:00:00Z', { body: 'Closes #32', requested_reviewers: [login('anna')] })]
+  const items = toTeamItems('dgpaci', issues, pulls, NOW)
+  expect(items.map(item => [item.kind, item.number, item.status])).toEqual([['issue', 31, 'inprogress'], ['issue', 30, 'todo'], ['issue', 32, 'waiting']])
+})
+
 test('a Forgejo issue, which carries pull_request: null, is an item of the person it is assigned to', async () => {
   const items = toTeamItems('dgpaci', [issue(30, ['dgpaci'], { pull_request: null })], [], NOW)
   expect(items.map(item => [item.kind, item.number, item.status])).toEqual([['issue', 30, 'todo']])

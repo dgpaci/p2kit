@@ -1,9 +1,11 @@
-import type { ForgeIssue, ForgePull, IssueState, MilestoneItem, MilestoneProgress, WorkPackage, WpForge } from '../types'
+import type { ForgeIssue, ForgePull, MilestoneItem, MilestoneProgress, WorkPackage, WpForge } from '../types'
 import { toMilestone } from './forge'
 import { DEFAULT_HEADINGS, getMissingHeadings } from './readiness'
 import type { RestMilestone } from './forge'
-import { isPlainIssue, logins, STALLED_MS } from './team'
+import { getClosedRefs, getIssueState, isPlainIssue, logins, STALLED_MS } from './team'
 import type { RestIssue, RestPull } from './team'
+
+export { getClosedRefs, getIssueState, IN_PROGRESS_LABEL } from './team'
 
 /** A pull request waiting on review: not a draft, with at least one requested reviewer. */
 const isInReview = (pull: RestPull): boolean => !pull.draft && (pull.requested_reviewers ?? []).length > 0
@@ -20,23 +22,6 @@ export function toMilestoneProgress(milestones: RestMilestone[], issues: RestIss
     }
   })
   return progress.sort((a, b) => (a.due === b.due ? 0 : !a.due ? 1 : !b.due ? -1 : a.due.localeCompare(b.due)) || a.title.localeCompare(b.title))
-}
-
-const CLOSING_REF = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)/gi
-
-/** The issue numbers a pull request body closes — `closes|fixes|resolves #n` and their tenses, any case — once each, in order. */
-export function getClosedRefs(body: string | null | undefined): number[] {
-  const refs = [...(body ?? '').matchAll(CLOSING_REF)].map(match => Number(match[1]))
-  return [...new Set(refs)]
-}
-
-/** Where an issue stands: `done` closed; `review` an open non-draft pull closes it; `inprogress` assigned, or an open draft pull closes it; else `todo`. */
-export function getIssueState(issue: RestIssue, pulls: RestPull[]): IssueState {
-  if (issue.state === 'closed') return 'done'
-  const closing = pulls.filter(pull => getClosedRefs(pull.body).includes(issue.number))
-  if (closing.some(pull => !pull.draft)) return 'review'
-  if (logins(issue.assignees).length > 0 || closing.length > 0) return 'inprogress'
-  return 'todo'
 }
 
 /** The open issues (pull requests dropped), most recently updated first, each with the readiness headings its body lacks, its assignees and its state against the open pulls. */

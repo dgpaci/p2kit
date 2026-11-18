@@ -174,6 +174,8 @@ select.assign { font: inherit; font-size: 12px; }
 .dialog-box h3 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--fg); margin: 0 0 10px; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .dialog-row { display: flex; gap: 8px; } .dialog-row input { flex: 1; }
+.dialog textarea { flex: 1; font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.dialog-row + .dialog-row { margin-top: 8px; }
 .dialog input[type=text], .dialog select { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .diff { font-family: ui-monospace, monospace; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diff .del { color: var(--red); } .diff .add { color: var(--green); }
@@ -301,11 +303,22 @@ function previewOf(preview, extra) {
     el('div', { className: 'diff' }, el('div', { className: 'del', textContent: '- milestone: ' + (preview.before || 'none') }),
       el('div', { className: 'add', textContent: '+ milestone: ' + preview.milestone.title + ' (' + preview.wp + ')' })),
     preview.milestone.closed ? el('p', { className: 'warn', textContent: 'The milestone ' + preview.milestone.title + ' is closed.' }) : null]
+  if (preview.kind === 'issue-create') return [
+    el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
+    el('div', { className: 'diff add', textContent: '+ ' + preview.issue.title + (preview.issue.body ? '\\n\\n' + preview.issue.body : '') }),
+    el('p', { textContent: 'Milestone: ' + (preview.milestone ? preview.milestone.title + ' (' + preview.wp + ')' : 'none') + ' · assignee: ' + (preview.assignee ? preview.assignee.person : 'none') }),
+    preview.milestone && preview.milestone.closed ? el('p', { className: 'warn', textContent: 'The milestone ' + preview.milestone.title + ' is closed.' }) : null,
+    el('p', { className: 'warn', textContent: 'An issue cannot be deleted once created: if it is not wanted, close it.' })]
   if (preview.kind === 'assign') return [
     el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
     el('p', {}, el('strong', { textContent: preview.item.ref + ' ' }), preview.item.title),
     el('div', { className: 'diff' }, el('div', { className: 'del', textContent: '- assignees: ' + (preview.before.join(', ') || 'none') }),
       el('div', { className: 'add', textContent: '+ assignees: ' + (preview.after.join(', ') || 'none') }))]
+  if (preview.kind === 'assign-many') return [
+    el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
+    el('div', { className: 'diff' }, ...preview.items.map(i => el('div', {}, el('strong', { textContent: i.ref + ' ' }), i.title,
+      el('div', { className: 'del', textContent: '- assignees: ' + (i.before.join(', ') || 'none') }), el('div', { className: 'add', textContent: '+ assignees: ' + i.after.join(', ') })))),
+    preview.skipped.length ? el('div', {}, el('h3', { textContent: 'Left out' }), ...preview.skipped.map(i => el('div', { className: 'dim', textContent: i.ref + ' · ' + i.reason }))) : null]
   if (preview.kind !== 'package') return [el('p', { className: 'dim mono', textContent: preview.file }),
     ...preview.changes.map(c => el('div', { className: 'diff' }, el('div', { className: 'dim', textContent: 'line ' + c.line }),
       c.before ? el('div', { className: 'del', textContent: '- ' + c.before }) : null, c.after ? el('div', { className: 'add', textContent: '+ ' + c.after }) : null))]
@@ -407,6 +420,42 @@ function attachControl(p, item) {
     onchange: () => { const wp = pick.value; pick.value = ''; if (wp) act(p, { kind: 'issue-milestone', number: item.number, wp }) } },
     el('option', { value: '', textContent: 'Attach to…' }),
     ...targets.map(w => el('option', { value: w.id, textContent: w.id + ' ' + w.title })))
+  return pick
+}
+// A new issue on the project's forge, optionally in a work package's milestone and assigned to a team member: the helper previews
+// it and creates it on Confirm. Without the helper, or for the readiness headings, the pm-issue skill drafts it in a session.
+// Taking the issue in hand (the in-progress label) is the developer's move, from their forge desk.
+const issueTargets = p => p.workPackages.filter(w => w.delivery && w.delivery.milestone && !['completed', 'archived', 'cancelled'].includes(w.status))
+function issueDialog(p, wp) {
+  const title = el('input', { type: 'text', placeholder: 'Export the daily log as CSV' })
+  const body = el('textarea', { rows: 6, placeholder: '## Why\\n\\n## What changes\\n\\n## Done when\\n' })
+  const pickWp = el('select', { title: 'work package' }, el('option', { value: '', textContent: 'No work package' }),
+    ...issueTargets(p).map(w => el('option', { value: w.id, textContent: w.id + ' ' + w.title, selected: w.id === wp })))
+  const pickWho = el('select', { title: 'assignee' }, el('option', { value: '', textContent: 'Unassigned' }),
+    ...p.team.filter(m => m.login).map(m => el('option', { value: m.login, textContent: m.person })))
+  const draft = el('a', { textContent: 'draft it with pm-issue' })
+  const drafted = () => { draft.href = skillLink(p, 'pm-issue', pickWp.value || 'a work package') }
+  pickWp.onchange = drafted
+  drafted()
+  const preview = () => title.value.trim() && act(p, { kind: 'issue-create', title: title.value.trim(), body: body.value, wp: pickWp.value, login: pickWho.value })
+  title.onkeydown = e => { if (e.key === 'Enter') preview() }
+  openDialog('New issue on ' + p.name,
+    el('div', { className: 'dialog-row' }, title), el('div', { className: 'dialog-row' }, body), el('div', { className: 'dialog-row' }, pickWp, pickWho),
+    el('p', { className: 'dim' }, 'For the readiness headings of a work package: ', draft, '.'),
+    buttons(closeButton('Cancel'), el('button', { className: 'primary', textContent: 'Preview', onclick: preview })))
+  title.focus()
+}
+function newIssueButton(p, wp, label = 'New issue') {
+  if (!server || p.pmRef) return null
+  return el('button', { className: 'act', textContent: label, title: 'create an issue' + (wp ? ' in ' + wp : ''), onclick: e => { e.stopPropagation(); issueDialog(p, wp) } })
+}
+// Assign one team member to every picked issue and pull request: one preview lists them all, with those left out.
+function assignManyControl(p, numbers) {
+  const members = p.team.filter(m => m.login)
+  if (!server || p.pmRef || !members.length) return null
+  const pick = el('select', { className: 'assign', title: 'assign a team member to the selected items',
+    onchange: () => { const login = pick.value; pick.value = ''; if (login) act(p, { kind: 'assign-many', numbers, login }) } },
+    el('option', { value: '', textContent: 'Assign to…' }), ...members.map(m => el('option', { value: m.login, textContent: m.person })))
   return pick
 }
 function packageDialog(p, refs) {
@@ -699,9 +748,10 @@ function activity(p) {
     ? el('div', { className: 'activity-bar' }, el('strong', { textContent: refs.length + ' selected' }), el('span', { className: 'refs', textContent: refs.join(' ') }),
         server ? el('button', { className: 'btn-primary', textContent: 'Create package', onclick: () => packageDialog(p, refs) })
           : el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: 'Create package' }),
+        assignManyControl(p, refs.map(r => Number(r.replace(/^(PR )?#/, '')))),
         el('a', { href: '#', textContent: 'clear', onclick: e => { e.preventDefault(); pickedItems.clear(); draw() } }),
         el('span', { className: 'dim hint', textContent: server ? 'previews the milestone and the work package, then writes them on Confirm' : 'opens a Claude session on ' + p.name + ' with the pm-package skill: ' + refs.join(' ') }))
-    : el('div', { className: 'activity-bar idle dim', textContent: 'Check issues or pull requests to group them into a work package.' })
+    : el('div', { className: 'activity-bar idle dim', textContent: 'Check issues or pull requests to group them into a work package or assign them.' })
 
   const milestoneRow = m => {
     const wp = p.milestonePackages[m.title]
@@ -876,7 +926,8 @@ function boardLane(p, l) {
       l.milestone ? el('span', { className: 'dim', textContent: 'milestone ' + l.milestone }) : null,
       l.progress ? el('span', { title: 'milestone items closed' }, bar(l.progress.closed, l.progress.total)) : null,
       l.reopened ? pill('reopened: ' + l.reopened + ' open', 'review') : null,
-      unassigned ? pill(unassigned + ' unassigned', 'red') : null),
+      unassigned ? pill(unassigned + ' unassigned', 'red') : null,
+      l.wp && issueTargets(p).some(w => w.id === l.wp) ? newIssueButton(p, l.wp, '+ issue') : null),
     el('div', { className: 'lane-cols' }, ...LANE_COLUMNS.map(([key, label]) => column(key, label)),
       el('div', { className: 'lane-col' }, el('h4', { textContent: 'Done' }),
         l.progress ? el('div', { className: 'lane-done', textContent: l.progress.closed + ' closed' }) : el('div', { className: 'dim', textContent: '—' }))))
@@ -886,8 +937,9 @@ function boardLane(p, l) {
 }
 function board(p) {
   const lanes = lanesOf(p)
-  if (lanes.length <= 1 && !unplannedCount(p)) return el('p', { className: 'dim', textContent: "No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo." })
-  return el('div', {}, el('p', { className: 'dim', textContent: "Open items by work package: To do, In progress, In review; Done is the milestone's closed count. The tab count is the open items in no work package." }),
+  if (lanes.length <= 1 && !unplannedCount(p)) return el('p', { className: 'dim' }, "No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo. ", newIssueButton(p, ''))
+  return el('div', {}, el('p', { className: 'dim' }, "Open items by work package: To do, In progress, In review; Done is the milestone's closed count. The tab count is the open items in no work package. " +
+    'An issue is in progress once its developer takes it (the in-progress label) or a pull request closes it; assigned alone it is still to do. ', newIssueButton(p, '')),
     ...lanes.map(l => boardLane(p, l)))
 }
 

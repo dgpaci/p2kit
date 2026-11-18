@@ -1,4 +1,4 @@
-import type { RoleLine, TeamItem, TeamMember, TeamStatus } from '../types'
+import type { IssueState, RoleLine, TeamItem, TeamMember, TeamStatus } from '../types'
 import { isDoc } from './yaml'
 import type { Value } from './yaml'
 
@@ -11,7 +11,7 @@ type RestUser = { login: string }
 type RestMilestoneRef = { title: string } | null
 export type RestIssue = {
   number: number; title: string; html_url: string; updated_at: string; assignees?: RestUser[] | null; pull_request?: unknown; state?: string
-  milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null
+  milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null; labels?: { name: string }[] | null
 }
 export type RestPull = {
   number: number; title: string; html_url: string; updated_at: string; draft?: boolean
@@ -22,6 +22,34 @@ export type RestPull = {
 export const logins = (users: RestUser[] | null | undefined): string[] => (users ?? []).map(user => user.login)
 /** An issue, not a pull request: GitHub omits `pull_request` on issues, Forgejo sends it as null. */
 export const isPlainIssue = (issue: RestIssue): boolean => issue.pull_request == null
+
+// The label a developer's desk puts on an issue they take in hand: with it, or with an open pull request closing the issue,
+// the work has started. Assigning alone is the PM's plan, not work in progress. The same rule as forge-desk's.
+export const IN_PROGRESS_LABEL = 'in-progress'
+const CLOSING_REF = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)/gi
+
+/** The issue numbers a pull request body closes — `closes|fixes|resolves #n` and their tenses, any case — once each, in order. */
+export function getClosedRefs(body: string | null | undefined): number[] {
+  const refs = [...(body ?? '').matchAll(CLOSING_REF)].map(match => Number(match[1]))
+  return [...new Set(refs)]
+}
+
+const hasInProgressLabel = (issue: RestIssue): boolean => (issue.labels ?? []).some(label => label.name.toLowerCase() === IN_PROGRESS_LABEL)
+
+/**
+ * Where an issue stands: `done` closed; `review` an open non-draft pull closes it; `inprogress` it carries the
+ * `in-progress` label, or an open draft pull closes it; else `todo`, assigned or not.
+ */
+export function getIssueState(issue: RestIssue, pulls: RestPull[]): IssueState {
+  if (issue.state === 'closed') return 'done'
+  const closing = pulls.filter(pull => getClosedRefs(pull.body).includes(issue.number))
+  if (closing.some(pull => !pull.draft)) return 'review'
+  if (hasInProgressLabel(issue) || closing.length > 0) return 'inprogress'
+  return 'todo'
+}
+
+// An assigned issue as its assignee's work: its pull request in review is waiting on others.
+const ISSUE_STATUS: Record<IssueState, TeamStatus> = { todo: 'todo', inprogress: 'inprogress', review: 'waiting', done: 'todo' }
 const limitOf = (value: Value | undefined): number | null => (typeof value === 'number' ? value : null)
 
 /** The people of the roles, once each in role order, with the login and WIP limit `team.people` gives them; items empty. */
@@ -55,7 +83,7 @@ export function toTeamItems(login: string, issues: RestIssue[], pulls: RestPull[
   const add = (kind: TeamItem['kind'], one: RestIssue | RestPull, status: TeamStatus) =>
     found.push({ item: { kind, number: one.number, title: one.title, status, url: one.html_url, updatedAt: one.updated_at.slice(0, 10) }, at: one.updated_at })
   for (const issue of issues) {
-    if (isPlainIssue(issue) && logins(issue.assignees).includes(login)) add('issue', issue, 'todo')
+    if (isPlainIssue(issue) && logins(issue.assignees).includes(login)) add('issue', issue, ISSUE_STATUS[getIssueState(issue, pulls)])
   }
   for (const pull of pulls) {
     const author = pull.user?.login ?? ''

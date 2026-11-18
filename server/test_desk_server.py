@@ -306,6 +306,37 @@ class Assign(unittest.TestCase):
             self.assign(number=12, login='mbianchi', op='add')
 
 
+class AssignMany(unittest.TestCase):
+    """One member assigned to the issues and pull requests picked on the Activity tab, in one preview and one Confirm."""
+    setUp, tearDown = Assign.setUp, Assign.tearDown
+
+    def assign_many(self, **request):
+        base = {'project': self.p.root, 'kind': 'assign-many', **request}
+        answer, _ = ds.run_action(self.p.home, base, self.forge)
+        return answer, ds.run_action(self.p.home, {**base, 'confirm': answer['hash']}, self.forge)[0]
+
+    def test_the_picked_items_are_patched_and_the_closed_or_held_ones_left_out(self):
+        answer, result = self.assign_many(numbers=[12, 18, 20, 18], login='dgpaci')
+        preview = answer['preview']
+        self.assertEqual(preview['summary'], 'Assign Davide Paci to 1 item')
+        self.assertEqual([(i['ref'], i['before'], i['after']) for i in preview['items']], [('PR #18', [], ['dgpaci'])])
+        self.assertEqual(preview['skipped'], [{'ref': '#12', 'reason': 'dgpaci already assigned'}, {'ref': '#20', 'reason': 'closed'}])
+        self.assertEqual([c for c in self.forge.calls if c[0] == 'PATCH'], [('PATCH', 'repos/o/r/issues/18', {'assignees': ['dgpaci']})])
+        self.assertEqual(result['done'], ['PR #18 assignees: dgpaci'])
+
+    def test_two_items_and_the_refusals(self):
+        answer, result = self.assign_many(numbers=[12, 18], login='mbianchi')
+        self.assertEqual(answer['preview']['summary'], 'Assign Marco Bianchi to 2 items')
+        self.assertEqual(result['done'], ['#12 assignees: dgpaci, mbianchi', 'PR #18 assignees: mbianchi'])
+        with self.assertRaisesRegex(ds.ActionError, 'nothing to assign'):
+            self.assign_many(numbers=[20], login='dgpaci')
+        with self.assertRaisesRegex(ds.ActionError, 'not a login of team.people'):
+            self.assign_many(numbers=[12], login='eve')
+        for numbers in ([], None, [True], ['12'], list(range(1, ds.MAX_ASSIGN_MANY + 2))):
+            with self.assertRaises(ds.ActionError):
+                self.assign_many(numbers=numbers, login='dgpaci')
+
+
 class IssueMilestone(unittest.TestCase):
     """Attaching an issue or pull request to a work package's milestone: `number` is the key on GitHub, `id` on Forgejo."""
 
@@ -360,6 +391,52 @@ class IssueMilestone(unittest.TestCase):
         with self.assertRaisesRegex(ds.ActionError, 'changed since the preview'):
             ds.run_action(self.p.home, {**base, 'confirm': answer['hash']}, self.forge)
         self.assertFalse([c for c in self.forge.calls if c[0] == 'PATCH'])
+
+
+class IssueCreate(unittest.TestCase):
+    """A new issue from the desk: the title, and optionally a work package's milestone and a team member to assign."""
+
+    def setUp(self):
+        self.p = Project()
+        self.p.write('.pm/project.yaml', TEAM)
+        self.p.write('.pm/work-packages/WP-02.md', '---\nid: WP-02\ntitle: Login\nstatus: draft\nmilestone: Login\n---\n')
+        self.forge = FakeForge([{'number': 9, 'id': 109, 'title': 'Login', 'state': 'open'}], {})
+
+    def tearDown(self):
+        self.p.temp.cleanup()
+
+    def create(self, **request):
+        base = {'project': self.p.root, 'kind': 'issue-create', **request}
+        answer, _ = ds.run_action(self.p.home, base, self.forge)
+        return answer['preview'], ds.run_action(self.p.home, {**base, 'confirm': answer['hash']}, self.forge)[0]
+
+    def test_the_preview_shows_title_milestone_and_assignee_and_confirm_posts_them(self):
+        preview, result = self.create(title=' Export CSV ', body='## Why\nx', wp='WP-02', login='mbianchi')
+        self.assertEqual((preview['summary'], preview['issue'], preview['milestone'], preview['assignee']),
+                         ('Create issue Export CSV', {'title': 'Export CSV', 'body': '## Why\nx'}, {'title': 'Login', 'key': 9, 'closed': False},
+                          {'login': 'mbianchi', 'person': 'Marco Bianchi'}))
+        self.assertEqual(self.forge.calls[-1], ('POST', 'repos/o/r/issues', {'title': 'Export CSV', 'body': '## Why\nx', 'milestone': 9, 'assignees': ['mbianchi']}))
+        self.assertEqual(result['done'], ['#9 created in Login, assigned to Marco Bianchi'])
+
+    def test_a_bare_issue_and_forgejo_takes_the_milestone_id(self):
+        preview, result = self.create(title='Bare')
+        self.assertEqual((preview['milestone'], preview['assignee']), (None, None))
+        self.assertEqual(self.forge.calls[-1], ('POST', 'repos/o/r/issues', {'title': 'Bare', 'body': ''}))
+        self.assertEqual(result['done'], ['#9 created'])
+        self.forge.forge = 'forgejo'
+        self.create(title='On Forgejo', wp='WP-02')
+        self.assertEqual(self.forge.calls[-1][2]['milestone'], 109)
+
+    def test_refused_without_title_off_team_or_without_milestone(self):
+        self.p.write('.pm/work-packages/WP-03.md', '---\nid: WP-03\ntitle: Gone\nstatus: draft\nmilestone: Gone\n---\n')
+        cases = ((dict(title='  '), 'needs a title'), (dict(title='a\nb'), 'needs a title'), (dict(title='x' * 201), 'needs a title'),
+                 (dict(title='x', body=3), 'the body is text'), (dict(title='x', login='eve'), 'not a login of team.people'),
+                 (dict(title='x', wp='WP-01'), 'WP-01 has no milestone'), (dict(title='x', wp='WP-03'), 'milestone Gone of WP-03 is not on'),
+                 (dict(title='x', wp='WP-99'), 'not found'))
+        for request, message in cases:
+            with self.subTest(request=request), self.assertRaisesRegex(ds.ActionError, message):
+                self.create(**request)
+        self.assertFalse([c for c in self.forge.calls if c[0] == 'POST'])
 
 
 class ForgeTransport(unittest.TestCase):

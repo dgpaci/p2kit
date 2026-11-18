@@ -86,7 +86,8 @@ const FILES: Record<string, string> = {
 const DIRS: Record<string, string[]> = { '/t/anaci/.pm/work-packages': ['WP-01.md'] }
 const ISSUES = [
   { number: 11, title: 'CR one', html_url: 'https://h/issues/11', updated_at: '2026-11-12T09:00:00Z', assignees: [], milestone: { title: 'Certificazioni' }, body: null },
-  { number: 12, title: 'CR two', html_url: 'https://h/issues/12', updated_at: '2026-11-12T09:00:00Z', assignees: [{ login: 'anna' }], milestone: { title: 'Certificazioni' }, body: null },
+  { number: 12, title: 'CR two', html_url: 'https://h/issues/12', updated_at: '2026-11-12T09:00:00Z', assignees: [{ login: 'anna' }], milestone: { title: 'Certificazioni' }, body: null,
+    labels: [{ name: 'In-Progress' }] },
   { number: 31, title: 'Loose', html_url: 'https://h/issues/31', updated_at: '2026-11-11T09:00:00Z', assignees: [], milestone: null, body: null },
 ]
 const MILESTONES = [{ title: 'Certificazioni', open_issues: 2, closed_issues: 14, due_on: null }]
