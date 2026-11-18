@@ -29,6 +29,10 @@ the current one.
 
    Replace `projects: []` with the block form on the first entry. Write absolute paths, never `~`
    or relative ones.
+   If `.pm/` is not committed on the repo's default branch (`git ls-tree origin/HEAD -- .pm` is
+   empty), say that a checkout of another branch will show no project, and offer to add
+   `pm_branch: <the branch holding .pm/>` to the entry; better still, commit `.pm/` to the default
+   branch (docs/pm-schema.md → *The project registry*).
 5. Tell the user in one line, with the project's `name` from `project.yaml`, and that `/pm-desk`
    opens the pane (it refreshes by itself within a minute).
 6. Optional — the issue template. Read the host of `git remote get-url origin`. If the repo has no

@@ -8,11 +8,21 @@ updated: <YYYY-MM-DD>
 
 # Project Brief — <Project name>
 
+> The brief is the project's yardstick. Its **Objectives** checklist is what the weekly digest
+> and the Highlight Report measure progress against: every work package names the objectives it
+> serves, and an objective is ticked only when the Board says it is met.
+
 ## Background
 <Why this project exists: the situation and the trigger, two or three sentences.>
 
 ## Objective
 <What the project must deliver, and by when, in one or two sentences.>
+
+## Objectives
+Ticked only after the Board states in chat that the objective is met.
+
+- [ ] **O-1** <one outcome, verifiable>. *Done when:* <the check that proves it, on real use>.
+- [ ] **O-2** <…>. *Done when:* <…>.
 
 ## Desired outcome
 <What will be different for the users once it is delivered.>

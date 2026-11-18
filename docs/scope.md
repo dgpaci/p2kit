@@ -40,6 +40,8 @@ the PM reads it before it is saved.
 | Close / reopen a commit note | `status:` of one note in `commit-notes.yaml` | button, preview, confirm |
 | Link an issue, milestone or branch | `issue:`, `milestone:`, `branch:` of a work package | button, preview, confirm |
 | Group issues and pull requests into a package | a forge milestone, and a new `WP-<nn>.md` | button, preview of the plan, confirm |
+| Assign / unassign a team member | the assignees of an open issue or pull request on the forge | select, preview before / after, confirm |
+| Attach an issue or pull request to a work package | the milestone of an open item on the forge: the work package's `milestone:` | select, preview old / new milestone, confirm |
 | Digest, Highlight Report, Presentation, Retrospective, issue draft | new text | opens a session with the skill |
 
 A direct action never writes without a preview. The confirmation applies only to the file as
@@ -57,6 +59,8 @@ shown again.
     from its own origin. Any website can reach `127.0.0.1`, so these checks are needed.
   - It edits only projects listed in `~/.config/p2kit/projects.yaml`.
   - It changes one line per action, and only to a value from a fixed set.
+  - It assigns only the logins of `team.people`, and writes nothing on a project whose
+    checkout has no `.pm/`.
   - Forge writes go through the CLI the user has already authenticated (`gh`, `fj`). No new
     token is needed.
   - When `python3` is missing, the browser page stays the read-only file it is today. Its

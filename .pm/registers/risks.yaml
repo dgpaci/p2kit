@@ -1,0 +1,25 @@
+risks:
+  - id: R-001
+    title: One person holds every role, so there is no independent assurance of the products
+    category: threat
+    probability: high
+    impact: medium
+    response: reduce
+    owner: Davide Paci
+    status: open
+  - id: R-002
+    title: Real use comes from one project only (anaci), so the plugin may fit its habits and not others
+    category: threat
+    probability: medium
+    impact: medium
+    response: reduce
+    owner: Davide Paci
+    status: open
+  - id: R-003
+    title: A change to the .pm/ schema breaks the data of projects already managed with p2kit
+    category: threat
+    probability: medium
+    impact: high
+    response: reduce
+    owner: Davide Paci
+    status: open

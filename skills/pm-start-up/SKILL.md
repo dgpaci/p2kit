@@ -31,10 +31,13 @@ writing, and keep the YAML inside its subset.
    `stage.current: 0`, `stage.name: Start-up`, `stage.start` today. Leave `approvals: []`.
 5. **Write `.pm/brief.md`** from `templates/brief.md`: fill every section from the mandate in short,
    plain sentences; mark assumptions as assumptions; list open points. `status: draft`,
-   `version: 0.1`. In the `light` profile the outline business case stays inside the brief.
+   `version: 0.1`. The **Objectives** checklist is the yardstick the digest and the report measure
+   against: 3–8 entries `- [ ] **O-<n>** <outcome>. *Done when:* <check>.`, each one verifiable
+   on real use, numbered once and never renumbered (a dropped objective is struck through, not
+   deleted). All start unticked. In the `light` profile the outline business case stays inside the brief.
 6. **Create `.pm/registers/risks.yaml` and `.pm/registers/issues.yaml`** with the risks and issues
    the mandate already reveals (often a few risks, no issues): `risks: []` / `issues: []` when none.
-7. **Show the user a summary**: the brief's objective, scope, top risks, open points, and the
+7. **Show the user a summary**: the brief's objective and objectives checklist, scope, top risks, open points, and the
    decision now due — *authorize initiation*. Ask whether to register the project in the desk
    (`/pm-register`) if it is not there yet.
 
@@ -52,6 +55,9 @@ Never write an approval on your own. Only when the user states the Executive's d
 
 and set `status: initiation`, `stage.current: 1`, `stage.name: Initiation`, `stage.start: <today>`,
 and the brief's `status: approved`. Then suggest `/pm-initiate`.
+
+The same holds for the objectives: an entry becomes `- [x]` only when the user states in chat that
+the Board considers it met; add `<date>` and who said it after its *done when*.
 
 Do not commit unless the user asks; when they do, one commit `docs(pm): project brief` for the
 `.pm/` files.

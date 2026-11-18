@@ -83,10 +83,13 @@ export type Pull = { number: number; title: string; state: 'open' | 'merged' | '
 export type Milestone = { title: string; open: number; closed: number; due: string }
 // An open milestone with its open items untouched for over 7 days and its open non-draft pulls waiting on a reviewer.
 export type MilestoneProgress = Milestone & { stalled: number; inReview: number }
-// An open issue of the repo; `createdAt` and `updatedAt` ISO days ('' when the forge gave no creation time), `milestone` its title or '', `missing` the readiness headings its body lacks.
-export type ForgeIssue = { number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; missing: string[] }
-// An open pull request of the repo; `inReview` when it is not a draft and waits on a requested reviewer.
-export type ForgePull = { number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; draft: boolean; inReview: boolean }
+// Where an issue stands: `review` an open non-draft pull request closes it, `inprogress` it has an assignee or an open draft pull closes it, `done` closed.
+export type IssueState = 'todo' | 'inprogress' | 'review' | 'done'
+// An open issue of the repo; `createdAt` and `updatedAt` ISO days ('' when the forge gave no creation time), `milestone` its title or '', `missing` the readiness headings its body lacks,
+// `assignees` their logins, `state` as IssueState reads it.
+export type ForgeIssue = { number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; missing: string[]; assignees: string[]; state: IssueState }
+// An open pull request of the repo; `inReview` when it is not a draft and waits on a requested reviewer; `assignees` their logins, `closes` the issues its body closes (`closes #n`, `fixes #n`, `resolves #n`).
+export type ForgePull = { number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; draft: boolean; inReview: boolean; assignees: string[]; closes: number[] }
 
 // An issue or a pull request of a work package's milestone, any state.
 export type MilestoneItem = { kind: 'issue' | 'pr'; number: number; title: string; url: string; state: 'open' | 'closed' | 'merged' }
@@ -140,6 +143,8 @@ export type Flow = { windows: FlowWindow[]; closedIssues: ClosedItem[]; mergedPu
 
 export type Project = {
   path: string
+  // The git ref .pm/ was read from when the working tree has none: the desk shows it read-only; '' = the working tree.
+  pmRef: string
   name: string
   code: string
   profile: string

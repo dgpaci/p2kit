@@ -53,6 +53,8 @@ const REVIEW_BATCH = 10
 // The raw text of a project's .pm/ files, as the loader found them; paths are absolute.
 export type ProjectFiles = {
   path: string
+  // The git ref the .pm/ files were read from, when the working tree has no .pm/; absent = the working tree.
+  pmRef?: string
   project?: string
   products: { path: string; text: string }[]
   workPackages: { path: string; text: string }[]
@@ -271,7 +273,7 @@ function getCurrentIteration(iterations: Iteration[], workPackages: WorkPackage[
 export function buildProject(files: ProjectFiles, today: string): Project {
   const errors: string[] = []
   let data: Doc = {}
-  if (files.project === undefined) errors.push('.pm/project.yaml not found')
+  if (files.project === undefined) errors.push('.pm/project.yaml not found — in the working tree, nor on pm_branch or origin/HEAD (docs/pm-schema.md → The project registry)')
   else {
     try {
       const parsed = parseYaml(files.project)
@@ -382,6 +384,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
 
   return {
     path: files.path,
+    pmRef: files.pmRef ?? '',
     name: text(data.name) || basename(files.path),
     code: text(data.code),
     profile: text(data.profile) || 'light',
@@ -418,25 +421,85 @@ export function buildProject(files: ProjectFiles, today: string): Project {
   }
 }
 
-/** The project folders the registry names; `~` is the home folder. */
-export function parseRegistry(raw: string, home: string): string[] {
+/** The projects the registry names: their folder (`~` is the home folder) and the optional `pm_branch` to read .pm/ from. */
+export function parseRegistryEntries(raw: string, home: string): { path: string; pmBranch: string }[] {
   const parsed = parseYaml(raw)
   if (!isDoc(parsed)) return []
   return docs(parsed.projects)
-    .map(entry => text(entry.path).replace(/^~(?=\/|$)/, home))
-    .filter(Boolean)
+    .map(entry => ({ path: text(entry.path).replace(/^~(?=\/|$)/, home), pmBranch: text(entry.pm_branch) }))
+    .filter(entry => entry.path)
 }
 
-async function readIfExists($: EngineInterface, path: string): Promise<string | undefined> {
-  return (await $.fs.exists(path)) ? await $.fs.read(path) : undefined
+/** The project folders the registry names; `~` is the home folder. */
+export function parseRegistry(raw: string, home: string): string[] {
+  return parseRegistryEntries(raw, home).map(entry => entry.path)
+}
+
+type TreeEntry = { name: string; kind: 'file' | 'dir' }
+// Where .pm/ is read from: the working tree (null), or a git ref with the repo-relative paths `git ls-tree` gave under .pm/.
+type PmSource = { root: string; ref: string; files: string[] } | null
+
+/** The direct children of `folder` among the file paths of a git tree, folders once each. */
+export function getTreeEntries(files: string[], folder: string): TreeEntry[] {
+  const prefix = folder ? `${folder.replace(/\/+$/, '')}/` : ''
+  const found = new Map<string, TreeEntry['kind']>()
+  for (const file of files) {
+    if (!file.startsWith(prefix)) continue
+    const [name, ...rest] = file.slice(prefix.length).split('/')
+    if (name && !found.has(name)) found.set(name, rest.length ? 'dir' : 'file')
+  }
+  return [...found].map(([name, kind]) => ({ name, kind }))
+}
+
+/**
+ * Where a project's .pm/ is read from: the working tree when it has .pm/; otherwise the registry's `pm_branch`, else the
+ * branch of `origin/HEAD`, when that ref holds .pm/. Read-only: the desk's actions write the working tree.
+ */
+async function getPmSource($: EngineInterface, path: string, pmBranch: string): Promise<PmSource> {
+  if (await $.fs.exists(`${path}/.pm`)) return null
+  let ref = pmBranch ? await resolveRef($, path, pmBranch) : ''
+  if (!pmBranch) {
+    const head = await git($, path, ['rev-parse', '--abbrev-ref', 'origin/HEAD'])
+    if (head.ok && head.stdout.trim() && head.stdout.trim() !== 'origin/HEAD') ref = head.stdout.trim()
+  }
+  if (!ref) return null
+  const tree = await git($, path, ['ls-tree', '-r', '--name-only', ref, '--', '.pm'])
+  const files = tree.ok ? tree.stdout.split('\n').filter(Boolean) : []
+  return files.length ? { root: path, ref, files } : null
+}
+
+function relative(source: NonNullable<PmSource>, path: string): string {
+  return path.slice(source.root.length + 1)
+}
+
+async function sourceExists($: EngineInterface, source: PmSource, path: string): Promise<boolean> {
+  if (!source) return await $.fs.exists(path)
+  const rel = relative(source, path)
+  return source.files.some(file => file === rel || file.startsWith(`${rel}/`))
+}
+
+async function sourceRead($: EngineInterface, source: PmSource, path: string): Promise<string> {
+  if (!source) return await $.fs.read(path)
+  return (await git($, source.root, ['show', `${source.ref}:${relative(source, path)}`])).stdout
+}
+
+async function sourceList($: EngineInterface, source: PmSource, folder: string): Promise<TreeEntry[]> {
+  if (!source) return (await $.fs.list(folder)) as TreeEntry[]
+  return getTreeEntries(source.files, relative(source, folder))
+}
+
+async function readIfExists($: EngineInterface, source: PmSource, path: string): Promise<string | undefined> {
+  return (await sourceExists($, source, path)) ? await sourceRead($, source, path) : undefined
 }
 
 /** The Markdown files of a folder, absolute paths, sorted; none when it is missing. */
-async function listMarkdown($: EngineInterface, folder: string): Promise<{ path: string; text: string }[]> {
-  if (!(await $.fs.exists(folder))) return []
-  const entries = (await $.fs.list(folder)).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md'))
+async function listMarkdown($: EngineInterface, source: PmSource, folder: string): Promise<{ path: string; text: string }[]> {
+  if (!(await sourceExists($, source, folder))) return []
+  const entries = (await sourceList($, source, folder)).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md'))
   entries.sort((a, b) => a.name.localeCompare(b.name))
-  return Promise.all(entries.map(async entry => ({ path: `${folder}/${entry.name}`, text: await $.fs.read(`${folder}/${entry.name}`) })))
+  const texts: { path: string; text: string }[] = []
+  for (const entry of entries) texts.push({ path: `${folder}/${entry.name}`, text: await sourceRead($, source, `${folder}/${entry.name}`) })
+  return texts
 }
 
 async function git($: EngineInterface, path: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
@@ -540,34 +603,36 @@ async function readSharedDocs($: EngineInterface, path: string, project: string 
   return { sharedDocs, docErrors }
 }
 
-/** Reads the .pm/ folder of the project at `path`. */
-export async function readProjectFiles($: EngineInterface, path: string): Promise<ProjectFiles> {
+/** Reads the .pm/ folder of the project at `path`, from a git ref when the working tree has none (getPmSource). */
+export async function readProjectFiles($: EngineInterface, path: string, pmBranch = ''): Promise<ProjectFiles> {
   const pm = `${path}/.pm`
-  const products = await listMarkdown($, pm)
-  if (await $.fs.exists(`${pm}/stages`)) {
-    const stages = (await $.fs.list(`${pm}/stages`)).filter(entry => entry.kind === 'dir')
+  const source = await getPmSource($, path, pmBranch)
+  const products = await listMarkdown($, source, pm)
+  if (await sourceExists($, source, `${pm}/stages`)) {
+    const stages = (await sourceList($, source, `${pm}/stages`)).filter(entry => entry.kind === 'dir')
     stages.sort((a, b) => Number(a.name) - Number(b.name) || a.name.localeCompare(b.name))
-    for (const stage of stages) products.push(...(await listMarkdown($, `${pm}/stages/${stage.name}`)))
+    for (const stage of stages) products.push(...(await listMarkdown($, source, `${pm}/stages/${stage.name}`)))
   }
-  products.push(...(await listMarkdown($, `${pm}/reports`)))
-  products.push(...(await listMarkdown($, `${pm}/digests`)))
-  products.push(...(await listMarkdown($, `${pm}/presentations`)))
-  const workPackages = await listMarkdown($, `${pm}/work-packages`)
-  const project = await readIfExists($, `${pm}/project.yaml`)
+  products.push(...(await listMarkdown($, source, `${pm}/reports`)))
+  products.push(...(await listMarkdown($, source, `${pm}/digests`)))
+  products.push(...(await listMarkdown($, source, `${pm}/presentations`)))
+  const workPackages = await listMarkdown($, source, `${pm}/work-packages`)
+  const project = await readIfExists($, source, `${pm}/project.yaml`)
 
   return {
     path,
+    ...(source ? { pmRef: source.ref } : {}),
     project,
     ...(await readSharedDocs($, path, project)),
     ...(await readWpPlans($, path, workPackages)),
     products,
     workPackages,
-    risks: await readIfExists($, `${pm}/registers/risks.yaml`),
-    issues: await readIfExists($, `${pm}/registers/issues.yaml`),
-    commitNotes: await readIfExists($, `${pm}/registers/commit-notes.yaml`),
-    iterations: await readIfExists($, `${pm}/registers/iterations.yaml`),
-    lessons: await readIfExists($, `${pm}/registers/lessons.yaml`),
-    dailyLog: await readIfExists($, `${pm}/registers/daily-log.yaml`),
+    risks: await readIfExists($, source, `${pm}/registers/risks.yaml`),
+    issues: await readIfExists($, source, `${pm}/registers/issues.yaml`),
+    commitNotes: await readIfExists($, source, `${pm}/registers/commit-notes.yaml`),
+    iterations: await readIfExists($, source, `${pm}/registers/iterations.yaml`),
+    lessons: await readIfExists($, source, `${pm}/registers/lessons.yaml`),
+    dailyLog: await readIfExists($, source, `${pm}/registers/daily-log.yaml`),
   }
 }
 
@@ -730,7 +795,7 @@ async function addRepoState($: EngineInterface, project: Project, isForced: bool
   }
   const { issues, pulls, milestones, errors } = read
   const team = project.team.map(member => (member.login ? withItems(member, toTeamItems(member.login, issues, pulls, now)) : member))
-  const forgeIssues = toForgeIssues(issues, project.readiness)
+  const forgeIssues = toForgeIssues(issues, project.readiness, pulls)
   return {
     ...project,
     team,
@@ -814,18 +879,18 @@ export async function loadProjects($: EngineInterface, isForced = false): Promis
   const home = (await $.env.get('HOME')) ?? ''
   const registry = `${home}/${REGISTRY_PATH}`
   if (!(await $.fs.exists(registry))) return { projects: [], errors: [] }
-  let paths: string[]
+  let entries: { path: string; pmBranch: string }[]
   try {
-    paths = parseRegistry(await $.fs.read(registry), home)
+    entries = parseRegistryEntries(await $.fs.read(registry), home)
   } catch (error) {
     return { projects: [], errors: [`~/${REGISTRY_PATH}: ${String(error)}`] }
   }
   const today = new Date(await $.clock.now()).toISOString().slice(0, 10)
   const projects = await Promise.all(
-    paths.map(async path => {
+    entries.map(async ({ path, pmBranch }) => {
       try {
         const originTarget = getOriginTarget($, path)
-        const project = await addForgeState($, buildProject(await readProjectFiles($, path), today), isForced, originTarget)
+        const project = await addForgeState($, buildProject(await readProjectFiles($, path, pmBranch), today), isForced, originTarget)
         // The open and the closed items are read side by side; the flow's own errors follow the repo's.
         const [repo, flowed] = await Promise.all([addRepoState($, project, isForced, originTarget), addFlow($, project, isForced, originTarget)])
         return { ...repo, flow: flowed.flow, errors: [...repo.errors, ...flowed.errors.slice(project.errors.length)] }

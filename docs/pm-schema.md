@@ -166,6 +166,21 @@ blocks, open items only:
 A failure to read the milestones is the project error `milestones: <forge> milestones: <reason>`;
 the issues and pull requests still show.
 
+From the same read, with no further request, each open pull request carries `assignees` (their
+logins, `[]` when the forge sends none or `null`) and `closes`: the issue numbers its body names
+after `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves` or `resolved`
+followed by `#<n>`, any case, once each. Each open issue carries `assignees` and a `state`, the
+first that holds:
+
+| state | issue |
+|---|---|
+| `done` | closed (only when a closed issue is in the list) |
+| `review` | an open non-draft pull request closes it |
+| `inprogress` | it has an assignee, or an open draft pull request closes it |
+| `todo` | otherwise |
+
+A pull request closing an issue of another repo with `owner/repo#n` is not read as closing it.
+
 The browser page can also start a package; it never writes. Checking issues and pull requests shows
 a bar with **Create package**, a link that opens a new Claude Desktop session in the project's folder
 asking for the pm-package skill on the picked references (`#12 #15 PR #18`); on a milestone with no
@@ -175,6 +190,22 @@ prompt into `／`, so a link never runs a command. The session needs p2kit loade
 same blocks, without the selection: there `/pm-package` is typed in a session. `/pm-package` shows its plan and writes to
 the forge — the milestone and the milestone of each item — and the work package file only after
 the user's OK.
+
+### Board
+
+The Board tab (`hooks/lanes.ts`) shows, from the same read, one swimlane per work package whose
+frontmatter `milestone:` names a milestone and which owns it (the rule of Activity: cancelled left
+out, the lowest id when several), by id. An archived work package gets a lane only while its
+milestone has open items. Each lane heads with the id, title, status and the milestone's
+`closed/total` (when it is among the open milestones read), then four columns: **To do**,
+**In progress**, **In review** hold the milestone's open issues by their `state` (`todo` when
+missing) and its open pull requests (a draft in progress, else in review); **Done** is the
+milestone's closed count, closed items are not read. Each card is `#n` (or `PR #n`), its title
+linked, and the assignees' logins or a red `unassigned`. A completed or archived work package with
+open items is flagged `reopened: N open`. The last lane, *Unplanned*, holds the open issues and
+pull requests with no milestone or a milestone of no work package; its size is the tab count.
+Lanes carry `data-wp` (`''` for Unplanned) and cards `data-number`, for drag and drop to come. The
+pane shows the same lanes as text, one line per non-empty column.
 
 ### Metrics
 
@@ -289,6 +320,20 @@ updated: 2026-11-03
 ---
 ```
 
+### Brief objectives
+
+`brief.md` carries an `## Objectives` section, a checklist that is the project's yardstick:
+
+```markdown
+- [ ] **O-2** Nothing gets lost — every open issue is on the desk. *Done when:* <check>.
+- [x] **O-1** Management products prepared by skills. *Done when:* <check>. <date>, <who>.
+```
+
+Ids are never renumbered; a dropped objective is struck through (`~~…~~`). An entry is ticked only
+after the user states in chat that the Board considers it met. Work packages name the objectives
+they serve with `objectives:`; `/pm-digest` and `/pm-report` read both to say, per objective, which
+work packages serve it, how far they are, and which objectives no work package serves.
+
 ### Work packages
 
 `work-packages/WP-<nn>.md`, frontmatter:
@@ -309,6 +354,7 @@ estimate: 24              # optional: estimated effort, hours
 actual: 18                # optional: effort spent so far, hours, entered by hand
 horizon: now              # optional: now | next | later (/pm-roadmap)
 rank: 2                   # optional: order inside the horizon, 1 = first
+objectives: [O-2, O-3]    # optional: the brief objectives this work package serves
 ```
 
 Progress of a stage = WPs of that stage with status `completed` or `archived` / WPs of that stage
@@ -537,10 +583,32 @@ preview the PM confirms; nothing is committed.
 | Close / reopen a note | `status:` of the note of `commit-notes.yaml` with that `sha` and that exact `text` | a flow-map note line |
 | Create package | the milestone (created or reused), its items, a new `WP-<nn>.md` (`status: draft`) | open issues and pull requests |
 | Create work package | a new `WP-<nn>.md` for an existing milestone, listing its open items | a milestone no work package carries |
+| Assign / unassign | `PATCH issues/<n>` with the full `assignees` list, the login added or removed (pull requests too, both forges) | an open item; a login of `team.people` |
+| Attach to a work package | `PATCH issues/<n>` with `milestone:` the key of the work package's milestone (`number` on GitHub, `id` on Forgejo) | an open item; a work package whose `milestone:` exists on the forge |
 
 A missing key is added before the closing `---`; a key written twice, a value already set, or a note
 matching no line or more than one is refused, and so is a change to a file that changed since its
 preview. Items already in another milestone move only when ticked in the preview.
+
+**Assign.** `{ kind: 'assign', number, login, op: 'add' | 'remove' }`. The preview reads the item
+(`GET issues/<n>`) and shows its reference, title and kind with the assignees before and after; the
+hash covers them, so a change of the assignees on the forge between preview and confirm is refused.
+A login outside `team.people`, a closed item, adding someone already assigned or removing someone
+who is not are refused. The browser page offers it as an *Assign…* select on the open issues and
+pull requests of the Activity and Team tabs: each team member with a login, `+` to add or `−` to
+remove by the item's assignees (both when they are not known). No action is accepted — and no
+select is shown — when the checkout has no `.pm/` (`.pm/` read from git: the desk is read-only).
+
+**Attach to a work package.** `{ kind: 'issue-milestone', number, wp: 'WP-<nn>' }`. The preview
+reads the work package's `milestone:`, finds that milestone on the forge and reads the item; it
+shows the item's reference, title and kind, its milestone now and the new one, and the forge. An
+item in another milestone is shown as a move; a closed milestone is allowed and flagged. The hash
+covers the item's current milestone, so a change on the forge between preview and confirm is
+refused. Refused: a closed item, an item already in that milestone, a work package without
+`milestone:` (link one with `/pm-link`, or group the items with *Create package*), a milestone
+missing on the forge. The browser page offers it as an *Attach to…* select on the open issues and
+pull requests of the Activity tab, listing the work packages with a milestone that are not
+archived or cancelled, less the one the item is already in; hidden on a read-only project.
 
 **Browser page.** `server/desk_server.py`, standard-library Python 3, serves the page on
 `127.0.0.1` at a random port. The mod starts it on *Open in browser* (or reuses one another session
@@ -589,3 +657,10 @@ projects:
   - path: /Users/me/src/customer-portal
     added: 2026-11-03
 ```
+
+`.pm/` is read from the working tree of `path`. When the checkout has no `.pm/` — a branch cut
+before `.pm/` was committed, a hotfix branch — the desk reads it from git instead: from
+`pm_branch` when the entry sets it (`pm_branch: develop`; the local branch, else `origin/<name>`),
+otherwise from the branch `origin/HEAD` points to. Read from a ref, the project is **read-only**:
+the form says so and the actions that write `.pm/` fail, since they write the working tree. Commit
+`.pm/` to the default branch so every checkout carries it.

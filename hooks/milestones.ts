@@ -1,8 +1,8 @@
-import type { ForgeIssue, ForgePull, MilestoneItem, MilestoneProgress, WorkPackage, WpForge } from '../types'
+import type { ForgeIssue, ForgePull, IssueState, MilestoneItem, MilestoneProgress, WorkPackage, WpForge } from '../types'
 import { toMilestone } from './forge'
 import { DEFAULT_HEADINGS, getMissingHeadings } from './readiness'
 import type { RestMilestone } from './forge'
-import { isPlainIssue, STALLED_MS } from './team'
+import { isPlainIssue, logins, STALLED_MS } from './team'
 import type { RestIssue, RestPull } from './team'
 
 /** A pull request waiting on review: not a draft, with at least one requested reviewer. */
@@ -22,12 +22,32 @@ export function toMilestoneProgress(milestones: RestMilestone[], issues: RestIss
   return progress.sort((a, b) => (a.due === b.due ? 0 : !a.due ? 1 : !b.due ? -1 : a.due.localeCompare(b.due)) || a.title.localeCompare(b.title))
 }
 
-/** The open issues (pull requests dropped), most recently updated first, each with the readiness headings its body lacks. */
-export function toForgeIssues(issues: RestIssue[], headings: string[] = DEFAULT_HEADINGS): ForgeIssue[] {
+const CLOSING_REF = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)/gi
+
+/** The issue numbers a pull request body closes — `closes|fixes|resolves #n` and their tenses, any case — once each, in order. */
+export function getClosedRefs(body: string | null | undefined): number[] {
+  const refs = [...(body ?? '').matchAll(CLOSING_REF)].map(match => Number(match[1]))
+  return [...new Set(refs)]
+}
+
+/** Where an issue stands: `done` closed; `review` an open non-draft pull closes it; `inprogress` assigned, or an open draft pull closes it; else `todo`. */
+export function getIssueState(issue: RestIssue, pulls: RestPull[]): IssueState {
+  if (issue.state === 'closed') return 'done'
+  const closing = pulls.filter(pull => getClosedRefs(pull.body).includes(issue.number))
+  if (closing.some(pull => !pull.draft)) return 'review'
+  if (logins(issue.assignees).length > 0 || closing.length > 0) return 'inprogress'
+  return 'todo'
+}
+
+/** The open issues (pull requests dropped), most recently updated first, each with the readiness headings its body lacks, its assignees and its state against the open pulls. */
+export function toForgeIssues(issues: RestIssue[], headings: string[] = DEFAULT_HEADINGS, pulls: RestPull[] = []): ForgeIssue[] {
   return issues
     .filter(isPlainIssue)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    .map(issue => ({ number: issue.number, title: issue.title, url: issue.html_url, createdAt: (issue.created_at ?? '').slice(0, 10), updatedAt: issue.updated_at.slice(0, 10), milestone: issue.milestone?.title ?? '', missing: getMissingHeadings(issue.body, headings) }))
+    .map(issue => ({
+      number: issue.number, title: issue.title, url: issue.html_url, createdAt: (issue.created_at ?? '').slice(0, 10), updatedAt: issue.updated_at.slice(0, 10),
+      milestone: issue.milestone?.title ?? '', missing: getMissingHeadings(issue.body, headings), assignees: logins(issue.assignees), state: getIssueState(issue, pulls),
+    }))
 }
 
 /** The open pull requests, most recently updated first, each marked draft or in review. */
@@ -36,7 +56,7 @@ export function toForgePulls(pulls: RestPull[]): ForgePull[] {
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .map(pull => ({
       number: pull.number, title: pull.title, url: pull.html_url, createdAt: (pull.created_at ?? '').slice(0, 10), updatedAt: pull.updated_at.slice(0, 10),
-      milestone: pull.milestone?.title ?? '', draft: Boolean(pull.draft), inReview: isInReview(pull),
+      milestone: pull.milestone?.title ?? '', draft: Boolean(pull.draft), inReview: isInReview(pull), assignees: logins(pull.assignees), closes: getClosedRefs(pull.body),
     }))
 }
 
