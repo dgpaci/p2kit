@@ -567,10 +567,20 @@ preview the PM confirms; nothing is committed.
 | Close / reopen a note | `status:` of the note of `commit-notes.yaml` with that `sha` and that exact `text` | a flow-map note line |
 | Create package | the milestone (created or reused), its items, a new `WP-<nn>.md` (`status: draft`) | open issues and pull requests |
 | Create work package | a new `WP-<nn>.md` for an existing milestone, listing its open items | a milestone no work package carries |
+| Assign / unassign | `PATCH issues/<n>` with the full `assignees` list, the login added or removed (pull requests too, both forges) | an open item; a login of `team.people` |
 
 A missing key is added before the closing `---`; a key written twice, a value already set, or a note
 matching no line or more than one is refused, and so is a change to a file that changed since its
 preview. Items already in another milestone move only when ticked in the preview.
+
+**Assign.** `{ kind: 'assign', number, login, op: 'add' | 'remove' }`. The preview reads the item
+(`GET issues/<n>`) and shows its reference, title and kind with the assignees before and after; the
+hash covers them, so a change of the assignees on the forge between preview and confirm is refused.
+A login outside `team.people`, a closed item, adding someone already assigned or removing someone
+who is not are refused. The browser page offers it as an *Assign…* select on the open issues and
+pull requests of the Activity and Team tabs: each team member with a login, `+` to add or `−` to
+remove by the item's assignees (both when they are not known). No action is accepted — and no
+select is shown — when the checkout has no `.pm/` (`.pm/` read from git: the desk is read-only).
 
 **Browser page.** `server/desk_server.py`, standard-library Python 3, serves the page on
 `127.0.0.1` at a random port. The mod starts it on *Open in browser* (or reuses one another session

@@ -1,11 +1,13 @@
 """Tests of the desk helper: python3 -m unittest discover -s server"""
 
 import http.client
+import io
 import json
 import os
 import tempfile
 import threading
 import unittest
+import unittest.mock
 
 import desk_server as ds
 
@@ -222,6 +224,118 @@ class Package(unittest.TestCase):
         self.assertIn('- PR #18 Fix', self.p.read('.pm/work-packages/WP-02.md'))
         with self.assertRaisesRegex(ds.ActionError, 'already carries'):
             self.run_package(title='Old', fromMilestone=True)
+
+
+TEAM = ('name: P\nstage: { current: 2 }\nteam:\n  wip_limit: 3\n  people:\n    Davide Paci: { login: dgpaci, wip_limit: 4 }\n'
+        '    "Marco Bianchi": { login: mbianchi }  # a comment\nreporting:\n  people:\n    Eve: { login: eve }\n')
+
+
+class Assign(unittest.TestCase):
+    def setUp(self):
+        self.p = Project()
+        self.p.write('.pm/project.yaml', TEAM)
+        self.forge = FakeForge([], {
+            12: {'number': 12, 'title': 'Login', 'state': 'open', 'assignees': [{'login': 'dgpaci'}]},
+            18: {'number': 18, 'title': 'Fix', 'state': 'open', 'assignees': None, 'pull_request': {}},
+            20: {'number': 20, 'title': 'Done', 'state': 'closed', 'assignees': []},
+        })
+
+    def tearDown(self):
+        self.p.temp.cleanup()
+
+    def assign(self, **request):
+        base = {'project': self.p.root, 'kind': 'assign', **request}
+        answer, _ = ds.run_action(self.p.home, base, self.forge)
+        return answer, ds.run_action(self.p.home, {**base, 'confirm': answer['hash']}, self.forge)[0]
+
+    def test_the_team_logins_are_read_from_team_people_only(self):
+        self.assertEqual(ds.team_logins(self.p.root), {'dgpaci': 'Davide Paci', 'mbianchi': 'Marco Bianchi'})
+
+    def test_the_preview_shows_the_assignees_before_and_after_and_confirm_patches_them(self):
+        answer, result = self.assign(number=12, login='mbianchi', op='add')
+        preview = answer['preview']
+        self.assertEqual((preview['summary'], preview['item']['kind'], preview['before'], preview['after']),
+                         ('Assign Marco Bianchi to #12', 'issue', ['dgpaci'], ['dgpaci', 'mbianchi']))
+        self.assertEqual(self.forge.calls[-1], ('PATCH', 'repos/o/r/issues/12', {'assignees': ['dgpaci', 'mbianchi']}))
+        self.assertEqual(result['done'], ['#12 assignees: dgpaci, mbianchi'])
+
+    def test_a_pull_request_with_no_assignee_and_a_removal(self):
+        answer, _ = self.assign(number=18, login='dgpaci', op='add')
+        self.assertEqual((answer['preview']['item']['ref'], answer['preview']['before']), ('PR #18', []))
+        answer, _ = self.assign(number=12, login='dgpaci', op='remove')
+        self.assertEqual(answer['preview']['summary'], 'Unassign Davide Paci from #12')
+        self.assertEqual(self.forge.calls[-1], ('PATCH', 'repos/o/r/issues/12', {'assignees': []}))
+
+    def test_only_logins_of_team_people_on_open_items_and_real_changes(self):
+        for login in ('eve', 'someone', None):
+            with self.assertRaisesRegex(ds.ActionError, 'not a login of team.people'):
+                self.assign(number=12, login=login, op='add')
+        with self.assertRaisesRegex(ds.ActionError, 'already assigned'):
+            self.assign(number=12, login='dgpaci', op='add')
+        with self.assertRaisesRegex(ds.ActionError, 'not assigned'):
+            self.assign(number=18, login='dgpaci', op='remove')
+        with self.assertRaisesRegex(ds.ActionError, 'closed'):
+            self.assign(number=20, login='dgpaci', op='add')
+        for number, op in ((True, 'add'), ('12', 'add'), (12, 'toggle')):
+            with self.assertRaises(ds.ActionError):
+                self.assign(number=number, login='dgpaci', op=op)
+        self.assertFalse([c for c in self.forge.calls if c[0] == 'PATCH'])
+
+    def test_a_change_on_the_forge_between_preview_and_confirm_is_refused(self):
+        base = {'project': self.p.root, 'kind': 'assign', 'number': 12, 'login': 'mbianchi', 'op': 'add'}
+        answer, _ = ds.run_action(self.p.home, base, self.forge)
+        self.forge.items[12]['assignees'] = [{'login': 'dgpaci'}, {'login': 'other'}]
+        with self.assertRaisesRegex(ds.ActionError, 'changed since the preview'):
+            ds.run_action(self.p.home, {**base, 'confirm': answer['hash']}, self.forge)
+        self.assertFalse([c for c in self.forge.calls if c[0] == 'PATCH'])
+
+    def test_a_checkout_without_pm_is_read_only(self):
+        pm = os.path.join(self.p.root, '.pm')
+        os.rename(pm, pm + '-gone')
+        with self.assertRaisesRegex(ds.ActionError, 'read-only'):
+            self.assign(number=12, login='mbianchi', op='add')
+
+
+class ForgeTransport(unittest.TestCase):
+    """The PATCH of an assign as each forge receives it: `gh api --input -` on GitHub, the REST API with the fj token on Forgejo."""
+
+    def forge(self, kind, host, home=''):
+        forge = ds.Forge.__new__(ds.Forge)
+        forge.forge, forge.host, forge.repo, forge.home = kind, host, 'o/r', home
+        return forge
+
+    def test_github_goes_through_gh_api(self):
+        seen = {}
+
+        def run(argv, input=None, **kwargs):
+            seen.update(argv=argv, input=input)
+            return ds.subprocess.CompletedProcess(argv, 0, stdout='{}', stderr='')
+        with unittest.mock.patch.object(ds.subprocess, 'run', run):
+            self.forge('github', 'github.com').call('PATCH', 'repos/o/r/issues/12', {'assignees': ['dgpaci']})
+        self.assertEqual(seen['argv'], ['gh', 'api', '-X', 'PATCH', 'repos/o/r/issues/12', '--input', '-'])
+        self.assertEqual(json.loads(seen['input']), {'assignees': ['dgpaci']})
+
+    def test_forgejo_goes_through_the_rest_api_with_the_fj_token(self):
+        with tempfile.TemporaryDirectory() as home:
+            keys = os.path.join(home, ds.FJ_KEYS)
+            os.makedirs(os.path.dirname(keys))
+            with open(keys, 'w') as handle:
+                json.dump({'hosts': {'hub.example': {'token': 't0k'}}}, handle)
+            seen = {}
+
+            class Response(io.BytesIO):
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+            def urlopen(request, timeout=None):
+                seen.update(url=request.full_url, method=request.get_method(), body=json.loads(request.data), auth=request.get_header('Authorization'))
+                return Response(b'{}')
+            with unittest.mock.patch.object(ds.urllib.request, 'urlopen', urlopen):
+                self.forge('forgejo', 'hub.example', home).call('PATCH', 'repos/o/r/issues/18', {'assignees': []})
+        self.assertEqual(seen, {'url': 'https://hub.example/api/v1/repos/o/r/issues/18', 'method': 'PATCH', 'body': {'assignees': []}, 'auth': 'token t0k'})
 
 
 class Server(unittest.TestCase):

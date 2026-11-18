@@ -431,6 +431,66 @@ def plan_package(root, home, request, forge=None):
     }, forge, existing
 
 
+def team_logins(root):
+    """login → person of `team.people` in .pm/project.yaml, the block form the schema documents."""
+    path = os.path.join(root, '.pm', 'project.yaml')
+    lines = read_text(path).splitlines() if os.path.exists(path) else []
+    found, section, people_indent = {}, None, 0
+    for line in lines:
+        bare = line.split(' #', 1)[0].rstrip()
+        if not bare.strip() or bare.lstrip().startswith('#'):
+            continue
+        indent = len(bare) - len(bare.lstrip())
+        if indent == 0:
+            section = 'team' if re.match(r'^team:\s*$', bare) else None
+        elif section == 'team' and re.match(r'^\s+people:\s*$', bare):
+            section, people_indent = 'people', indent
+        elif section == 'people':
+            if indent <= people_indent:
+                section = 'team'
+                continue
+            match = re.match(r'^\s+(.+?):\s*\{(.*)\}\s*$', bare)
+            login = note_field('{' + match.group(2) + '}', 'login') if match else None
+            if login:
+                found[login.strip()] = from_scalar(match.group(1))
+    return found
+
+
+def plan_assign(root, home, request, forge=None):
+    """The change of the assignees of one issue or pull request: who, before and after, as the forge has it now."""
+    number, login, op = request.get('number'), request.get('login'), request.get('op')
+    if not (isinstance(number, int) and not isinstance(number, bool) and number > 0):
+        raise ActionError('an issue or pull request is a number')
+    if op not in ('add', 'remove'):
+        raise ActionError('op is add or remove')
+    people = team_logins(root)
+    if not isinstance(login, str) or login not in people:
+        raise ActionError(f'{login} is not a login of team.people in .pm/project.yaml')
+    forge = forge or Forge(root, home)
+    item = forge.call('GET', f'repos/{forge.repo}/issues/{number}')
+    ref = item_ref(item)
+    if item.get('state') != 'open':
+        raise ActionError(f'{ref} is closed')
+    before = [a['login'] for a in item.get('assignees') or [] if a.get('login')]
+    held = login.lower() in (a.lower() for a in before)
+    if op == 'add' and held:
+        raise ActionError(f'{login} is already assigned to {ref}')
+    if op == 'remove' and not held:
+        raise ActionError(f'{login} is not assigned to {ref}')
+    after = before + [login] if op == 'add' else [a for a in before if a.lower() != login.lower()]
+    return {
+        'kind': 'assign', 'project': root, 'forge': f'{forge.host}/{forge.repo}',
+        'summary': f'Assign {people[login]} to {ref}' if op == 'add' else f'Unassign {people[login]} from {ref}',
+        'item': {'ref': ref, 'number': number, 'title': item.get('title', ''), 'kind': 'pr' if item.get('pull_request') is not None else 'issue'},
+        'before': before, 'after': after,
+    }, forge
+
+
+def apply_assign(preview, forge):
+    forge.call('PATCH', f"repos/{forge.repo}/issues/{preview['item']['number']}", {'assignees': preview['after']})
+    return [f"{preview['item']['ref']} assignees: {', '.join(preview['after']) or 'none'}"]
+
+
 def apply_package(root, preview, forge, existing, move):
     """Writes the plan, stopping at the first failure; says what was done."""
     done = []
@@ -465,7 +525,13 @@ def run_action(home, request, forge=None):
     if not isinstance(request, dict):
         raise ActionError('not an action')
     root = project_root(home, request.get('project'))
-    if request.get('kind') == 'package':
+    # The desk reads .pm/ from git when the checkout has none: such a project is shown, never written.
+    if not os.path.isdir(os.path.join(root, '.pm')):
+        raise ActionError('the checkout has no .pm/: the project is read-only until it does')
+    if request.get('kind') == 'assign':
+        preview, forge = plan_assign(root, home, request, forge)
+        apply = lambda: apply_assign(preview, forge)
+    elif request.get('kind') == 'package':
         preview, forge, existing = plan_package(root, home, request, forge)
         apply = lambda: apply_package(root, preview, forge, existing, request.get('move') or [])
     else:

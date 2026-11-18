@@ -166,6 +166,7 @@ button.primary, button.btn-primary { background: var(--on); border-color: var(--
 .act { font-size: 12px; padding: 1px 8px; margin-left: 6px; }
 .place select, .place input { font: inherit; font-size: 12px; margin-left: 6px; }
 .place input { width: 52px; }
+select.assign { font: inherit; font-size: 12px; }
 .dialog { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 60px 16px; }
 .dialog-box { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; width: min(640px, 100%); max-height: calc(100vh - 120px); overflow: auto; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
 .dialog-box h3 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--fg); margin: 0 0 10px; }
@@ -223,6 +224,8 @@ const stageEffort = e => 'Stage ' + e.stage + ' effort: ' + e.actual + 'h of ' +
 const iterationFact = it => el('span', { className: it.isOverdue ? 'err' : '', textContent: 'iteration ' + it.number + ' · ' + it.done + '/' + it.planned + ' WPs · ends ' + (it.end || '—') + (it.isOverdue ? ' overdue' : '') })
 // Readiness: an open issue lacking a heading of project.yaml readiness.headings carries a notready pill naming what is missing.
 const missingOf = (p, number) => (p.forgeIssues.find(i => i.number === number) || {}).missing || []
+// The assignees of a team item, from the project's open issues or pull requests once they carry them; undefined until then.
+const assigneesOf = (p, i) => ((i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => x.number === i.number) || {}).assignees
 const notReadyPill = missing => missing.length ? Object.assign(pill('notready', 'notready'), { title: 'missing: ' + missing.join(', ') }) : null
 
 // Desk actions. Served by the desk helper (server/desk_server.py), the page carries its token: every action is previewed, then
@@ -267,6 +270,11 @@ function actionButton(label, run, fallback) {
 }
 // What an action will change: the line before and after, or the plan of a package with the items to move picked here.
 function previewOf(preview, extra) {
+  if (preview.kind === 'assign') return [
+    el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
+    el('p', {}, el('strong', { textContent: preview.item.ref + ' ' }), preview.item.title),
+    el('div', { className: 'diff' }, el('div', { className: 'del', textContent: '- assignees: ' + (preview.before.join(', ') || 'none') }),
+      el('div', { className: 'add', textContent: '+ assignees: ' + (preview.after.join(', ') || 'none') }))]
   if (preview.kind !== 'package') return [el('p', { className: 'dim mono', textContent: preview.file }),
     ...preview.changes.map(c => el('div', { className: 'diff' }, el('div', { className: 'dim', textContent: 'line ' + c.line }),
       c.before ? el('div', { className: 'del', textContent: '- ' + c.before }) : null, c.after ? el('div', { className: 'add', textContent: '+ ' + c.after }) : null))]
@@ -340,6 +348,20 @@ function placeControls(p, w) {
   const rank = el('input', { type: 'number', min: 1, title: 'rank', value: w.rank === null ? '' : String(w.rank),
     onchange: () => act(p, { kind: 'wp-rank', target: w.id, value: rank.value === '' ? '' : Number(rank.value) }) })
   return el('span', { className: 'place' }, horizon, rank)
+}
+// Assign or unassign a team member on an open issue or pull request: a select of the members with a login, each option adding or
+// removing them by the item's assignees; with no assignees known both are offered and the helper's preview refuses what cannot be.
+// Only with the helper, and never on a project whose .pm/ is read from git.
+function assignControl(p, number, assignees) {
+  const members = p.team.filter(m => m.login)
+  if (!server || p.pmRef || !members.length) return null
+  const held = assignees ? new Set(assignees.map(a => (a.login || a).toLowerCase())) : null
+  const options = members.flatMap(m => held ? [[held.has(m.login.toLowerCase()) ? 'remove' : 'add', m]] : [['add', m], ['remove', m]])
+  const pick = el('select', { className: 'assign', title: 'assign a team member', onclick: e => e.stopPropagation(),
+    onchange: () => { const [op, login] = pick.value.split(':'); pick.value = ''; if (login) act(p, { kind: 'assign', number, login, op }) } },
+    el('option', { value: '', textContent: 'Assign…' }),
+    ...options.map(([op, m]) => el('option', { value: op + ':' + m.login, textContent: (op === 'add' ? '+ ' : '− ') + m.person })))
+  return pick
 }
 function packageDialog(p, refs) {
   const title = el('input', { type: 'text', placeholder: 'one to three words' })
@@ -522,7 +544,8 @@ function team(p) {
             el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: (i.kind === 'pr' ? 'PR #' : '#') + i.number })),
             el('td', { textContent: i.title }),
             el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
-            el('td', { style: 'width:150px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status))))))
+            el('td', { style: 'width:150px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status)),
+            el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, i.number, i.assignees || assigneesOf(p, i)))))))
         : el('div', { className: 'empty dim', textContent: 'No open item.' }))))
 }
 
@@ -571,13 +594,15 @@ function activity(p) {
     el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: pr.url, className: 'mono', textContent: 'PR #' + pr.number })),
     el('td', { textContent: pr.title }),
     el('td', { style: 'width:220px; text-align:right' }, pr.milestone ? pill(pr.milestone) : null, ' ', pr.draft ? pill('draft') : pr.inReview ? pill('in review', 'review') : null),
-    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: pr.updatedAt }))
+    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: pr.updatedAt }),
+    el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, pr.number, pr.assignees)))
 
   const issueRow = i => el('tr', { className: rowClass('i' + i.number) }, pick('i' + i.number, '#' + i.number),
     el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: '#' + i.number })),
     el('td', { textContent: i.title }),
     el('td', { style: 'width:100px; text-align:right' }, notReadyPill(i.missing || [])),
-    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }))
+    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
+    el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, i.number, i.assignees)))
 
   // Issues by milestone: the open ones in their order, then any other title (closed, or past the one-page read), then "No milestone".
   const shown = notReadyOnly ? p.forgeIssues.filter(i => (i.missing || []).length) : p.forgeIssues
