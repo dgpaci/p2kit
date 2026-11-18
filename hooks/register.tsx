@@ -25,7 +25,7 @@ const CHANGED_PATH = '.claude/p2kit/desk-changed.json'
 
 // Change a tag when its value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-15' })
+const projects = atom({ plugin: 'p2kit', key: 'projects' } as const, [], { shape: 'projects-16' })
 const selected = atom({ plugin: 'p2kit', key: 'selected' } as const, '', { shape: 'selected-1' })
 // The chosen project's body: '' the recap, `tab:<id>`, `theme:<WP-id>`.
 const view = atom({ plugin: 'p2kit', key: 'view' } as const, '', { shape: 'view-1' })
@@ -82,9 +82,19 @@ function getThemeProgress(delivery: WpDelivery): string {
 /** `▓▓░░░ 2/5`: completed work packages of the current stage; a continuous stage, which has no end, counts them: `3 open · 12 completed`. */
 function getProgressBar({ progress: { done, total }, stage }: Project): string {
   if (stage.isContinuous) return `${total - done} open · ${done} completed`
+  return getTextBar(done, total)
+}
+
+function getTextBar(done: number, total: number): string {
   const width = 10
   const filled = total ? Math.round((width * done) / total) : 0
   return `${'▓'.repeat(filled)}${'░'.repeat(width - filled)} ${done}/${total}`
+}
+
+/** `objectives ▓▓░░░ 1/7`: the brief objectives met, dropped ones not counted; '' when the brief has no checklist. */
+function getObjectivesText({ objectives = [] }: Project): string {
+  const live = objectives.filter(one => !one.isDropped)
+  return live.length ? `objectives ${getTextBar(live.filter(one => one.isMet).length, live.length)}` : ''
 }
 
 /** Hours with their sign: "+4h", "0h", "-3h". */
@@ -270,6 +280,7 @@ export const register: Register = on => {
     const getWipLines = (project: Project) =>
       project.team.filter(member => member.isOverLimit).map(member => <Text color="red">{getWipText(member)}</Text>)
     /** The open iteration in the overview row, red and " overdue" past its end. */
+    const getObjectivesFact = (project: Project) => getObjectivesText(project) && <Text mono>{getObjectivesText(project)}</Text>
     const getIterationFact = ({ iteration }: Project) => iteration && (
       <Text color={iteration.isOverdue ? 'red' : undefined} dimColor={!iteration.isOverdue}>
         {`iteration ${iteration.number} · ${iteration.done}/${iteration.planned} WPs · ends ${iteration.end || '—'}${iteration.isOverdue ? ' overdue' : ''}`}
@@ -338,6 +349,7 @@ export const register: Register = on => {
                 <Button key={`open:${project.path}`} plain onPress={() => select(project.path)}>{project.name || project.path}</Button>
                 <Text dimColor>{[project.code, getStageLabel(project), project.status].filter(Boolean).join(' · ')}</Text>
               </Box>
+              {getObjectivesFact(project)}
               <Text mono>{getProgressBar(project)}</Text>
               {getIterationFact(project)}
               {getEffortFact(project)}
@@ -636,6 +648,7 @@ export const register: Register = on => {
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="column">
           <Text>{`Stage ${p.stage.current === null ? '—' : `${p.stage.current}${p.stage.name ? ` · ${p.stage.name}` : ''}`} · ${getStageSpan(p)}`}</Text>
+          {getObjectivesFact(p)}
           <Text mono>{`${getProgressBar(p)} · ${themes.length} active work themes`}</Text>
           {p.iteration && (
             <Text color={p.iteration.isOverdue ? 'red' : undefined} wrap="truncate-end">

@@ -8,6 +8,7 @@ import { toForgeIssues, toForgePulls, toMilestoneItems, toMilestoneProgress } fr
 import type { RestMilestoneItem } from './milestones'
 import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
 import { findPlanPath, getPhaseSummary, parseObjective, parsePhaseOutcomes, parsePhases } from './stage'
+import { getObjectives } from './objectives'
 import { readReadiness } from './readiness'
 import { getClosedRefs, hasCommitRef, isPlainIssue, logins, readTeam, toTeamItems, withItems } from './team'
 import type { RestIssue, RestPull, TimelineEvent } from './team'
@@ -170,6 +171,7 @@ function readWpFront(file: { path: string; text: string }, errors: string[] = []
     deviation: getDeviation(status, estimate, actual),
     horizon: HORIZONS.includes(horizon) ? horizon : '',
     rank: num(front.rank),
+    objectives: list(front.objectives).map(text).filter(Boolean),
     link: link.issue !== null || link.milestone || link.branch ? link : null,
   }
 }
@@ -417,6 +419,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     ...readLessons(files.lessons, errors),
     ...readDailyLog(files.dailyLog, today, errors),
     roadmap: getRoadmap(workPackages),
+    objectives: getObjectives(files.products.find(file => file.path === `${files.path}/.pm/brief.md`)?.text, workPackages, errors),
     openBlockers: notes.filter(note => note.kind === 'blocker' && note.status === 'open').length,
     unthemedNotes: notes.filter(note => !workPackages.some(pkg => pkg.delivery && pkg.id === note.wp)),
     errors,

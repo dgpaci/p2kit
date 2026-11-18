@@ -24,6 +24,10 @@ writes only after the user's OK, and commits nothing.
      true takes its `used` from the work packages;
    - the stage effort, when `effort` is set: `actual`h of `estimate`h, deviation (signed) over
      `counted` work packages;
+   - the brief objectives (`objectives`, the dropped ones left out): met over all, and per open
+     objective the work packages in `wps` with `done` of them completed; none when the list is
+     empty. Ticking one is never this skill's job: when one looks met, say so in **Blockers and
+     decisions for the Board**;
    - the open high risks of `risks` (`score ≥ 6`), with owner;
    - the work packages of the current stage with status `completed` or `archived` — all of them: a work
      package carries no completion date, so the section says they are the stage's, not the
@@ -34,7 +38,8 @@ writes only after the user's OK, and commits nothing.
 4. Draft the report under these headings, in this order, in plain sentences built from the data:
    **Summary**, **Period and stage status**, **Tolerances**, **Completed in the period**,
    **Planned for the next period**, **Risks and issues**, **Blockers and decisions for the
-   Board**, **Flow**. Summary and the Board requests are drafted from the data and from what the
+   Board**, **Flow**. **Period and stage status** ends with the objectives line
+   (`objectives <met>/<total> met`, then the open ones with their work packages). Summary and the Board requests are drafted from the data and from what the
    user adds in chat; a section with nothing to say says so in one line. **Period and stage
    status** carries one line with the stage effort when `effort` is set; **Tolerances** marks a
    computed tolerance (`isComputed`) `from work packages`.

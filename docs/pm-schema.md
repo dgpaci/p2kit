@@ -343,6 +343,17 @@ after the user states in chat that the Board considers it met. Work packages nam
 they serve with `objectives:`; `/pm-digest` and `/pm-report` read both to say, per objective, which
 work packages serve it, how far they are, and which objectives no work package serves.
 
+The desk reads the checklist of `.pm/brief.md` (`hooks/objectives.ts`): an entry is
+`- [ ] **O-<n>** <title> — …` or `… . *Done when:* …`, the title running up to ` — ` or
+`*Done when`, `[x]` met, `~~…~~` dropped; lines of the entry after the first are not read. Per
+objective it lists the work packages naming it that are not cancelled and how many of them are
+`completed` or `archived`. An id a work package names that the checklist lacks is the error
+`WP-<nn>: objectives: O-<n> is not in the brief`; a brief without the section shows nothing and no
+error. Shown: the overview row and the pane, `objectives <bar> <met>/<total>` after the stage (the
+dropped ones not counted); the recap, an *Objectives* section right after the cards, before
+*Tolerances* and *Needs attention*; a work package's page, the objectives it serves above its
+phases. The progress of a work package is not measured on its objectives.
+
 ### Work packages
 
 `work-packages/WP-<nn>.md`, frontmatter:
@@ -595,7 +606,7 @@ preview the PM confirms; nothing is committed.
 | Assign / unassign | `PATCH issues/<n>` with the full `assignees` list, the login added or removed (pull requests too, both forges) | an open item; a login of `team.people` |
 | Assign to many | one `PATCH issues/<n>` per picked item, the login added to its `assignees` | open items not already held by that login (1–50); a login of `team.people` |
 | New issue | `POST issues` with `title`, `body`, and optionally `milestone` (the work package's, `number` on GitHub, `id` on Forgejo) and `assignees` (one login) | a title; a work package whose `milestone:` exists on the forge; a login of `team.people` |
-| Attach to a work package | `PATCH issues/<n>` with `milestone:` the key of the work package's milestone (`number` on GitHub, `id` on Forgejo) | an open item; a work package whose `milestone:` exists on the forge |
+| Attach to a work package | `PATCH issues/<n>` with `milestone:` the key of the work package's milestone (`number` on GitHub, `id` on Forgejo); for a work package without `milestone:`, first the milestone named after its title (created, or reused when one carries that title), and after the patch its `milestone:` key | an open item; a work package whose `milestone:` exists on the forge, or one with a title and no `milestone:` |
 
 A missing key is added before the closing `---`; a key written twice, a value already set, or a note
 matching no line or more than one is refused, and so is a change to a file that changed since its
@@ -622,11 +633,17 @@ reads the work package's `milestone:`, finds that milestone on the forge and rea
 shows the item's reference, title and kind, its milestone now and the new one, and the forge. An
 item in another milestone is shown as a move; a closed milestone is allowed and flagged. The hash
 covers the item's current milestone, so a change on the forge between preview and confirm is
-refused. Refused: a closed item, an item already in that milestone, a work package without
-`milestone:` (link one with `/pm-link`, or group the items with *Create package*), a milestone
-missing on the forge. The browser page offers it as an *Attach to…* select on the open issues and
-pull requests of the Activity tab, listing the work packages with a milestone that are not
-archived or cancelled, less the one the item is already in; hidden on a read-only project.
+refused. A work package without `milestone:` gets one named after its `title`: the preview says
+*Create milestone* (none on the forge carries that title) or *Reuse milestone*, and shows the
+`milestone:` line it adds to the work package; Confirm creates the milestone, patches the item,
+then writes the line, stopping at the first failure and saying what was done. The work package's
+file hash is in the preview, so an edit between preview and confirm is refused before any forge
+write. Refused: a closed item, an item already in that milestone, a work package with neither
+`milestone:` nor `title`, a `milestone:` missing on the forge. The browser page offers it as an
+*Attach to…* select on the open issues and pull requests of the Activity tab, listing the work
+packages with a milestone that are not archived or cancelled, less the one the item is already in,
+then under *New milestone* those with a title and no milestone that are not completed, archived or
+cancelled; a drop on such a work package opens the same preview. Hidden on a read-only project.
 
 **New issue.** `{ kind: 'issue-create', title, body?, wp?, login? }`, from the *New issue* button of
 the Board tab or a lane's *+ issue* (its work package picked). The preview shows the forge, the

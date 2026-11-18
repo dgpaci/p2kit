@@ -30,6 +30,9 @@ A work theme is a work package carrying link keys in its frontmatter: `issue`, `
      match, without the `remotes/origin/` prefix; confirm it with the user. No match → ask, or
      leave it absent.
    - `base`: ask, `''` (the repo's default branch) by default.
+   - `objectives`: when `.pm/brief.md` has an `## Objectives` checklist and the work package
+     carries no `objectives:` yet, list the open objectives (id and title) and offer the ones the
+     work package serves, `objectives: [O-2, O-4]`; only ids of the brief, none if the user says so.
 
    Keep the frontmatter within the YAML subset (docs/pm-schema.md → *YAML subset*): one
    `key: value` per line; any value holding a `:` or a `#` — an issue title often does, a
