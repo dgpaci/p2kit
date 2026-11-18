@@ -165,8 +165,7 @@ class FakeForge:
     def milestones(self):
         return self.ms
 
-    def milestone_key(self, milestone):
-        return milestone['number']
+    milestone_key = ds.Forge.milestone_key
 
     def open_items(self, milestone):
         return [i for i in self.items.values() if (i.get('milestone') or {}).get('title') == milestone['title']]
@@ -294,6 +293,62 @@ class Assign(unittest.TestCase):
         os.rename(pm, pm + '-gone')
         with self.assertRaisesRegex(ds.ActionError, 'read-only'):
             self.assign(number=12, login='mbianchi', op='add')
+
+
+class IssueMilestone(unittest.TestCase):
+    """Attaching an issue or pull request to a work package's milestone: `number` is the key on GitHub, `id` on Forgejo."""
+
+    def setUp(self):
+        self.p = Project()
+        self.p.write('.pm/work-packages/WP-02.md', '---\nid: WP-02\ntitle: Login\nstatus: draft\nmilestone: Login\n---\n')
+        self.p.write('.pm/work-packages/WP-03.md', '---\nid: WP-03\ntitle: Gone\nstatus: draft\nmilestone: Gone\n---\n')
+        self.forge = FakeForge([{'number': 3, 'id': 103, 'title': 'Old', 'state': 'open'}, {'number': 9, 'id': 109, 'title': 'Login', 'state': 'closed'}], {
+            12: {'number': 12, 'title': 'Login form', 'state': 'open', 'milestone': None},
+            18: {'number': 18, 'title': 'Fix', 'state': 'open', 'milestone': {'number': 3, 'id': 103, 'title': 'Old'}, 'pull_request': {}},
+            19: {'number': 19, 'title': 'There', 'state': 'open', 'milestone': {'number': 9, 'id': 109, 'title': 'Login'}},
+            20: {'number': 20, 'title': 'Done', 'state': 'closed', 'milestone': None},
+        })
+
+    def tearDown(self):
+        self.p.temp.cleanup()
+
+    def attach(self, **request):
+        base = {'project': self.p.root, 'kind': 'issue-milestone', **request}
+        answer, _ = ds.run_action(self.p.home, base, self.forge)
+        return answer['preview'], ds.run_action(self.p.home, {**base, 'confirm': answer['hash']}, self.forge)[0]
+
+    def test_the_preview_shows_the_item_the_old_and_new_milestone_and_confirm_patches_it(self):
+        preview, result = self.attach(number=12, wp='WP-02')
+        self.assertEqual((preview['summary'], preview['forge'], preview['item']['kind'], preview['before'], preview['milestone']),
+                         ('Attach #12 to Login (WP-02)', 'github.com/o/r', 'issue', '', {'title': 'Login', 'key': 9, 'closed': True}))
+        self.assertEqual(self.forge.calls[-1], ('PATCH', 'repos/o/r/issues/12', {'milestone': 9}))
+        self.assertEqual(result['done'], ['#12 in milestone Login'])
+
+    def test_an_item_in_another_milestone_is_a_move_and_forgejo_takes_the_id(self):
+        self.forge.forge = 'forgejo'
+        preview, _ = self.attach(number=18, wp='WP-02')
+        self.assertEqual((preview['summary'], preview['item']['ref'], preview['before']), ('Move PR #18 from Old to Login (WP-02)', 'PR #18', 'Old'))
+        self.assertEqual(self.forge.calls[-1], ('PATCH', 'repos/o/r/issues/18', {'milestone': 109}))
+
+    def test_refused_already_there_no_milestone_unknown_milestone_closed_item(self):
+        cases = ((dict(number=19, wp='WP-02'), 'already in milestone Login'),
+                 (dict(number=12, wp='WP-01'), 'WP-01 has no milestone: link one with /pm-link'),
+                 (dict(number=12, wp='WP-03'), 'milestone Gone of WP-03 is not on'),
+                 (dict(number=20, wp='WP-02'), 'closed'),
+                 (dict(number=12, wp='WP-99'), 'not found'),
+                 (dict(number='12', wp='WP-02'), 'is a number'))
+        for request, message in cases:
+            with self.subTest(request=request), self.assertRaisesRegex(ds.ActionError, message):
+                self.attach(**request)
+        self.assertFalse([c for c in self.forge.calls if c[0] == 'PATCH'])
+
+    def test_a_change_on_the_forge_between_preview_and_confirm_is_refused(self):
+        base = {'project': self.p.root, 'kind': 'issue-milestone', 'number': 12, 'wp': 'WP-02'}
+        answer, _ = ds.run_action(self.p.home, base, self.forge)
+        self.forge.items[12]['milestone'] = {'number': 3, 'title': 'Old'}
+        with self.assertRaisesRegex(ds.ActionError, 'changed since the preview'):
+            ds.run_action(self.p.home, {**base, 'confirm': answer['hash']}, self.forge)
+        self.assertFalse([c for c in self.forge.calls if c[0] == 'PATCH'])
 
 
 class ForgeTransport(unittest.TestCase):

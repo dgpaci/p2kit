@@ -1,4 +1,5 @@
 import { getLinkBase, getPackageLink, getSessionLink } from './actions'
+import { getBoardLanes } from './lanes'
 import { getMilestonePackage } from './milestones'
 import { getWorkThemes } from './project'
 import type { Project } from '../types'
@@ -38,6 +39,7 @@ export function renderBoard(input: BoardInput): string {
     projects: input.projects.map(project => ({
       ...project, sessionLink: getSessionLink(project), themes: getWorkThemes(project), blockers: getOpenBlockers(project),
       packageLink: getPackageLink(project, []), linkBase: getLinkBase(project), milestonePackages: getMilestonePackages(project),
+      lanes: getBoardLanes(project),
     })),
     refreshedAt: new Date(input.refreshedAt).toISOString(),
     errors: input.errors,
@@ -176,6 +178,21 @@ select.assign { font: inherit; font-size: 12px; }
 .diff { font-family: ui-monospace, monospace; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diff .del { color: var(--red); } .diff .add { color: var(--green); }
 .warn { color: var(--amber); }
+/* Board tab: one swimlane per work package, four columns; cards carry data-number and lanes data-wp for drag and drop. */
+.lane { border: 1px solid var(--line); border-radius: 8px; margin-top: 12px; overflow: hidden; }
+.lane.reopened { border-color: var(--amber); }
+.lane.unplanned { border-style: dashed; }
+.lane-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 8px 12px; background: var(--chip); border-bottom: 1px solid var(--line); }
+.lane-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.lane-col { padding: 8px; border-left: 1px solid var(--line); min-height: 56px; }
+.lane-col:first-child { border-left: 0; }
+.lane-col h4 { margin: 0 0 6px; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.bcard { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; margin-bottom: 6px; background: var(--bg); font-size: 13px; }
+.bcard .who { display: block; font-size: 12px; color: var(--dim); margin-top: 2px; }
+.bcard .who.none { color: var(--red); font-weight: 600; }
+.bcard .ms { font-size: 11px; color: var(--dim); }
+.lane-done { font-size: 13px; color: var(--green); }
+@media (max-width: 720px) { .lane-cols { grid-template-columns: 1fr 1fr; } .lane-col:nth-child(3) { border-left: 0; } }
 @media (max-width: 720px) {
   .theme-row { grid-template-columns: 18px 1fr; } .theme-row .forge { grid-column: 2; justify-content: flex-start; }
   .theme-row > :nth-child(3) { grid-column: 2; }
@@ -270,6 +287,12 @@ function actionButton(label, run, fallback) {
 }
 // What an action will change: the line before and after, or the plan of a package with the items to move picked here.
 function previewOf(preview, extra) {
+  if (preview.kind === 'issue-milestone') return [
+    el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
+    el('p', {}, el('strong', { textContent: preview.item.ref + ' ' }), preview.item.title),
+    el('div', { className: 'diff' }, el('div', { className: 'del', textContent: '- milestone: ' + (preview.before || 'none') }),
+      el('div', { className: 'add', textContent: '+ milestone: ' + preview.milestone.title + ' (' + preview.wp + ')' })),
+    preview.milestone.closed ? el('p', { className: 'warn', textContent: 'The milestone ' + preview.milestone.title + ' is closed.' }) : null]
   if (preview.kind === 'assign') return [
     el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
     el('p', {}, el('strong', { textContent: preview.item.ref + ' ' }), preview.item.title),
@@ -361,6 +384,21 @@ function assignControl(p, number, assignees) {
     onchange: () => { const [op, login] = pick.value.split(':'); pick.value = ''; if (login) act(p, { kind: 'assign', number, login, op }) } },
     el('option', { value: '', textContent: 'Assign…' }),
     ...options.map(([op, m]) => el('option', { value: op + ':' + m.login, textContent: (op === 'add' ? '+ ' : '− ') + m.person })))
+  return pick
+}
+// The work packages an open issue or pull request can be attached to: those with a milestone, not archived or cancelled, other
+// than the one whose milestone the item already has (item.milestone is its title, '' when none).
+const attachTargets = (p, item) => p.workPackages.filter(w => w.delivery && w.delivery.milestone && !['archived', 'cancelled'].includes(w.status)
+  && w.delivery.milestone !== item.milestone)
+// Attach an open issue or pull request to a work package's milestone: a select of attachTargets, previewed by the helper (a move
+// when the item is in another milestone). Only with the helper, and never on a project whose .pm/ is read from git.
+function attachControl(p, item) {
+  const targets = attachTargets(p, item)
+  if (!server || p.pmRef || !targets.length) return null
+  const pick = el('select', { className: 'assign', title: 'attach to a work package', onclick: e => e.stopPropagation(),
+    onchange: () => { const wp = pick.value; pick.value = ''; if (wp) act(p, { kind: 'issue-milestone', number: item.number, wp }) } },
+    el('option', { value: '', textContent: 'Attach to…' }),
+    ...targets.map(w => el('option', { value: w.id, textContent: w.id + ' ' + w.title })))
   return pick
 }
 function packageDialog(p, refs) {
@@ -595,14 +633,14 @@ function activity(p) {
     el('td', { textContent: pr.title }),
     el('td', { style: 'width:220px; text-align:right' }, pr.milestone ? pill(pr.milestone) : null, ' ', pr.draft ? pill('draft') : pr.inReview ? pill('in review', 'review') : null),
     el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: pr.updatedAt }),
-    el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, pr.number, pr.assignees)))
+    el('td', { style: 'width:1%; white-space:nowrap' }, attachControl(p, pr), ' ', assignControl(p, pr.number, pr.assignees)))
 
   const issueRow = i => el('tr', { className: rowClass('i' + i.number) }, pick('i' + i.number, '#' + i.number),
     el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: '#' + i.number })),
     el('td', { textContent: i.title }),
     el('td', { style: 'width:100px; text-align:right' }, notReadyPill(i.missing || [])),
     el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
-    el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, i.number, i.assignees)))
+    el('td', { style: 'width:1%; white-space:nowrap' }, attachControl(p, i), ' ', assignControl(p, i.number, i.assignees)))
 
   // Issues by milestone: the open ones in their order, then any other title (closed, or past the one-page read), then "No milestone".
   const shown = notReadyOnly ? p.forgeIssues.filter(i => (i.missing || []).length) : p.forgeIssues
@@ -717,6 +755,48 @@ function dailyLog(p) {
       [d.id, d.kind + (d.source ? ' · ' + d.source : ''), logText(d), d.issue === null ? '' : issueLink(p, d.issue), d.owner, d.isOverdue ? el('span', { className: 'err', textContent: d.due }) : d.due, d.status]))))))
 }
 
+// Board: a swimlane per work package with a milestone (p.lanes, hooks/lanes.ts), its open items in To do / In progress / In review,
+// the milestone's closed count as Done; a completed or archived package with open items is flagged reopened; the last lane holds
+// the open items of no work package. p.lanes is missing on a page built by older code: read as empty.
+const LANE_COLUMNS = [['todo', 'To do'], ['inprogress', 'In progress'], ['review', 'In review']]
+const lanesOf = p => p.lanes || []
+const unplannedCount = p => { const last = lanesOf(p).find(l => !l.wp); return last ? last.cards.length : 0 }
+function boardCard(c) {
+  return el('div', { className: 'bcard', title: (c.kind === 'pr' ? 'pull request' : 'issue') + ' #' + c.number },
+    el('a', { href: c.url, className: 'mono', textContent: (c.kind === 'pr' ? 'PR #' : '#') + c.number }), ' ', c.title,
+    c.milestone && !c.inLane ? el('span', { className: 'ms', textContent: ' · ' + c.milestone }) : null,
+    c.assignees.length ? el('span', { className: 'who', textContent: c.assignees.map(a => '@' + a).join(' ') }) : el('span', { className: 'who none', textContent: 'unassigned' }))
+}
+function boardLane(l) {
+  const cardOf = c => boardCard(Object.assign({ inLane: Boolean(l.wp) }, c))
+  const column = (key, label) => {
+    const list = l.cards.filter(c => c.column === key)
+    const col = el('div', { className: 'lane-col' }, el('h4', { textContent: label + ' · ' + list.length }), ...list.map(c => { const node = cardOf(c); node.dataset.number = String(c.number); node.dataset.kind = c.kind; return node }))
+    col.dataset.column = key
+    return col
+  }
+  const unassigned = l.cards.filter(c => !c.assignees.length).length
+  const lane = el('div', { className: 'lane' + (l.reopened ? ' reopened' : '') + (l.wp ? '' : ' unplanned') },
+    el('div', { className: 'lane-head' },
+      l.wp ? el('strong', {}, el('span', { className: 'mono', textContent: l.wp + ' ' }), l.title) : el('strong', { textContent: 'Unplanned' }),
+      l.wp ? pill(l.status || 'no status', l.status === 'completed' || l.status === 'archived' ? 'ready' : l.status === 'in-progress' ? 'inprogress' : '') : el('span', { className: 'dim', textContent: 'open items in no work package' }),
+      l.milestone ? el('span', { className: 'dim', textContent: 'milestone ' + l.milestone }) : null,
+      l.progress ? el('span', { title: 'milestone items closed' }, bar(l.progress.closed, l.progress.total)) : null,
+      l.reopened ? pill('reopened: ' + l.reopened + ' open', 'review') : null,
+      unassigned ? pill(unassigned + ' unassigned', 'red') : null),
+    el('div', { className: 'lane-cols' }, ...LANE_COLUMNS.map(([key, label]) => column(key, label)),
+      el('div', { className: 'lane-col' }, el('h4', { textContent: 'Done' }),
+        l.progress ? el('div', { className: 'lane-done', textContent: l.progress.closed + ' closed' }) : el('div', { className: 'dim', textContent: '—' }))))
+  lane.dataset.wp = l.wp
+  return lane
+}
+function board(p) {
+  const lanes = lanesOf(p)
+  if (lanes.length <= 1 && !unplannedCount(p)) return el('p', { className: 'dim', textContent: "No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo." })
+  return el('div', {}, el('p', { className: 'dim', textContent: "Open items by work package: To do, In progress, In review; Done is the milestone's closed count. The tab count is the open items in no work package." }),
+    ...lanes.map(boardLane))
+}
+
 // One entry per tab: [id, label, count(p), render(p)].
 // Risks and issues list every entry, the open ones first; a closed one is dimmed.
 const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
@@ -726,6 +806,7 @@ const TABS = [
   ['team', 'Team', p => p.team.length, team],
   ['activity', 'Activity', p => p.forgeIssues.length + p.forgePulls.length, activity],
   ['metrics', 'Metrics', p => p.flow ? p.flow.windows[0].merge.count : 0, metrics],
+  ['board', 'Board', unplannedCount, board],
   ['documents', 'Documents', p => p.documents.length, documents],
   ['wps', 'Work packages', p => p.workPackages.length, p => el('div', {}, p.effort ? el('p', { textContent: stageEffort(p.effort) }) : null, tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Estimate', 'Actual', 'Deviation', 'Link'],
     p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), el('span', {}, w.status, statusAction(p, w)), w.teamManager, w.due, hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation), wpLink(p, w)])))],

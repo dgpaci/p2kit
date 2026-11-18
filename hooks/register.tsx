@@ -7,6 +7,7 @@ import type { CommitNote, Light, MilestoneItem, Phase, PhaseState, Project, Pull
 import { EditError, setFrontmatterKey, setNoteStatus, setWpStatus } from './edits'
 import type { LineChange } from './edits'
 import { getFlowCell } from './flow'
+import { getBoardLanes } from './lanes'
 import { getItemProgress, getMilestonePackage } from './milestones'
 import { getWorkThemes, loadProjects } from './project'
 import { getDeskServer } from './server'
@@ -96,6 +97,8 @@ const getWpEffortText = ({ estimate, actual, deviation }: WorkPackage): string =
   [estimate === null ? '' : `est ${estimate}h`, actual === null ? '' : `act ${actual}h`, deviation === null ? '' : getSignedHours(deviation)].filter(Boolean).join(' · ')
 
 const HORIZON_LABEL = { now: 'Now', next: 'Next', later: 'Later' } as const
+// The open columns of a Board lane in the pane.
+const BOARD_COLUMNS = [['todo', 'To do'], ['inprogress', 'In progress'], ['review', 'In review']] as const
 
 const getWipText = (member: TeamMember): string => `WIP ${member.person} ${member.wip}/${member.wipLimit}`
 
@@ -378,6 +381,7 @@ export const register: Register = on => {
       const wp = p.workPackages.find(one => one.id === id)
       return wp ? [{ label: HORIZON_LABEL[horizon], wp }] : []
     }))
+    const lanes = getBoardLanes(p)
     const tabs: { id: string; label: string; count: number; render: () => unknown }[] = [
       {
         id: 'roles', label: 'Roles', count: p.roles.length,
@@ -470,6 +474,20 @@ export const register: Register = on => {
             )),
           ]
         },
+      },
+      {
+        // Board: one block per work package with a milestone, a line per column; the count is the open items in no work package.
+        id: 'board', label: 'Board', count: lanes.at(-1)?.cards.length ?? 0,
+        render: () => lanes.flatMap(lane => {
+          const head = lane.wp
+            ? `${lane.wp} ${lane.title} · ${lane.status || 'no status'}${lane.progress ? ` · ${lane.progress.closed}/${lane.progress.total}` : ''}${lane.reopened ? ` · reopened: ${lane.reopened} open` : ''}`
+            : `Unplanned · ${lane.cards.length} open`
+          const columns = BOARD_COLUMNS.flatMap(([column, label]) => {
+            const list = lane.cards.filter(card => card.column === column)
+            return list.length ? [<Text wrap="truncate-end">{`  ${label}: ${list.map(card => `${card.kind === 'pr' ? 'PR ' : ''}#${card.number} ${card.assignees.length ? card.assignees.map(login => `@${login}`).join(' ') : 'unassigned'}`).join(', ')}`}</Text>] : []
+          })
+          return [<Text bold color={lane.reopened ? 'warning' : undefined} wrap="truncate-end">{head}</Text>, ...(columns.length ? columns : [<Text dimColor>{'  No open item.'}</Text>])]
+        }),
       },
       {
         id: 'documents', label: 'Documents', count: p.documents.length,
