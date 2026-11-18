@@ -191,6 +191,26 @@ def project_root(home, path):
     return real
 
 
+def openable_path(home, path):
+    """A file or folder inside a registered project, the only paths the desk opens; never a path of its own."""
+    if not isinstance(path, str) or not path:
+        raise ActionError('no path')
+    real = os.path.realpath(path)
+    if not any(real == root or real.startswith(root + os.sep) for root in registered_projects(home)):
+        raise ActionError('the path is not inside a project of projects.yaml')
+    if not os.path.exists(real):
+        raise ActionError(f'{path} not found')
+    return real
+
+
+def open_path(home, path):
+    """Opens a project's file or folder in its default application: a page served over http cannot follow a file:// link."""
+    real = openable_path(home, path)
+    command = 'open' if sys.platform == 'darwin' else 'xdg-open'
+    subprocess.run([command, real], check=True, timeout=FORGE_TIMEOUT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {'opened': real}
+
+
 def read_text(path):
     with open(path, encoding='utf-8') as handle:
         return handle.read()
@@ -766,13 +786,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.refuse(403, 'token')
         if (self.headers.get('Content-Type') or '').split(';')[0].strip() != 'application/json':
             return self.refuse(415, 'json only')
-        if self.path != '/action':
+        if self.path not in ('/action', '/open'):
             return self.refuse(404, 'not found')
         length = int(self.headers.get('Content-Length') or 0)
         if length <= 0 or length > MAX_BODY:
             return self.refuse(413, 'body size')
         try:
             request = json.loads(self.rfile.read(length))
+            if self.path == '/open':
+                return self.answer(200, open_path(self.server.home, request.get('path') if isinstance(request, dict) else None))
             with self.server.lock:
                 result, changed = run_action(self.server.home, request)
         except ActionError as error:

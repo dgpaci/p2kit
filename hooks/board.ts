@@ -218,7 +218,15 @@ const data = JSON.parse(document.getElementById('data').textContent)
 // A link to the web (forge issues and pull requests) or to a file (documents) opens in a new tab, so the desk stays open.
 const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); if (tag === 'a' && /^(https?|file):/.test(node.getAttribute('href') || '')) Object.assign(node, { target: '_blank', rel: 'noopener' }); node.append(...children.filter(c => c !== null && c !== undefined && c !== false)); return node }
 const dot = light => el('span', { className: 'dot', title: 'tolerances: ' + light, style: 'background: var(--' + light + ')' })
-const fileLink = (path, label) => el('a', { href: 'file://' + encodeURI(path), textContent: label })
+// Served over http the page cannot follow a file:// link (the browser drops the click): the desk helper opens the file in its
+// default application. Opened from disk, the file:// link works as it is.
+const fileLink = (path, label) => el('a', { href: 'file://' + encodeURI(path), textContent: label, onclick: e => {
+  if (!window.P2KIT_SERVER) return
+  e.preventDefault()
+  e.stopPropagation()
+  fetch('/open', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-P2kit-Token': window.P2KIT_SERVER.token }, body: JSON.stringify({ path }) })
+    .then(r => r.ok ? null : r.json().catch(() => ({})).then(a => alert('Cannot open ' + path + ': ' + (a.error || 'HTTP ' + r.status))))
+} })
 const sessionLink = p => el('a', { href: p.sessionLink, textContent: 'Open session', onclick: e => e.stopPropagation() })
 const bar = (done, total) => el('span', {}, el('span', { className: 'bar' }, el('i', { style: 'width:' + (total ? Math.round(100 * done / total) : 0) + '%' })), done + '/' + total)
 // The milestone's items closed over all of them, from its item list when read, else from its counts; null without a milestone.
@@ -992,7 +1000,7 @@ const TABS = [
   ['board', 'Board', unplannedCount, board],
   ['documents', 'Documents', p => p.documents.length, documents],
   ['wps', 'Work packages', p => p.workPackages.length, p => el('div', {}, p.effort ? el('p', { textContent: stageEffort(p.effort) }) : null, tableOf(['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', 'Estimate', 'Actual', 'Deviation', 'Link'],
-    p.workPackages.map(w => [fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), el('span', {}, w.status, statusAction(p, w)), w.teamManager, w.due, hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation), wpLink(p, w)])))],
+    p.workPackages.map(w => [(w.delivery ? link(w.id, p.path + '/theme/' + w.id) : fileLink(w.path, w.id)), w.title, w.stage === null ? '' : String(w.stage), el('span', {}, w.status, statusAction(p, w)), w.teamManager, w.due, hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation), wpLink(p, w)])))],
   ['iterations', 'Iterations', p => p.iterations.length, iterations],
   ['lessons', 'Lessons', p => openActions(p).length, lessons],
   ['roadmap', 'Roadmap', placedCount, roadmap],
