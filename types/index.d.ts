@@ -25,9 +25,15 @@ export type WorkPackage = {
   // Roadmap placement: `horizon` now | next | later, '' when absent or unknown; `rank` 1 = first, null when absent.
   horizon: string
   rank: number | null
+  // The brief objectives it serves (frontmatter `objectives:`), [] when absent.
+  objectives: string[]
   // Its work theme, when it links an issue, a milestone or a branch; null otherwise.
   delivery: WpDelivery | null
 }
+
+// One entry of the brief's `## Objectives` checklist: ticked by the Board (`isMet`), struck through (`isDropped`); `wps` the work
+// packages naming it, not cancelled, and `done` how many of them are completed or archived.
+export type Objective = { id: string; title: string; isMet: boolean; isDropped: boolean; wps: string[]; done: number }
 
 export type Risk = { id: string; title: string; probability: string; impact: string; status: string; owner: string; score: number }
 
@@ -190,6 +196,8 @@ export type Project = {
   lastLog: string
   // Ids of the open work packages (neither completed nor cancelled) per horizon, by rank then id (no rank last); `unplaced` by id.
   roadmap: { now: string[]; next: string[]; later: string[]; unplaced: string[] }
+  // The brief's objectives checklist; [] when the brief has none.
+  objectives: Objective[]
   // Open blocker notes over the whole commit-notes register.
   openBlockers: number
   // Notes naming no linked work package: counted, so shown too.

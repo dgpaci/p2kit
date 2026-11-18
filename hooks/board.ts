@@ -82,6 +82,7 @@ th { color: var(--dim); font-weight: 500; font-size: 13px; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }
 .bar { display: inline-block; width: 90px; height: 6px; border-radius: 3px; background: var(--line); vertical-align: middle; margin-right: 6px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--on); }
+.bar.met i { background: var(--green); }
 .phases { display: inline-flex; gap: 2px; vertical-align: middle; margin-right: 6px; }
 .phases i { width: 12px; height: 8px; border-radius: 2px; background: var(--line); }
 .phases i.done { background: var(--green); } .phases i.in-progress { background: var(--on); }
@@ -235,6 +236,12 @@ const stageSpan = p => p.stage.isContinuous ? 'since ' + (p.stage.start || '—'
 const pill = (text, cls = '') => el('span', { className: 'pill ' + cls, textContent: text })
 // A completed work theme stays in view until archived: it says so.
 const completedPill = w => w.status === 'completed' ? el('span', {}, ' ', pill('completed', 'ready')) : null
+// The brief's objectives checklist: the dropped ones are listed but never counted. A project without the field (a hand-built
+// fixture) or a brief without the section shows nothing.
+const liveObjectives = p => (p.objectives || []).filter(o => !o.isDropped)
+const metBar = (done, total) => el('span', {}, el('span', { className: 'bar met' }, el('i', { style: 'width:' + (total ? Math.round(100 * done / total) : 0) + '%' })), done + '/' + total)
+const objectivesBar = p => metBar(liveObjectives(p).filter(o => o.isMet).length, liveObjectives(p).length)
+const objectivesFact = p => liveObjectives(p).length ? el('span', { title: 'brief objectives met' }, 'objectives ', objectivesBar(p)) : null
 const stageOf = p => p.stage.current === null ? 'no stage' : 'stage ' + p.stage.current + (p.stage.name ? ' ' + p.stage.name : '')
 const isOpen = s => s === 'open'
 // WIP: one red badge per person over the limit, in the card head and in the recap's "Needs attention".
@@ -594,6 +601,7 @@ function overview() {
         el('div', {}, el('strong', { textContent: p.name }), ' ', el('span', { className: 'dim', textContent: p.code }),
           el('div', { className: 'facts' },
             el('span', { textContent: stageOf(p) }),
+            objectivesFact(p),
             el('span', {}, 'WPs ', progressOf(p)),
             p.iteration ? iterationFact(p.iteration) : null,
             p.effort ? effortFact(p) : null,
@@ -631,6 +639,23 @@ function attention(p) {
   return lines.length ? lines : [el('p', { className: 'dim', textContent: 'Nothing.' })]
 }
 
+// Per objective: ticked or open (struck through when dropped), the work packages naming it and how many are completed.
+const WP_DONE = ['completed', 'archived']
+function objectivesTable(p, objectives) {
+  const status = id => (p.workPackages.find(w => w.id === id) || {}).status || ''
+  return tableOf(['', 'Objective', 'Work packages', 'Progress'], objectives.map(o => [
+    el('span', { className: 'mono' + (o.isDropped ? ' dim' : ''), textContent: o.id }),
+    o.isDropped ? el('s', { className: 'dim', textContent: o.title }) : el('span', {}, o.isMet ? el('span', { className: 'ok', textContent: '✔ ' }) : '☐ ', o.title),
+    el('span', { className: 'forge' }, ...o.wps.map(id => pill(id + ' ' + status(id), WP_DONE.includes(status(id)) ? 'merged' : 'open'))),
+    o.isDropped ? el('span', { className: 'dim', textContent: 'dropped' }) : o.wps.length ? el('span', {}, metBar(o.done, o.wps.length), el('span', { className: 'dim', textContent: ' completed' })) : el('span', { className: 'dim', textContent: '—' }),
+  ]))
+}
+// The recap's objectives, right after the cards; nothing when the brief has no checklist.
+function objectivesSection(p) {
+  if (!liveObjectives(p).length) return null
+  return el('div', {}, el('h3', {}, 'Objectives ', el('span', { style: 'text-transform: none' }, objectivesBar(p), ' met')), objectivesTable(p, p.objectives))
+}
+
 function card(key, value, sub, className = '') {
   return el('div', { className: 'card' }, el('div', { className: 'k', textContent: key }), el('div', { className: 'v ' + className }, value), el('div', { className: 's', textContent: sub }))
 }
@@ -643,6 +668,7 @@ function recap(p) {
       p.iteration ? card('Iteration', p.iteration.number + ' · ' + p.iteration.done + '/' + p.iteration.planned, p.iteration.goal + ' · ends ' + (p.iteration.end || '—'), p.iteration.isOverdue ? 'err' : '') : null,
       card('Blockers', String(p.openBlockers), 'open blocker notes', p.openBlockers ? 'err' : ''),
       card('Next report', p.nextReport.due || '—', p.nextReport.isOverdue ? 'overdue' : 'highlight report', p.nextReport.isOverdue ? 'err' : '')),
+    objectivesSection(p),
     el('div', { className: 'grid2' },
       el('div', {}, el('h3', { textContent: 'Tolerances' }), tableOf(['', 'Area', 'Used / limit'], p.tolerances.map(t => [dot(t.light), t.area, t.used + ' / ' + t.limit + ' ' + t.unit + (t.isComputed ? ' · from work packages' : '')]))),
       el('div', {}, el('h3', { textContent: 'Needs attention' }), ...attention(p))),
@@ -681,10 +707,13 @@ function themePanel(p, w) {
   const d = w.delivery
   const f = d.forge
   const noted = d.commits.filter(c => c.notes.length)
+  const served = (p.objectives || []).filter(o => (w.objectives || []).includes(o.id))
   return [
     el('p', {}, el('strong', { textContent: w.id + ' ' + w.title }), ' ',
       el('span', { className: 'dim', textContent: [w.status, d.issue === null ? '' : '#' + d.issue, d.milestone && 'milestone ' + d.milestone, d.ref || d.branch, d.base && 'over ' + d.base].filter(Boolean).join(' · ') }), statusAction(p, w)),
     el('div', { className: 'forge' }, ...forgePills(d)),
+    // The brief objectives the work package serves, above its phases.
+    ...(served.length ? [el('h3', { textContent: 'Objectives' }), objectivesTable(p, served)] : []),
     el('h3', { textContent: 'Phases' }),
     phaseTable(d),
     el('div', {}, el('h3', { textContent: 'Issue and pull requests' }),

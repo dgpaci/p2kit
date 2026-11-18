@@ -343,6 +343,17 @@ after the user states in chat that the Board considers it met. Work packages nam
 they serve with `objectives:`; `/pm-digest` and `/pm-report` read both to say, per objective, which
 work packages serve it, how far they are, and which objectives no work package serves.
 
+The desk reads the checklist of `.pm/brief.md` (`hooks/objectives.ts`): an entry is
+`- [ ] **O-<n>** <title> — …` or `… . *Done when:* …`, the title running up to ` — ` or
+`*Done when`, `[x]` met, `~~…~~` dropped; lines of the entry after the first are not read. Per
+objective it lists the work packages naming it that are not cancelled and how many of them are
+`completed` or `archived`. An id a work package names that the checklist lacks is the error
+`WP-<nn>: objectives: O-<n> is not in the brief`; a brief without the section shows nothing and no
+error. Shown: the overview row and the pane, `objectives <bar> <met>/<total>` after the stage (the
+dropped ones not counted); the recap, an *Objectives* section right after the cards, before
+*Tolerances* and *Needs attention*; a work package's page, the objectives it serves above its
+phases. The progress of a work package is not measured on its objectives.
+
 ### Work packages
 
 `work-packages/WP-<nn>.md`, frontmatter:

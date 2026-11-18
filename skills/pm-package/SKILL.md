@@ -42,7 +42,9 @@ picked issues and pull requests — then writes one work package file. It commit
    - the work package: the one already carrying `milestone: <title>` (reused, nothing written),
      else a new `WP-<nn>` with the next free number — `title`, `product: work-package`,
      `stage` = the current stage, `status: draft`, `milestone: <title>` — and a body listing the
-     packaged items, one `- #n title` line each.
+     packaged items, one `- #n title` line each. When `.pm/brief.md` has an `## Objectives`
+     checklist, propose the `objectives: [O-n, …]` the package serves, drawn from the items, only
+     ids of the brief.
 6. **Ask for an explicit OK.** Without it, write nothing; apply the user's corrections and show the
    plan again.
 7. **On the OK, write to the forge**, in this order, and stop at the first failure — report what was
