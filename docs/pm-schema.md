@@ -289,6 +289,20 @@ updated: 2026-11-03
 ---
 ```
 
+### Brief objectives
+
+`brief.md` carries an `## Objectives` section, a checklist that is the project's yardstick:
+
+```markdown
+- [ ] **O-2** Nothing gets lost — every open issue is on the desk. *Done when:* <check>.
+- [x] **O-1** Management products prepared by skills. *Done when:* <check>. <date>, <who>.
+```
+
+Ids are never renumbered; a dropped objective is struck through (`~~…~~`). An entry is ticked only
+after the user states in chat that the Board considers it met. Work packages name the objectives
+they serve with `objectives:`; `/pm-digest` and `/pm-report` read both to say, per objective, which
+work packages serve it, how far they are, and which objectives no work package serves.
+
 ### Work packages
 
 `work-packages/WP-<nn>.md`, frontmatter:
@@ -309,6 +323,7 @@ estimate: 24              # optional: estimated effort, hours
 actual: 18                # optional: effort spent so far, hours, entered by hand
 horizon: now              # optional: now | next | later (/pm-roadmap)
 rank: 2                   # optional: order inside the horizon, 1 = first
+objectives: [O-2, O-3]    # optional: the brief objectives this work package serves
 ```
 
 Progress of a stage = WPs of that stage with status `completed` or `archived` / WPs of that stage

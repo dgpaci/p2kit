@@ -1,6 +1,6 @@
 ---
 name: pm-digest
-description: Write the weekly digest of a p2kit project for the alignment meeting — closed this week, pull requests in review, stalled and waiting items per person, issues needing a decision, open blockers — from the project desk's snapshot, saved under .pm/digests/. Use when the user asks for the weekly digest, the alignment-meeting summary, what happened this week, or asks for /pm-digest.
+description: Write the weekly digest of a p2kit project for the alignment meeting — closed this week, pull requests in review, stalled and waiting items per person, issues needing a decision, open blockers, and progress against the Project Brief's objectives — from the project desk's snapshot and .pm/brief.md, saved under .pm/digests/. Use when the user asks for the weekly digest, the alignment-meeting summary, what happened this week, or asks for /pm-digest.
 ---
 
 # Weekly digest
@@ -15,7 +15,7 @@ nothing.
    - No snapshot file → say to open the desk with `/pm-desk`, which writes it, and stop.
    - The repo not in it → say the project is not registered, suggest `/pm-register`, and stop.
    - `refreshedAt` older than 10 minutes → go on, and note it in the header (step 3).
-2. Collect the six sections over the period, by default the last 7 days (`from` = today − 7,
+2. Collect the seven sections over the period, by default the last 7 days (`from` = today − 7,
    `to` = today; a day is inside when it is after `from` and not after `to`, so consecutive
    digests never share a day). Every section is written, `none` when empty:
    1. **Closed this week** — `flow.closedIssues` and `flow.mergedPulls` with `closedAt` inside
@@ -30,6 +30,15 @@ nothing.
       `priority`, high → low.
    6. **Open blockers** — the notes of `.pm/registers/commit-notes.yaml` with `kind: blocker`
       and `status: open`: work package (`wp`, or `stage <n>`), short sha, text, date.
+   7. **Against the brief objectives** — read the `## Objectives` checklist of `.pm/brief.md`
+      and the `objectives:` key of every `.pm/work-packages/WP-<nn>.md` (docs/pm-schema.md →
+      *Brief objectives*). One line per objective, in id order:
+      `O-<n> <short text> — <met | open>: <WPs serving it, each with status and its milestone's
+      closed/total from the snapshot>; missing: <what still keeps the done-when from holding>`.
+      Then, flagged: open objectives that **no** work package serves, and work packages that name
+      **no** objective. Ticking an objective is never this skill's job: when one looks met, say so
+      and leave the decision to the user. A brief with no `## Objectives` section → `the brief
+      has no objectives checklist — add one (/pm-start-up template)`.
 3. Write the digest:
 
    ```markdown
