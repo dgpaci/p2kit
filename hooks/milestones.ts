@@ -5,7 +5,7 @@ import type { RestMilestone } from './forge'
 import { getClosedRefs, getIssueState, isPlainIssue, logins, STALLED_MS } from './team'
 import type { RestIssue, RestPull } from './team'
 
-export { getClosedRefs, getIssueState, IN_PROGRESS_LABEL } from './team'
+export { getClosedRefs, getIssueState } from './team'
 
 /** A pull request waiting on review: not a draft, with at least one requested reviewer. */
 const isInReview = (pull: RestPull): boolean => !pull.draft && (pull.requested_reviewers ?? []).length > 0

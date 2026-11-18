@@ -86,8 +86,7 @@ const FILES: Record<string, string> = {
 const DIRS: Record<string, string[]> = { '/t/anaci/.pm/work-packages': ['WP-01.md'] }
 const ISSUES = [
   { number: 11, title: 'CR one', html_url: 'https://h/issues/11', updated_at: '2026-11-12T09:00:00Z', assignees: [], milestone: { title: 'Certificazioni' }, body: null },
-  { number: 12, title: 'CR two', html_url: 'https://h/issues/12', updated_at: '2026-11-12T09:00:00Z', assignees: [{ login: 'anna' }], milestone: { title: 'Certificazioni' }, body: null,
-    labels: [{ name: 'In-Progress' }] },
+  { number: 12, title: 'CR two', html_url: 'https://h/issues/12', updated_at: '2026-11-12T09:00:00Z', assignees: [{ login: 'anna' }], milestone: { title: 'Certificazioni' }, body: null },
   { number: 31, title: 'Loose', html_url: 'https://h/issues/31', updated_at: '2026-11-11T09:00:00Z', assignees: [], milestone: null, body: null },
 ]
 const MILESTONES = [{ title: 'Certificazioni', open_issues: 2, closed_issues: 14, due_on: null }]
@@ -117,6 +116,8 @@ test('the pane Board tab shows each lane as text, the reopened one flagged, the 
       if (e.argv[2] === 'repos/acme/anaci/issues?state=open&per_page=100&page=1') return answer(0, JSON.stringify(ISSUES))
       if (e.argv[2] === 'repos/acme/anaci/pulls?state=open&per_page=100&page=1') return answer(0, '[]')
       if (e.argv[2] === 'repos/acme/anaci/milestones?state=open&per_page=100') return answer(0, JSON.stringify(MILESTONES))
+      // Only the assigned issue's timeline is read: its first commit puts it in progress.
+      if (e.argv[2] === 'repos/acme/anaci/issues/12/timeline?per_page=100') return answer(0, JSON.stringify([{ event: 'referenced', commit_id: 'abc1234' }]))
       return answer(1)
     }
     if (e.argv.slice(3).join(' ') === 'remote get-url origin') return answer(0, 'git@github.com:acme/anaci.git\n')

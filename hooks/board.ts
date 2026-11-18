@@ -424,7 +424,7 @@ function attachControl(p, item) {
 }
 // A new issue on the project's forge, optionally in a work package's milestone and assigned to a team member: the helper previews
 // it and creates it on Confirm. Without the helper, or for the readiness headings, the pm-issue skill drafts it in a session.
-// Taking the issue in hand (the in-progress label) is the developer's move, from their forge desk.
+// Starting the work is the developer's move, from their forge desk's Solve.
 const issueTargets = p => p.workPackages.filter(w => w.delivery && w.delivery.milestone && !['completed', 'archived', 'cancelled'].includes(w.status))
 function issueDialog(p, wp) {
   const title = el('input', { type: 'text', placeholder: 'Export the daily log as CSV' })
@@ -939,7 +939,7 @@ function board(p) {
   const lanes = lanesOf(p)
   if (lanes.length <= 1 && !unplannedCount(p)) return el('p', { className: 'dim' }, "No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo. ", newIssueButton(p, ''))
   return el('div', {}, el('p', { className: 'dim' }, "Open items by work package: To do, In progress, In review; Done is the milestone's closed count. The tab count is the open items in no work package. " +
-    'An issue is in progress once its developer takes it (the in-progress label) or a pull request closes it; assigned alone it is still to do. ', newIssueButton(p, '')),
+    'An issue is in progress from its first commit, or once a pull request closes it; assigned alone it is still to do. ', newIssueButton(p, '')),
     ...lanes.map(l => boardLane(p, l)))
 }
 

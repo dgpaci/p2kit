@@ -138,8 +138,8 @@ their point of view:
 |---|---|
 | `review` | open pull request authored by someone else, review requested from them |
 | `inprogress` | open pull request they authored or are assigned: draft, or no review requested from others |
-| `inprogress` | open issue assigned to them whose `state` (below) is `inprogress`: taken in hand |
-| `todo` | open issue assigned to them, not taken in hand yet |
+| `inprogress` | open issue assigned to them whose `state` (below) is `inprogress`: the work has started |
+| `todo` | open issue assigned to them, not started yet |
 | `waiting` | their open pull request with a review requested from someone else; their issue whose `state` is `review` |
 | `stalled` | the same, untouched for more than 7 days |
 
@@ -177,13 +177,16 @@ first that holds:
 |---|---|
 | `done` | closed (only when a closed issue is in the list) |
 | `review` | an open non-draft pull request closes it |
-| `inprogress` | it carries the `in-progress` label (any case), or an open draft pull request closes it |
+| `inprogress` | a commit references it (its timeline shows one), or an open draft pull request closes it |
 | `todo` | otherwise, assigned or not |
 
-Assigning is the PM's plan, not work in progress: an issue becomes `inprogress` when its developer
-takes it in hand. Their forge desk puts the `in-progress` label on it as it opens the work session,
-and forge-desk reads the same rule, so both desks agree on what is in progress. The issues are read
-with their `labels` (both forges send them in the list), with no further request.
+Assigning is the PM's plan, not work in progress: an issue becomes `inprogress` with its first
+commit, the rule forge-desk reads too, so both desks agree on what is in progress. The desk reads
+the timeline (`issues/<n>/timeline`, `per_page=100` on GitHub, `limit=100` on Forgejo) of each open
+assigned issue no pull request closes, the most recently updated first, at most 50 per read of the
+repo, in batches of 10; a commit is a `referenced` event with a `commit_id` on GitHub, a
+`commit_ref` on Forgejo. An issue once seen started is not read again for the module's life. A
+failed read is one error, `team: <forge> timeline: <message>`, and leaves the issue as it was.
 
 A pull request closing an issue of another repo with `owner/repo#n` is not read as closing it.
 
@@ -631,8 +634,8 @@ title and body, the milestone and the assignee, and says that an issue cannot be
 created. Refused: a title empty, longer than 200 characters or of more than one line, a body over
 20000 characters, a login outside `team.people`, a work package without `milestone:` or whose
 milestone is missing on the forge; a closed milestone is allowed and flagged. The dialog links the
-`pm-issue` skill for an issue drafted with the readiness headings. Taking the issue in hand is not
-a desk action: the developer does it from their forge desk. Hidden on a read-only project.
+`pm-issue` skill for an issue drafted with the readiness headings. Starting the work is not a desk
+action: the developer does it from their forge desk's Solve. Hidden on a read-only project.
 
 **Browser page.** `server/desk_server.py`, standard-library Python 3, serves the page on
 `127.0.0.1` at a random port. The mod starts it on *Open in browser* (or reuses one another session

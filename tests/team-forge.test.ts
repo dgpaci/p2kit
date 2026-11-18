@@ -25,7 +25,8 @@ const PULLS = [
   { number: 2, title: 'Pull 2', html_url: 'https://h/pulls/2', updated_at: '2026-11-11T10:00:00Z', draft: false, user: user('dgpaci'), assignees: [], requested_reviewers: [user('lverdi')] },
 ]
 // The closed-item reads of the flow metrics answer empty and are left out of the counts: tests/flow-forge.test.ts covers them.
-const isFlowRead = (path: string): boolean => path.includes('state=closed') || path.includes('/reviews')
+// The flow reads and the issue timelines are pinned in tests of their own.
+const isFlowRead = (path: string): boolean => path.includes('state=closed') || path.includes('/reviews') || path.includes('/timeline')
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 const FORGEJO_PAGE_1 = Array.from({ length: 50 }, (_, n) => ({ ...PULLS[0], number: 100 + n, user: user('someone'), requested_reviewers: [] }))
 
