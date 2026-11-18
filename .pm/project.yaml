@@ -1,0 +1,46 @@
+# p2kit project file — schema: docs/pm-schema.md
+schema: 1
+name: p2kit
+code: P2KIT
+profile: agile                  # light | full | agile
+status: delivery
+stage:
+  current: 2
+  name: Delivery
+  start: 2026-11-17
+  continuous: true
+tolerances:
+  time: { limit: 0, used: 0, unit: days }
+  cost: { limit: 0, used: 0, unit: EUR }
+roles:
+  executive: Davide Paci
+  senior_user: [Davide Paci]
+  senior_supplier: [Davide Paci]
+  project_manager: Davide Paci
+  team_manager: []
+  assurance: []
+  support: []
+team:
+  wip_limit: 3
+  people:
+    Davide Paci: { login: dgpaci }
+reporting:
+  highlight_every_days: 14
+  last_highlight: null
+approvals:
+  - decision: authorize-initiation
+    by: Davide Paci
+    date: 2026-11-17
+    note: brief approved, initiation authorized in chat
+  - decision: authorize-project
+    by: Davide Paci
+    date: 2026-11-17
+    note: PID approved in chat
+  - decision: authorize-stage-2
+    by: Davide Paci
+    date: 2026-11-17
+    note: continuous Delivery stage approved in chat
+  - decision: approve-brief-v0.2
+    by: Davide Paci
+    date: 2026-11-18
+    note: brief v0.2 with objectives checklist O-1..O-7 approved in chat, O-1 met
