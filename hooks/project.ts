@@ -795,7 +795,7 @@ async function addRepoState($: EngineInterface, project: Project, isForced: bool
   }
   const { issues, pulls, milestones, errors } = read
   const team = project.team.map(member => (member.login ? withItems(member, toTeamItems(member.login, issues, pulls, now)) : member))
-  const forgeIssues = toForgeIssues(issues, project.readiness)
+  const forgeIssues = toForgeIssues(issues, project.readiness, pulls)
   return {
     ...project,
     team,

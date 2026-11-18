@@ -166,6 +166,21 @@ blocks, open items only:
 A failure to read the milestones is the project error `milestones: <forge> milestones: <reason>`;
 the issues and pull requests still show.
 
+From the same read, with no further request, each open pull request carries `assignees` (their
+logins, `[]` when the forge sends none or `null`) and `closes`: the issue numbers its body names
+after `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves` or `resolved`
+followed by `#<n>`, any case, once each. Each open issue carries `assignees` and a `state`, the
+first that holds:
+
+| state | issue |
+|---|---|
+| `done` | closed (only when a closed issue is in the list) |
+| `review` | an open non-draft pull request closes it |
+| `inprogress` | it has an assignee, or an open draft pull request closes it |
+| `todo` | otherwise |
+
+A pull request closing an issue of another repo with `owner/repo#n` is not read as closing it.
+
 The browser page can also start a package; it never writes. Checking issues and pull requests shows
 a bar with **Create package**, a link that opens a new Claude Desktop session in the project's folder
 asking for the pm-package skill on the picked references (`#12 #15 PR #18`); on a milestone with no

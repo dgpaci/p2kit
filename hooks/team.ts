@@ -10,7 +10,7 @@ const STATUS_ORDER: TeamStatus[] = ['review', 'inprogress', 'todo', 'waiting', '
 type RestUser = { login: string }
 type RestMilestoneRef = { title: string } | null
 export type RestIssue = {
-  number: number; title: string; html_url: string; updated_at: string; assignees?: RestUser[] | null; pull_request?: unknown
+  number: number; title: string; html_url: string; updated_at: string; assignees?: RestUser[] | null; pull_request?: unknown; state?: string
   milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null
 }
 export type RestPull = {
@@ -19,7 +19,7 @@ export type RestPull = {
   milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null; merged_at?: string | null
 }
 
-const logins = (users: RestUser[] | null | undefined): string[] => (users ?? []).map(user => user.login)
+export const logins = (users: RestUser[] | null | undefined): string[] => (users ?? []).map(user => user.login)
 /** An issue, not a pull request: GitHub omits `pull_request` on issues, Forgejo sends it as null. */
 export const isPlainIssue = (issue: RestIssue): boolean => issue.pull_request == null
 const limitOf = (value: Value | undefined): number | null => (typeof value === 'number' ? value : null)
