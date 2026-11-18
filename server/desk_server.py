@@ -542,16 +542,26 @@ def apply_assign_many(preview, forge):
 
 
 def plan_issue_milestone(root, home, request, forge=None):
-    """Attaching one issue or pull request to the milestone of a work package: the item, its milestone now and the new one."""
+    """Attaching one issue or pull request to the milestone of a work package: the item, its milestone now and the new one.
+
+    A work package without `milestone:` gets one named after its title: created on the forge, or the one already carrying that
+    title reused, and written in the work package's frontmatter; `link` carries that file edit, None otherwise.
+    """
     number, wp = request.get('number'), request.get('wp')
     if not (isinstance(number, int) and not isinstance(number, bool) and number > 0):
         raise ActionError('an issue or pull request is a number')
-    title = read_key(read_text(wp_path(root, wp)), 'milestone')
+    path = wp_path(root, wp)
+    text = read_text(path)
+    title, link = read_key(text, 'milestone'), None
     if not title:
-        raise ActionError(f'{wp} has no milestone: link one with /pm-link, or group the items with Create package')
+        title = (read_key(text, 'title') or '').strip()
+        if not title:
+            raise ActionError(f'{wp} has no milestone and no title to name one after')
+        _, change = set_key(text, 'milestone', to_scalar(title))
+        link = {'file': os.path.relpath(path, root), 'fileHash': file_hash(text), 'change': change}
     forge = forge or Forge(root, home)
     milestone = next((m for m in forge.milestones() if m.get('title') == title), None)
-    if not milestone:
+    if not milestone and not link:
         raise ActionError(f'milestone {title} of {wp} is not on {forge.host}/{forge.repo}')
     item = forge.call('GET', f'repos/{forge.repo}/issues/{number}')
     ref = item_ref(item)
@@ -559,19 +569,41 @@ def plan_issue_milestone(root, home, request, forge=None):
         raise ActionError(f'{ref} is closed')
     before = (item.get('milestone') or {}).get('title') or ''
     if before == title:
-        raise ActionError(f'{ref} is already in milestone {title}')
+        raise ActionError(f'{ref} is already in milestone {title}' + (f': link it to {wp} with /pm-link' if link else ''))
+    if link:
+        summary = f"Attach {ref} to {wp} — {'reuse' if milestone else 'create'} milestone {title}"
+    else:
+        summary = f'Move {ref} from {before} to {title} ({wp})' if before else f'Attach {ref} to {title} ({wp})'
     return {
-        'kind': 'issue-milestone', 'project': root, 'forge': f'{forge.host}/{forge.repo}', 'wp': wp,
-        'summary': f'Move {ref} from {before} to {title} ({wp})' if before else f'Attach {ref} to {title} ({wp})',
+        'kind': 'issue-milestone', 'project': root, 'forge': f'{forge.host}/{forge.repo}', 'wp': wp, 'summary': summary,
         'item': {'ref': ref, 'number': number, 'title': item.get('title', ''), 'kind': 'pr' if item.get('pull_request') is not None else 'issue'},
         'before': before,
-        'milestone': {'title': title, 'key': forge.milestone_key(milestone), 'closed': milestone.get('state') == 'closed'},
+        'milestone': {'title': title, 'key': forge.milestone_key(milestone) if milestone else None,
+                      'closed': bool(milestone) and milestone.get('state') == 'closed', 'action': 'reuse' if milestone else 'create'},
+        'link': link,
     }, forge
 
 
-def apply_issue_milestone(preview, forge):
-    forge.call('PATCH', f"repos/{forge.repo}/issues/{preview['item']['number']}", {'milestone': preview['milestone']['key']})
-    return [f"{preview['item']['ref']} in milestone {preview['milestone']['title']}"]
+def apply_issue_milestone(root, preview, forge):
+    """Creates the milestone when planned, attaches the item, writes the work package's `milestone:`; stops at the first failure."""
+    done, key = [], preview['milestone']['key']
+    try:
+        if key is None:
+            created = forge.call('POST', f'repos/{forge.repo}/milestones', {'title': preview['milestone']['title']})
+            key = forge.milestone_key(created)
+            done.append(f"milestone {preview['milestone']['title']} created")
+        forge.call('PATCH', f"repos/{forge.repo}/issues/{preview['item']['number']}", {'milestone': key})
+        done.append(f"{preview['item']['ref']} in milestone {preview['milestone']['title']}")
+        if preview['link']:
+            path = os.path.join(root, preview['link']['file'])
+            text = read_text(path)
+            if file_hash(text) != preview['link']['fileHash']:
+                raise ActionError(f"{preview['link']['file']} changed since the preview")
+            write_text(path, set_key(text, 'milestone', to_scalar(preview['milestone']['title']))[0])
+            done.append(f"{preview['wp']} linked to milestone {preview['milestone']['title']}")
+    except ActionError as error:
+        raise ActionError(f"{error} — done before it: {', '.join(done) or 'nothing'}") from None
+    return done
 
 
 def plan_issue_create(root, home, request, forge=None):
@@ -658,7 +690,7 @@ def run_action(home, request, forge=None):
         apply = lambda: apply_assign_many(preview, forge)
     elif request.get('kind') == 'issue-milestone':
         preview, forge = plan_issue_milestone(root, home, request, forge)
-        apply = lambda: apply_issue_milestone(preview, forge)
+        apply = lambda: apply_issue_milestone(root, preview, forge)
     elif request.get('kind') == 'issue-create':
         preview, forge = plan_issue_create(root, home, request, forge)
         apply = lambda: apply_issue_create(preview, forge)

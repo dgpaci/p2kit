@@ -307,8 +307,11 @@ function previewOf(preview, extra) {
   if (preview.kind === 'issue-milestone') return [
     el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
     el('p', {}, el('strong', { textContent: preview.item.ref + ' ' }), preview.item.title),
+    preview.link ? el('p', {}, el('strong', { textContent: (preview.milestone.action === 'create' ? 'Create' : 'Reuse') + ' milestone ' }), preview.milestone.title) : null,
     el('div', { className: 'diff' }, el('div', { className: 'del', textContent: '- milestone: ' + (preview.before || 'none') }),
       el('div', { className: 'add', textContent: '+ milestone: ' + preview.milestone.title + ' (' + preview.wp + ')' })),
+    preview.link ? el('div', {}, el('p', { className: 'dim mono', textContent: preview.link.file }), el('div', { className: 'diff' }, el('div', { className: 'dim', textContent: 'line ' + preview.link.change.line }),
+      el('div', { className: 'add', textContent: '+ ' + preview.link.change.after }))) : null,
     preview.milestone.closed ? el('p', { className: 'warn', textContent: 'The milestone ' + preview.milestone.title + ' is closed.' }) : null]
   if (preview.kind === 'issue-create') return [
     el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
@@ -415,18 +418,22 @@ function assignControl(p, number, assignees) {
   return pick
 }
 // The work packages an open issue or pull request can be attached to: those with a milestone, not archived or cancelled, other
-// than the one whose milestone the item already has (item.milestone is its title, '' when none).
+// than the one whose milestone the item already has (item.milestone is its title, '' when none); newMilestoneTargets those with
+// a title and no milestone, neither completed, archived nor cancelled, which get a milestone named after them.
 const attachTargets = (p, item) => p.workPackages.filter(w => w.delivery && w.delivery.milestone && !['archived', 'cancelled'].includes(w.status)
   && w.delivery.milestone !== item.milestone)
+const newMilestoneTargets = p => p.workPackages.filter(w => w.title && !(w.delivery && w.delivery.milestone) && !['completed', 'archived', 'cancelled'].includes(w.status))
 // Attach an open issue or pull request to a work package's milestone: a select of attachTargets, previewed by the helper (a move
 // when the item is in another milestone). Only with the helper, and never on a project whose .pm/ is read from git.
 function attachControl(p, item) {
   const targets = attachTargets(p, item)
-  if (!server || p.pmRef || !targets.length) return null
+  const fresh = newMilestoneTargets(p)
+  if (!server || p.pmRef || !(targets.length || fresh.length)) return null
   const pick = el('select', { className: 'assign', title: 'attach to a work package', onclick: e => e.stopPropagation(),
     onchange: () => { const wp = pick.value; pick.value = ''; if (wp) act(p, { kind: 'issue-milestone', number: item.number, wp }) } },
     el('option', { value: '', textContent: 'Attach to…' }),
-    ...targets.map(w => el('option', { value: w.id, textContent: w.id + ' ' + w.title })))
+    ...targets.map(w => el('option', { value: w.id, textContent: w.id + ' ' + w.title })),
+    fresh.length ? el('optgroup', { label: 'New milestone' }, ...fresh.map(w => el('option', { value: w.id, textContent: w.id + ' ' + w.title + ' — create milestone' }))) : null)
   return pick
 }
 // A new issue on the project's forge, optionally in a work package's milestone and assigned to a team member: the helper previews
@@ -489,7 +496,8 @@ function wpRequest(p, item, w) {
   if (['archived', 'cancelled'].includes(w.status)) return null
   const milestone = w.delivery ? w.delivery.milestone : ''
   if (item.kind === 'milestone') return milestone === item.title ? null : { kind: 'wp-link', target: w.id, field: 'milestone', value: item.title }
-  return milestone && milestone !== item.milestone ? { kind: 'issue-milestone', number: item.number, wp: w.id } : null
+  if (!milestone) return w.title && w.status !== 'completed' ? { kind: 'issue-milestone', number: item.number, wp: w.id } : null
+  return milestone !== item.milestone ? { kind: 'issue-milestone', number: item.number, wp: w.id } : null
 }
 function endDrag() {
   dragging = null

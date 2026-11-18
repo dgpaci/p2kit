@@ -344,6 +344,7 @@ class IssueMilestone(unittest.TestCase):
         self.p = Project()
         self.p.write('.pm/work-packages/WP-02.md', '---\nid: WP-02\ntitle: Login\nstatus: draft\nmilestone: Login\n---\n')
         self.p.write('.pm/work-packages/WP-03.md', '---\nid: WP-03\ntitle: Gone\nstatus: draft\nmilestone: Gone\n---\n')
+        self.p.write('.pm/work-packages/WP-04.md', '---\nid: WP-04\nstatus: draft\n---\n')
         self.forge = FakeForge([{'number': 3, 'id': 103, 'title': 'Old', 'state': 'open'}, {'number': 9, 'id': 109, 'title': 'Login', 'state': 'closed'}], {
             12: {'number': 12, 'title': 'Login form', 'state': 'open', 'milestone': None},
             18: {'number': 18, 'title': 'Fix', 'state': 'open', 'milestone': {'number': 3, 'id': 103, 'title': 'Old'}, 'pull_request': {}},
@@ -362,7 +363,8 @@ class IssueMilestone(unittest.TestCase):
     def test_the_preview_shows_the_item_the_old_and_new_milestone_and_confirm_patches_it(self):
         preview, result = self.attach(number=12, wp='WP-02')
         self.assertEqual((preview['summary'], preview['forge'], preview['item']['kind'], preview['before'], preview['milestone']),
-                         ('Attach #12 to Login (WP-02)', 'github.com/o/r', 'issue', '', {'title': 'Login', 'key': 9, 'closed': True}))
+                         ('Attach #12 to Login (WP-02)', 'github.com/o/r', 'issue', '', {'title': 'Login', 'key': 9, 'closed': True, 'action': 'reuse'}))
+        self.assertIsNone(preview['link'])
         self.assertEqual(self.forge.calls[-1], ('PATCH', 'repos/o/r/issues/12', {'milestone': 9}))
         self.assertEqual(result['done'], ['#12 in milestone Login'])
 
@@ -374,7 +376,7 @@ class IssueMilestone(unittest.TestCase):
 
     def test_refused_already_there_no_milestone_unknown_milestone_closed_item(self):
         cases = ((dict(number=19, wp='WP-02'), 'already in milestone Login'),
-                 (dict(number=12, wp='WP-01'), 'WP-01 has no milestone: link one with /pm-link'),
+                 (dict(number=12, wp='WP-04'), 'WP-04 has no milestone and no title'),
                  (dict(number=12, wp='WP-03'), 'milestone Gone of WP-03 is not on'),
                  (dict(number=20, wp='WP-02'), 'closed'),
                  (dict(number=12, wp='WP-99'), 'not found'),
@@ -383,6 +385,34 @@ class IssueMilestone(unittest.TestCase):
             with self.subTest(request=request), self.assertRaisesRegex(ds.ActionError, message):
                 self.attach(**request)
         self.assertFalse([c for c in self.forge.calls if c[0] == 'PATCH'])
+
+    def test_a_work_package_without_milestone_gets_one_named_after_it_created_then_linked(self):
+        self.p.write('.pm/work-packages/WP-05.md', '---\nid: WP-05\ntitle: Docs\nstatus: draft\n---\n')
+        preview, result = self.attach(number=18, wp='WP-05')
+        self.assertEqual((preview['summary'], preview['before'], preview['milestone']),
+                         ('Attach PR #18 to WP-05 — create milestone Docs', 'Old', {'title': 'Docs', 'key': None, 'closed': False, 'action': 'create'}))
+        self.assertEqual((preview['link']['file'], preview['link']['change']['after']), ('.pm/work-packages/WP-05.md', 'milestone: Docs'))
+        self.assertEqual(self.forge.calls[-2:], [('POST', 'repos/o/r/milestones', {'title': 'Docs'}), ('PATCH', 'repos/o/r/issues/18', {'milestone': 9})])
+        self.assertIn('milestone: Docs\n', self.p.read('.pm/work-packages/WP-05.md'))
+        self.assertEqual(result['done'], ['milestone Docs created', 'PR #18 in milestone Docs', 'WP-05 linked to milestone Docs'])
+
+    def test_a_milestone_already_carrying_the_title_is_reused_and_forgejo_takes_its_id(self):
+        self.forge.forge = 'forgejo'
+        self.p.write('.pm/work-packages/WP-05.md', '---\nid: WP-05\ntitle: Old\nstatus: draft\n---\n')
+        preview, _ = self.attach(number=12, wp='WP-05')
+        self.assertEqual((preview['summary'], preview['milestone']['key'], preview['milestone']['action']), ('Attach #12 to WP-05 — reuse milestone Old', 103, 'reuse'))
+        self.assertFalse([c for c in self.forge.calls if c[0] == 'POST'])
+        self.assertEqual(self.forge.calls[-1], ('PATCH', 'repos/o/r/issues/12', {'milestone': 103}))
+        self.assertIn('milestone: Old\n', self.p.read('.pm/work-packages/WP-05.md'))
+
+    def test_a_work_package_edited_between_preview_and_confirm_is_refused_before_the_forge(self):
+        self.p.write('.pm/work-packages/WP-05.md', '---\nid: WP-05\ntitle: Docs\nstatus: draft\n---\n')
+        base = {'project': self.p.root, 'kind': 'issue-milestone', 'number': 12, 'wp': 'WP-05'}
+        answer, _ = ds.run_action(self.p.home, base, self.forge)
+        self.p.write('.pm/work-packages/WP-05.md', '---\nid: WP-05\ntitle: Docs\nstatus: authorized\n---\n')
+        with self.assertRaisesRegex(ds.ActionError, 'changed since the preview'):
+            ds.run_action(self.p.home, {**base, 'confirm': answer['hash']}, self.forge)
+        self.assertFalse([c for c in self.forge.calls if c[0] in ('POST', 'PATCH')])
 
     def test_a_change_on_the_forge_between_preview_and_confirm_is_refused(self):
         base = {'project': self.p.root, 'kind': 'issue-milestone', 'number': 12, 'wp': 'WP-02'}
