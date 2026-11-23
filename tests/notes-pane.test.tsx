@@ -56,10 +56,10 @@ test('the drill-in lists the commits of a work package with their notes and the 
 
   await $.command.run(RUN)
   const ui = await $.ui.mount(PANE)
-  expect(await ui.find({ type: 'Text', text: /blockers 1/, color: 'red' })).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /blockers 1/ }))?.props.color).toBe('red')
 
   await ui.press({ key: 'open:/src/anaci' })
-  expect(await ui.find({ type: 'Text', text: 'WP-03 bbbb222 waiting for the print template', color: 'red' })).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: 'WP-03 bbbb222 waiting for the print template' }))?.props.color).toBe('red')
   await ui.press({ key: 'theme:WP-03' })
   expect(await ui.find({ type: 'Text', text: 'aaaa111 feat: header' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: 'bbbb222 fix: rows' })).toBeTruthy()
