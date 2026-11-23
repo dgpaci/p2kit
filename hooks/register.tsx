@@ -47,6 +47,8 @@ const STATUS_LABEL: Record<TeamStatus, string> = { review: 'review asked', inpro
 const FLOW_ROWS: [string, 'leadTime' | 'firstReview' | 'merge'][] = [['Lead time', 'leadTime'], ['Review (opened → first review)', 'firstReview'], ['Merge (opened → merged)', 'merge']]
 // The longest weekly bar of the Metrics tab, in characters.
 const METRICS_BAR = 20
+// The Daily Log kinds, coloured as on the page; an event keeps the default colour.
+const LOG_KIND_COLORS: Record<string, string | undefined> = { decision: 'cyan', action: 'yellow', problem: 'magenta', note: 'green' }
 const WP_COLOR: Record<string, string> = { completed: 'green', 'in-progress': 'cyan', authorized: 'white', draft: 'gray', cancelled: 'gray', archived: 'gray' }
 
 // The automatic refresh; a reload of the module starts a new one.
@@ -543,7 +545,7 @@ export const register: Register = on => {
           ...(log.length === 0 ? [<Text dimColor>No daily log yet: run /pm-log in the project's repo.</Text>] : logDays.flatMap(day => [
             <Text bold>{day}</Text>,
             ...log.filter(one => one.date === day).map(one => (
-              <Text color={one.isOverdue ? 'red' : undefined} dimColor={one.status === 'done'} wrap="truncate-end">
+              <Text color={one.isOverdue ? 'red' : LOG_KIND_COLORS[one.kind]} dimColor={one.status === 'done'} wrap="truncate-end">
                 {[one.id, one.kind, one.text, one.ref, one.register ? `→ ${one.register}` : '', one.issue === null ? '' : `#${one.issue}`, one.owner,
                   one.due ? `due ${one.due}` : '', one.status].filter(Boolean).join(' · ')}
               </Text>
