@@ -13,9 +13,9 @@ export function getRiskState(risk: Risk): string {
   return 'response not assessed'
 }
 
-/** The open risks for Needs attention: the uncovered ones first, then the covered ones waiting for the closure; by score within each. */
+/** The high open risks (score 6 or more) for Needs attention: the uncovered ones first, then the covered ones waiting for the closure. */
 export const getAttentionRisks = (risks: Risk[]): Risk[] =>
-  risks.filter(risk => risk.status === 'open').sort((a, b) => Number(isRiskCovered(a)) - Number(isRiskCovered(b)) || b.score - a.score)
+  risks.filter(risk => risk.status === 'open' && risk.score >= 6).sort((a, b) => Number(isRiskCovered(a)) - Number(isRiskCovered(b)) || b.score - a.score)
 
 /** The second pane line of a risk in the Risks register: response type and actions, then Claude's verdict and its reasoning. */
 export function getRiskResponseLine(risk: Risk): string {

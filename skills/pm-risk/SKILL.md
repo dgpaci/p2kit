@@ -8,7 +8,7 @@ description: Keep the Risk Register of a p2kit project — add a risk, record ho
 A risk carries a response type (`response`: reduce, accept, …) and how it is actually handled
 (`response_actions`); Claude assesses those actions and records a verdict, `adequate` or
 `not-adequate`, with one line of reasoning (docs/pm-schema.md → *`registers/risks.yaml`*). The desk
-keeps every open risk in Needs attention, red until its response is judged adequate, then waiting
+keeps every high open risk (score 6 or more) in Needs attention, red until its response is judged adequate, then waiting
 for the closure. This skill writes only `.pm/registers/risks.yaml`, after the user's OK for each
 change; it never closes a risk on its own, never touches the forge and commits nothing.
 

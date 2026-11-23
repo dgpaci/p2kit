@@ -34,13 +34,13 @@ test('a risk reads its response actions and verdict; an old entry has none, an u
   expect(project.errors).toEqual(["risks.yaml: R-004 verdict 'maybe' is neither adequate nor not-adequate"])
 })
 
-test('only an adequate verdict on written actions covers a risk; Needs attention lists the uncovered first', () => {
+test('only an adequate verdict on written actions covers a risk; Needs attention lists the high ones, uncovered first', () => {
   const project = buildProject(files(RISKS), '2026-11-23')
   expect(project.risks.map(isRiskCovered)).toEqual([true, false, false, false])
   expect(project.risks.map(getRiskState)).toEqual([
     'response adequate: confirm the closure', 'response not adequate: nobody watches the date', 'no response', 'response not assessed',
   ])
-  expect(getAttentionRisks(project.risks).map(r => r.id)).toEqual(['R-002', 'R-004', 'R-003', 'R-001'])
+  expect(getAttentionRisks(project.risks).map(r => r.id)).toEqual(['R-002', 'R-001'])
   expect(getRiskResponseLine(project.risks[0])).toBe(
     'reduce · advance circular to the branches, updated inline manuals, upcoming videos · ✔ adequate · cuts the cause and keeps a fallback; the videos are not out yet',
   )

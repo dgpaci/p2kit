@@ -627,7 +627,7 @@ export const register: Register = on => {
     ]
     const tab = chosenView.startsWith('tab:') ? tabs.find(one => `tab:${one.id}` === chosenView) : undefined
 
-    /** Open blocker notes with WP id and short sha, open risks (red until covered), an overdue report. */
+    /** Open blocker notes with WP id and short sha, high open risks (red until covered), an overdue report. */
     const getAttention = () => {
       const blockers = getOpenBlockers(p).map(({ wp, sha, text }) => [wp, sha, text])
       const lines = [

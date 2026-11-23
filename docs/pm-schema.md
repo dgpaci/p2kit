@@ -467,11 +467,12 @@ reasoning — written by `/pm-risk` only after the user's OK, and cleared when t
 All four are optional: a risk without them has no response.
 
 A risk is **covered** when it has `response_actions` and `verdict: adequate`. The desk shows every
-open risk in Needs attention: red with `no response`, `response not assessed` or
+high open risk (score 6 or more) in Needs attention: red with `no response`, `response not assessed` or
 `response not adequate: <reason>` until covered, then plain with `response adequate: confirm the
 closure`. An adequate verdict never closes a risk: it stays `open`, and in Needs attention, until
 the user confirms the closure in chat and `/pm-risk` writes `status: closed`. The Risks section of
-the Registers tab shows the response and the verdict next to each risk.
+the Registers tab shows the response and the verdict next to each risk, red on any open risk not
+covered.
 
 ### `registers/issues.yaml`
 

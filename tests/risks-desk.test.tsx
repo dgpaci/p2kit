@@ -25,7 +25,7 @@ const PANE = {
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } } as const
 
 test('the desk shows each risk with its response and verdict, and keeps the uncovered ones red in Needs attention', async ($, on) => {
-  // Needs attention, page and pane: every open risk, "<id> [<score>] <title> · <state>", the uncovered ones first and red, by score;
+  // Needs attention, page and pane: every high open risk (score 6 or more), "<id> [<score>] <title> · <state>", the uncovered ones first and red, by score;
   // the state is "no response", "response not assessed", "response not adequate: <reason>" or, plain, "response adequate: confirm the closure".
   // The Risks section of the Registers tab: columns Risk, P × I, Response, Verdict, Status on the page; a second line per risk in the pane.
   // The register's skill is /pm-risk. A closed risk never shows in Needs attention.
@@ -35,7 +35,7 @@ test('the desk shows each risk with its response and verdict, and keeps the unco
   expect(data.projects[0].risks[1]).toMatchObject({ responseActions: 'we wait', verdict: 'not-adequate', verdictReason: 'nobody watches the date' })
   const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
   expect(script).toContain("const isCovered = r => !!r.responseActions && r.verdict === 'adequate'")
-  expect(script).toContain("p.risks.filter(r => isOpen(r.status)).sort((a, b) => isCovered(a) - isCovered(b) || b.score - a.score)")
+  expect(script).toContain("p.risks.filter(r => isOpen(r.status) && r.score >= 6).sort((a, b) => isCovered(a) - isCovered(b) || b.score - a.score)")
   expect(script).toContain("className: isCovered(r) ? '' : 'err', textContent: r.id + ' [' + r.score + '] ' + r.title + ' · ' + riskState(r)")
   for (const label of ["'no response'", "'response adequate: confirm the closure'", "'response not adequate'", "'response not assessed'", "'✔ adequate'", "'✘ not adequate'"]) {
     expect(script).toContain(label)
@@ -60,7 +60,8 @@ test('the desk shows each risk with its response and verdict, and keeps the unco
   const ui = await $.ui.mount(PANE)
   await ui.press({ key: 'open:/t/portal' })
   expect((await ui.find({ type: 'Text', text: 'R-002 [9] Provider late · response not adequate: nobody watches the date' }))?.props.color).toBe('red')
-  expect((await ui.find({ type: 'Text', text: 'R-003 [2] Email pricing · no response' }))?.props.color).toBe('red')
+  // A low risk stays out of Needs attention; the register still shows it red without a response.
+  expect(await ui.find({ type: 'Text', text: /^R-003 \[2\] Email pricing · / })).toBeFalsy()
   const covered = await ui.find({ type: 'Text', text: 'R-001 [6] Branch staff keep the old procedure · response adequate: confirm the closure' })
   expect(covered).toBeTruthy()
   expect(covered?.props.color).toBeUndefined()

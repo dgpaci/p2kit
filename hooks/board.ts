@@ -633,8 +633,8 @@ const riskState = r => !r.responseActions ? 'no response' : r.verdict === 'adequ
 
 function attention(p) {
   const blockers = p.blockers.map(b => [b.wp, b.sha, b.text])
-  // Every open risk: the uncovered ones first and red, then the covered ones waiting for the closure; by score within each.
-  const risks = p.risks.filter(r => isOpen(r.status)).sort((a, b) => isCovered(a) - isCovered(b) || b.score - a.score)
+  // The high open risks (score 6 or more): the uncovered ones first and red, then the covered ones waiting for the closure; by score.
+  const risks = p.risks.filter(r => isOpen(r.status) && r.score >= 6).sort((a, b) => isCovered(a) - isCovered(b) || b.score - a.score)
   const lines = [
     ...blockers.map(([wp, sha, text]) => el('div', { className: 'err' }, el('span', { className: 'mono', textContent: wp + ' ' + sha + ' ' }), text)),
     ...risks.map(r => el('div', { className: isCovered(r) ? '' : 'err', textContent: r.id + ' [' + r.score + '] ' + r.title + ' · ' + riskState(r) })),
