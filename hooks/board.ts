@@ -248,6 +248,11 @@ const fileLink = (path, label) => el('a', { href: 'file://' + encodeURI(path), t
   fetch('/open', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-P2kit-Token': window.P2KIT_SERVER.token }, body: JSON.stringify({ path }) })
     .then(r => r.ok ? null : r.json().catch(() => ({})).then(a => alert('Cannot open ' + path + ': ' + (a.error || 'HTTP ' + r.status))))
 } })
+// A Markdown document opens rendered as HTML by the desk helper, in a new tab; without the helper, or for any other file, it
+// is a file link.
+const docLink = (path, label) => window.P2KIT_SERVER && /\\.md$/i.test(path)
+  ? el('a', { href: '/doc?path=' + encodeURIComponent(path), target: '_blank', rel: 'noopener', textContent: label, onclick: e => e.stopPropagation() })
+  : fileLink(path, label)
 const sessionLink = p => el('a', { href: p.sessionLink, textContent: 'Open session', onclick: e => e.stopPropagation() })
 const bar = (done, total) => el('span', {}, el('span', { className: 'bar' }, el('i', { style: 'width:' + (total ? Math.round(100 * done / total) : 0) + '%' })), done + '/' + total)
 // The milestone's items closed over all of them, from its item list when read, else from its counts; null without a milestone.
@@ -891,18 +896,19 @@ function metrics(p) {
       el('small', { textContent: w.week.slice(5) })))))
 }
 
-// Documents: the products of .pm/, then each folder of the project.yaml documents key with its files.
+// Documents: the products of .pm/, then each folder of the project.yaml documents key with its files. A Markdown one opens
+// rendered as HTML when the desk helper serves the page (docLink).
 function documents(p) {
   const own = p.documents.filter(d => !d.folder)
   const folders = [...new Set(p.documents.filter(d => d.folder).map(d => d.folder))]
   const open = openLogActions(p).length
   return el('div', {},
     p.documents.length ? null : el('p', { className: 'dim', textContent: 'None yet.' }),
-    own.length ? tableOf(['Document', 'Status', 'Version'], own.map(d => [fileLink(d.path, d.title), d.status, d.version])) : null,
+    own.length ? tableOf(['Document', 'Status', 'Version'], own.map(d => [docLink(d.path, d.title), d.status, d.version])) : null,
     // Every folder's File column has the same width, so the folders line up one under the other.
     ...folders.map(f => el('div', { className: 'doc-folder' },
       el('h3', { textContent: f }),
-      tableOf(['Document', 'File'], p.documents.filter(d => d.folder === f).map(d => [fileLink(d.path, d.title), el('span', { className: 'dim mono', textContent: d.path.split('/').pop() })])))),
+      tableOf(['Document', 'File'], p.documents.filter(d => d.folder === f).map(d => [docLink(d.path, d.title), el('span', { className: 'dim mono', textContent: d.path.split('/').pop() })])))),
     // The Daily Log closes the tab.
     blockTitle('Daily log', open ? open + ' open actions' : ''),
     dailyLog(p))

@@ -681,7 +681,10 @@ action: the developer does it from their forge desk's Solve. Hidden on a read-on
 **Browser page.** `server/desk_server.py`, standard-library Python 3, serves the page on
 `127.0.0.1` at a random port. The mod starts it on *Open in browser* (or reuses one another session
 started) and writes nothing else; the helper writes `~/.claude/p2kit/desk-server.json`
-(`{ port, pid }`). `GET /` is the page with a per-session token, `GET /desk.json` the snapshot;
+(`{ port, pid }`). `GET /` is the page with a per-session token, `GET /desk.json` the snapshot,
+`GET /doc?path=<file>` a Markdown document of a registered project rendered as an HTML page
+(`server/doc_page.py`: a Markdown subset, everything escaped, no script; 403 for any other file, 404
+when missing) — the Documents tab links its `.md` files there, and to the file itself without the helper;
 `POST /action` returns `{ preview, hash }`, and the same request with `confirm: <hash>` applies it
 only if the preview, computed again, has the same hash. A request is refused (403) unless its
 `Host` is `127.0.0.1:<port>` or `localhost:<port>`, its `Origin` the same, and its `X-P2kit-Token`

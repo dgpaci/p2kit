@@ -582,6 +582,41 @@ class Server(unittest.TestCase):
         self.assertEqual(json.loads(body)['opened'], doc)
         self.assertEqual(run.call_args[0][0][1], doc)
 
+    def doc(self, path, **headers):
+        return self.request('GET', '/doc?path=' + ds.urllib.parse.quote(path), **headers)
+
+    def test_doc_renders_a_markdown_file_of_a_project_as_html(self):
+        self.p.write('.pm/brief.md', '---\ntitle: Brief\n---\n# Brief\n\n<script>x</script> **ok**\n')
+        connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
+        connection.request('GET', '/doc?path=' + ds.urllib.parse.quote(os.path.join(self.p.root, '.pm', 'brief.md')), headers={'Host': f'127.0.0.1:{self.port}'})
+        response = connection.getresponse()
+        page = response.read().decode()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader('Content-Type'), 'text/html; charset=utf-8')
+        self.assertIn("default-src 'none'", response.getheader('Content-Security-Policy'))
+        self.assertIn('<title>Brief</title>', page)
+        self.assertIn('&lt;script&gt;x&lt;/script&gt; <strong>ok</strong>', page)
+        self.assertNotIn(self.server.token, page)
+
+    def test_doc_refuses_any_other_file_and_other_hosts(self):
+        os.makedirs(os.path.join(self.p.home, 'other'))
+        outside = os.path.join(self.p.home, 'other', 'secret.md')
+        with open(outside, 'w') as handle:
+            handle.write('# secret\n')
+        os.symlink(outside, os.path.join(self.p.root, 'link.md'))
+        self.p.write('.pm/brief.md', '# Brief\n')
+        brief = os.path.join(self.p.root, '.pm', 'brief.md')
+        self.assertEqual(self.doc(brief, Host='evil.example')[0], 403)
+        self.assertEqual(self.doc(outside)[0], 403)
+        self.assertEqual(self.doc(os.path.join(self.p.root, 'link.md'))[0], 403)
+        self.assertEqual(self.doc(self.p.root + '/.pm/../../other/secret.md')[0], 403)
+        self.assertEqual(self.doc(os.path.join(self.p.root, '.pm', 'project.yaml'))[0], 403)
+        self.assertEqual(self.doc('.pm/brief.md')[0], 403)
+        self.assertEqual(self.doc('')[0], 403)
+        self.assertEqual(self.doc(os.path.join(self.p.root, 'missing.md'))[0], 404)
+        self.assertEqual(self.request('GET', '/doc')[0], 403)
+        self.assertEqual(self.doc(brief)[0], 200)
+
 
 if __name__ == '__main__':
     unittest.main()

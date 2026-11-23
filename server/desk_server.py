@@ -6,6 +6,7 @@ Every action is shown first (POST /action returns a preview and its hash) and ap
 when the request carries that hash and the preview, computed again, still matches it.
 It edits files of the projects listed in ~/.config/p2kit/projects.yaml, never commits,
 and writes to a forge only through the CLI or token the user has already set up.
+GET /doc?path=<file> renders a project's Markdown document as an HTML page (server/doc_page.py).
 
 stdout, read by the mod: `listening <port>` once, then `changed <project path>` per write.
 Each write also stamps ~/.claude/p2kit/desk-changed.json, so every session reads the forge again.
@@ -22,8 +23,11 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from doc_page import document_page
 
 DESK_DIR = '.claude/p2kit'
 INFO_FILE = 'desk-server.json'
@@ -36,6 +40,9 @@ FORGE_TIMEOUT = 30
 MAX_TITLE = 200
 MAX_ISSUE_BODY = 20000
 MAX_ASSIGN_MANY = 50
+MAX_DOCUMENT = 2 * 1024 * 1024
+# A rendered document loads no script and no frame: only its own inline style and images from the web.
+DOC_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src http: https: data:; frame-ancestors 'none'; base-uri 'none'"
 
 WP_ID = re.compile(r'^WP-\d{2,}$')
 BRANCH = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$')
@@ -209,6 +216,34 @@ def open_path(home, path):
     command = 'open' if sys.platform == 'darwin' else 'xdg-open'
     subprocess.run([command, real], check=True, timeout=FORGE_TIMEOUT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {'opened': real}
+
+
+class DocumentRefused(ActionError):
+    def __init__(self, status, reason):
+        super().__init__(reason)
+        self.status = status
+
+
+def readable_document(home, path):
+    """A Markdown file inside a registered project, the only file /doc renders: 403 for any other path, 404 when missing."""
+    if not isinstance(path, str) or not path or not os.path.isabs(path):
+        raise DocumentRefused(403, 'not an absolute path')
+    real = os.path.realpath(path)
+    if not any(real.startswith(root + os.sep) for root in registered_projects(home)):
+        raise DocumentRefused(403, 'the path is not inside a project of projects.yaml')
+    if not real.lower().endswith('.md'):
+        raise DocumentRefused(403, 'only Markdown documents are rendered')
+    if not os.path.isfile(real):
+        raise DocumentRefused(404, f'{path} not found')
+    if os.path.getsize(real) > MAX_DOCUMENT:
+        raise DocumentRefused(403, 'the document is too large to render')
+    return real
+
+
+def render_document(home, path):
+    """The HTML page of a project's Markdown document."""
+    real = readable_document(home, path)
+    return document_page(real, read_text(real))
 
 
 def read_text(path):
@@ -748,10 +783,12 @@ class Handler(BaseHTTPRequestHandler):
         port = self.server.server_address[1]
         return {f'127.0.0.1:{port}', f'localhost:{port}'}
 
-    def answer(self, status, body, content_type='application/json; charset=utf-8'):
+    def answer(self, status, body, content_type='application/json; charset=utf-8', headers=None):
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.send_response(status)
         self.send_header('Content-Type', content_type)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
@@ -780,6 +817,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.answer(200, read_text(path).encode('utf-8')) if os.path.exists(path) else self.refuse(404, 'no snapshot')
         if self.path == '/health':
             return self.answer(200, {'ok': True, 'pid': os.getpid()})
+        # A document of a project, rendered from Markdown: a read, like the page, so it needs our Host and no token.
+        url = urllib.parse.urlsplit(self.path)
+        if url.path == '/doc':
+            paths = urllib.parse.parse_qs(url.query).get('path') or ['']
+            try:
+                page = render_document(self.server.home, paths[0])
+            except DocumentRefused as error:
+                return self.refuse(error.status, str(error))
+            except (ValueError, OSError) as error:
+                return self.refuse(500, f'{type(error).__name__}: {error}')
+            return self.answer(200, page.encode('utf-8'), 'text/html; charset=utf-8', {'Content-Security-Policy': DOC_POLICY})
         return self.refuse(404, 'not found')
 
     def do_POST(self):

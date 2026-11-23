@@ -67,7 +67,8 @@ lead time, review and merge time and the weekly throughput.
 ![Metrics](images/metrics.png)
 
 The other tabs: **Activity** (milestones, open issues and pull requests, with a selection bar to
-package or assign many at once), **Documents** (the `.pm/` products and the Daily Log),
+package or assign many at once), **Documents** (the `.pm/` products and the Daily Log; a Markdown
+document opens as a readable HTML page when the desk helper serves the page),
 **Registers** (risks, approvals, problems, lessons, iterations).
 
 ## A task from assignment to merge
