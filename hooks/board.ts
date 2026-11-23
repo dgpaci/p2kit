@@ -155,6 +155,7 @@ a.btn-primary { background: var(--on); border-color: var(--on); color: #fff; fon
 .pill.kind-decision { color: var(--on); border-color: var(--on); } .pill.kind-action { color: var(--amber); border-color: var(--amber); }
 .pill.kind-problem { color: var(--purple); border-color: var(--purple); } .pill.kind-note { color: var(--green); border-color: var(--green); }
 .log-source { margin-left: 6px; color: var(--dim); cursor: help; }
+.log-day td:not(:nth-child(3)) { white-space: nowrap; }
 .log-filters { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 8px 0; }
 .log-filters input[type=search] { flex: 1 1 180px; min-width: 0; max-width: 320px; }
 .log-filters .n { font-size: 12px; color: var(--dim); }
@@ -952,9 +953,10 @@ function registers(p) {
 }
 
 // The Daily Log: a filter bar (day, kinds, free text), then a block per day, newest first, its entries in file order; an open action
-// past its due is red. Each kind has its colour, each source its symbol. The filters are page-local, like the Activity ones: another
-// project starts unfiltered, and the page does not reload itself while a filter is set. A change redraws only the list, so the search
-// box keeps the focus. p.dailyLog is missing on a project built by older code: read as empty.
+// past its due is red; every column but the entry stays on one line. Each kind has its colour, each source its symbol. The filters
+// are page-local, like the Activity ones: another project starts unfiltered, and the page does not reload itself while a filter is
+// set. A change redraws only the list, so the search box keeps the focus. p.dailyLog is missing on a project built by older code:
+// read as empty.
 const logOf = p => p.dailyLog || []
 const openLogActions = p => logOf(p).filter(d => d.status === 'open')
 const logText = d => d.text + (d.ref ? ' ' + d.ref : '') + (d.register ? ' → ' + d.register : '')
@@ -974,7 +976,7 @@ const logKind = d => {
 function logDays(p, entries) {
   if (!entries.length) return [el('p', { className: 'dim', textContent: 'No entry matches the filters.' })]
   const days = [...new Set(entries.map(d => d.date))].sort().reverse()
-  return days.map(day => el('div', {}, el('h3', { textContent: day }),
+  return days.map(day => el('div', { className: 'log-day' }, el('h3', { textContent: day }),
     tableOf(['', 'Kind', 'Entry', 'Issue', 'Owner', 'Due', 'Status'], entries.filter(d => d.date === day).map(d => dimUnlessOpen(d.status || 'open',
       [d.id, logKind(d), logText(d), d.issue === null ? '' : issueLink(p, d.issue), d.owner, d.isOverdue ? el('span', { className: 'err', textContent: d.due }) : d.due, d.status])))))
 }
