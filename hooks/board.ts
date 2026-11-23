@@ -160,6 +160,7 @@ a.btn-primary { background: var(--on); border-color: var(--on); color: #fff; fon
 .log-filters .n { font-size: 12px; color: var(--dim); }
 /* Fixed layout: the ref, pill and date columns line up across the separate group tables. */
 table.rows { table-layout: fixed; }
+.doc-folder table { table-layout: fixed; } .doc-folder th:last-child { width: 26em; } .doc-folder td:last-child { overflow-wrap: anywhere; }
 .sel-col { width: 28px; padding-right: 0 !important; }
 .sel-col input { margin: 0; cursor: pointer; }
 tr.checked td { background: color-mix(in srgb, var(--on) 8%, transparent); }
@@ -870,7 +871,8 @@ function documents(p) {
   return el('div', {},
     p.documents.length ? null : el('p', { className: 'dim', textContent: 'None yet.' }),
     own.length ? tableOf(['Document', 'Status', 'Version'], own.map(d => [fileLink(d.path, d.title), d.status, d.version])) : null,
-    ...folders.map(f => el('div', {},
+    // Every folder's File column has the same width, so the folders line up one under the other.
+    ...folders.map(f => el('div', { className: 'doc-folder' },
       el('h3', { textContent: f }),
       tableOf(['Document', 'File'], p.documents.filter(d => d.folder === f).map(d => [fileLink(d.path, d.title), el('span', { className: 'dim mono', textContent: d.path.split('/').pop() })])))),
     // The Daily Log closes the tab.
