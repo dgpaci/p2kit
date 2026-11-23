@@ -42,7 +42,7 @@ the PM reads it before it is saved.
 | Group issues and pull requests into a package | a forge milestone, and a new `WP-<nn>.md` | button, preview of the plan, confirm |
 | Assign / unassign a team member | the assignees of the open issues and pull requests checked on the Team or Activity tab | checkboxes and one *Assign to…* select on top, or a drop on a member; preview before / after, confirm |
 | Create an issue | a new forge issue, optionally in a work package's milestone and assigned to a team member | dialog, preview, confirm |
-| Attach an issue or pull request to a work package | the milestone of an open item on the forge: the work package's `milestone:`, created after the work package's title when it has none | select or drop, preview old / new milestone, confirm |
+| Attach an issue or pull request to a work package | the milestone of an open item on the forge: the work package's `milestone:`, created after the work package's title when it has none | a drop on a work package (drag dock or Board lane), preview old / new milestone, confirm; a checked group goes through *Create package* |
 | Digest, Highlight Report, Presentation, Retrospective, issue draft | new text | opens a session with the skill |
 
 A direct action never writes without a preview. The confirmation applies only to the file as
@@ -59,7 +59,11 @@ shown again.
   - The helper accepts an action only when it carries the page's per-session token and comes
     from its own origin. Any website can reach `127.0.0.1`, so these checks are needed.
   - It edits only projects listed in `~/.config/p2kit/projects.yaml`.
-  - It changes one line per action, and only to a value from a fixed set.
+  - It changes only the lines the preview listed, and only to a value from a fixed set. Most
+    actions change one line; placing a work package may also renumber the `rank:` of the others
+    in its horizon, and assigning many patches each checked item.
+  - It serves a project's Markdown documents as read-only HTML pages (`GET /doc`): only `.md`
+    files inside a registered project, rendered with every tag escaped and scripts blocked.
   - It assigns only the logins of `team.people`, and writes nothing on a project whose
     checkout has no `.pm/`.
   - Forge writes go through the CLI the user has already authenticated (`gh`, `fj`). No new
