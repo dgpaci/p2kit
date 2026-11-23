@@ -37,6 +37,8 @@ writing, and keep the YAML inside its subset.
    deleted). All start unticked. In the `light` profile the outline business case stays inside the brief.
 6. **Create `.pm/registers/risks.yaml` and `.pm/registers/issues.yaml`** with the risks and issues
    the mandate already reveals (often a few risks, no issues): `risks: []` / `issues: []` when none.
+   A risk whose handling the mandate already states gets its `response_actions` and Claude's
+   verdict as skills/pm-risk/SKILL.md steps 3–4 describe; the others stay without, for `/pm-risk`.
 7. **Show the user a summary**: the brief's objective and objectives checklist, scope, top risks, open points, and the
    decision now due — *authorize initiation*. Ask whether to register the project in the desk
    (`/pm-register`) if it is not there yet.

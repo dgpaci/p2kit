@@ -10,6 +10,7 @@ import { getFlowCell } from './flow'
 import { getBoardLanes } from './lanes'
 import { getItemProgress, getMilestonePackage } from './milestones'
 import { getWorkThemes, loadProjects } from './project'
+import { getAttentionRisks, getRiskResponseLine, getRiskState, isRiskCovered } from './risks'
 import { getDeskServer } from './server'
 import { toSnapshot } from './snapshot'
 
@@ -559,11 +560,15 @@ export const register: Register = on => {
         id: 'registers', label: 'Registers', count: openRisks.length + openIssues.length + openActions.length,
         render: () => {
           const registers = [
-            { id: 'risks', label: 'Risks', size: p.risks.length, sub: `${openRisks.length} open`, skill: '/pm-log', render: () => allRisks.length === 0 ? <Text dimColor>None.</Text> : allRisks.map(risk => (
+            // Each risk on two lines: id, score and title, then its response and Claude's verdict, red while an open risk is not covered.
+            { id: 'risks', label: 'Risks', size: p.risks.length, sub: `${openRisks.length} open`, skill: '/pm-risk', render: () => allRisks.length === 0 ? <Text dimColor>None.</Text> : allRisks.flatMap(risk => [
           <Text color={risk.status === 'open' && risk.score >= 6 ? 'red' : undefined} dimColor={risk.status !== 'open'} wrap="truncate-end">
             {`${risk.id} [${risk.score}] ${risk.title}${risk.status === 'open' ? '' : ` · ${risk.status}`}`}
-          </Text>
-        )) },
+          </Text>,
+          <Text color={risk.status === 'open' && !isRiskCovered(risk) ? 'red' : undefined} dimColor={risk.status !== 'open' || isRiskCovered(risk)} wrap="truncate-end">
+            {`  ${getRiskResponseLine(risk)}`}
+          </Text>,
+        ]) },
             { id: 'approvals', label: 'Approvals', size: p.approvals.length, sub: String(p.approvals.length), skill: '/pm-start-up', render: () => p.approvals.length === 0 ? <Text dimColor>None recorded.</Text>
           : p.approvals.map(one => <Text wrap="truncate-end">{`${one.date} ${one.decision} — ${one.by}`}</Text>) },
             { id: 'problems', label: 'Problems', size: p.issues.length, sub: `${openIssues.length} open`, skill: '/pm-log', render: () => allIssues.length === 0 ? <Text dimColor>None.</Text>
@@ -622,12 +627,14 @@ export const register: Register = on => {
     ]
     const tab = chosenView.startsWith('tab:') ? tabs.find(one => `tab:${one.id}` === chosenView) : undefined
 
-    /** Open blocker notes with WP id and short sha, high open risks, an overdue report. */
+    /** Open blocker notes with WP id and short sha, high open risks (red until covered), an overdue report. */
     const getAttention = () => {
       const blockers = getOpenBlockers(p).map(({ wp, sha, text }) => [wp, sha, text])
       const lines = [
         ...blockers.map(([wp, sha, text]) => <Text color="red" wrap="truncate-end">{`${wp} ${sha} ${text}`}</Text>),
-        ...openRisks.filter(risk => risk.score >= 6).map(risk => <Text color="red" wrap="truncate-end">{`${risk.id} [${risk.score}] ${risk.title}`}</Text>),
+        ...getAttentionRisks(p.risks).map(risk => (
+          <Text color={isRiskCovered(risk) ? undefined : 'red'} wrap="truncate-end">{`${risk.id} [${risk.score}] ${risk.title} · ${getRiskState(risk)}`}</Text>
+        )),
         ...(p.nextReport.isOverdue ? [<Text color="red">{`highlight report overdue (${p.nextReport.due})`}</Text>] : []),
         ...(p.iteration?.isOverdue ? [<Text color="red">{`Iteration ${p.iteration.number} past its end (${p.iteration.end})`}</Text>] : []),
         ...openActions.map(one => <Text wrap="truncate-end">{`${one.id} ${one.text}${one.issue === null ? '' : ` #${one.issue}`}`}</Text>),

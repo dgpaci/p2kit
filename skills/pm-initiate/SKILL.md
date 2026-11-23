@@ -27,7 +27,8 @@ plugin root (two levels up from this skill's folder); keep the YAML inside its s
 5. **Create the work packages** of that stage, one file each, `.pm/work-packages/WP-<nn>.md`, with
    the frontmatter of the schema, `stage: 2`, `status: draft`. Keep them few and deliverable-sized.
 6. **Update `.pm/project.yaml`**: firm tolerances, roles, `reporting.highlight_every_days`;
-   `stage.planned_end` of the initiation stage. Add the new risks and issues to the registers.
+   `stage.planned_end` of the initiation stage. Add the new risks and issues to the registers; a
+   risk's response actions and Claude's verdict on them follow skills/pm-risk/SKILL.md steps 3–4.
 7. **Show the user a summary** — plan at a glance, tolerances, top risks — and the decision now due:
    *authorize the project* and *authorize stage 2*.
 

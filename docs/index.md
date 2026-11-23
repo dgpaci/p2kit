@@ -26,6 +26,7 @@ The screenshots below come from a demo project, *Webshop renewal*, on the fictio
 | see who is overloaded or stuck | the Team tab: each person's items, WIP limit, stalled reviews |
 | report | `/pm-digest` (weekly, for the alignment meeting), `/pm-report` (Highlight Report for the Board) |
 | keep a diary | `/pm-log`: forge events, meeting decisions and actions |
+| handle risks | `/pm-risk`: how each risk is handled, an adequate / not adequate verdict, closure on your confirmation |
 | learn | `/pm-retro`: what to keep, what to change, actions opened as issues |
 
 ## The desk

@@ -628,12 +628,19 @@ function overview() {
   ]
 }
 
+// A risk is covered when its response actions are written and Claude judged them adequate; a snapshot of older code has neither, so
+// its risks read as uncovered. A covered risk stays open, and in Needs attention, until the user confirms its closure in chat.
+const isCovered = r => !!r.responseActions && r.verdict === 'adequate'
+const riskState = r => !r.responseActions ? 'no response' : r.verdict === 'adequate' ? 'response adequate: confirm the closure'
+  : r.verdict === 'not-adequate' ? 'response not adequate' + (r.verdictReason ? ': ' + r.verdictReason : '') : 'response not assessed'
+
 function attention(p) {
   const blockers = p.blockers.map(b => [b.wp, b.sha, b.text])
-  const risks = p.risks.filter(r => isOpen(r.status) && r.score >= 6).sort((a, b) => b.score - a.score)
+  // The high open risks (score 6 or more): the uncovered ones first and red, then the covered ones waiting for the closure; by score.
+  const risks = p.risks.filter(r => isOpen(r.status) && r.score >= 6).sort((a, b) => isCovered(a) - isCovered(b) || b.score - a.score)
   const lines = [
     ...blockers.map(([wp, sha, text]) => el('div', { className: 'err' }, el('span', { className: 'mono', textContent: wp + ' ' + sha + ' ' }), text)),
-    ...risks.map(r => el('div', { className: 'err', textContent: r.id + ' [' + r.score + '] ' + r.title })),
+    ...risks.map(r => el('div', { className: isCovered(r) ? '' : 'err', textContent: r.id + ' [' + r.score + '] ' + r.title + ' · ' + riskState(r) })),
     p.nextReport.isOverdue ? el('div', { className: 'err', textContent: 'Highlight report overdue since ' + p.nextReport.due }) : null,
     p.iteration && p.iteration.isOverdue ? el('div', { className: 'err', textContent: 'Iteration ' + p.iteration.number + ' past its end (' + p.iteration.end + ')' }) : null,
     ...openActions(p).map(a => el('div', { textContent: actionText(a) })),
@@ -953,9 +960,17 @@ function workPackages(p) {
 // open ones first; a closed one is dimmed. Entry: [id, label, size(p), subtitle(p), skill that starts it, render(p)].
 const openFirst = rows => rows.filter(r => isOpen(r.status)).concat(rows.filter(r => !isOpen(r.status)))
 const dimUnlessOpen = (status, cells) => isOpen(status) ? cells : cells.map(c => el('span', { className: 'dim' }, c))
+// A risk's response: its type, then the actions taken (red "no response" on an open risk without them); the verdict: Claude's
+// assessment of those actions, an icon and its one line of reasoning.
+const riskResponse = r => r.responseActions ? el('span', {}, r.response ? el('span', { className: 'dim', textContent: r.response + ' · ' }) : null, r.responseActions)
+  : el('span', { className: isOpen(r.status) ? 'err' : 'dim', textContent: (r.response ? r.response + ' · ' : '') + 'no response' })
+const riskVerdict = r => !r.responseActions ? '' : r.verdict === 'adequate' ? el('span', {}, el('span', { className: 'ok', textContent: '✔ adequate' }), r.verdictReason ? el('div', { className: 'dim', textContent: r.verdictReason }) : null)
+  : r.verdict === 'not-adequate' ? el('span', {}, el('span', { className: 'err', textContent: '✘ not adequate' }), r.verdictReason ? el('div', { className: 'dim', textContent: r.verdictReason }) : null)
+  : el('span', { className: 'dim', textContent: 'not assessed' })
+const riskRow = r => dimUnlessOpen(r.status, [r.id, r.title, r.probability + ' × ' + r.impact + ' = ' + r.score, riskResponse(r), riskVerdict(r), r.status])
 const REGISTERS = [
-  ['risks', 'Risks', p => p.risks.length, p => p.risks.filter(r => isOpen(r.status)).length + ' open', '/pm-log',
-    p => tableOf(['', 'Risk', 'P × I', 'Status'], openFirst(p.risks).map(r => dimUnlessOpen(r.status, [r.id, r.title, r.probability + ' × ' + r.impact + ' = ' + r.score, r.status])))],
+  ['risks', 'Risks', p => p.risks.length, p => p.risks.filter(r => isOpen(r.status)).length + ' open', '/pm-risk',
+    p => tableOf(['', 'Risk', 'P × I', 'Response', 'Verdict', 'Status'], openFirst(p.risks).map(riskRow))],
   ['approvals', 'Approvals', p => p.approvals.length, p => String(p.approvals.length), '/pm-start-up',
     p => tableOf(['Date', 'Decision', 'By', 'Note'], p.approvals.map(a => [a.date, a.decision, a.by, a.note]))],
   ['problems', 'Problems', p => p.issues.length, p => p.issues.filter(i => isOpen(i.status)).length + ' open', '/pm-log',
