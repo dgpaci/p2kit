@@ -96,13 +96,13 @@ test('the pane shows the Team tab, filters it by member, and flags each person o
 
   await $.command.run(RUN)
   const ui = await $.ui.mount(PANE)
-  expect(await ui.find({ type: 'Text', text: 'WIP Davide Paci 2/1', color: 'red' })).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: 'WIP Davide Paci 2/1' }))?.props.color).toBe('red')
   expect(await ui.find({ type: 'Text', text: /^WIP Luca Verdi/ })).toBeFalsy()
 
   await ui.press({ key: 'open:/t/gh' })
-  expect(await ui.find({ type: 'Text', text: 'WIP Davide Paci 2/1', color: 'red' })).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: 'WIP Davide Paci 2/1' }))?.props.color).toBe('red')
   await ui.press({ key: 'tab:team' })
-  expect(await ui.find({ type: 'Text', text: /^Davide Paci · @dgpaci · Project Manager · WIP 2\/1$/, color: 'red' })).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /^Davide Paci · @dgpaci · Project Manager · WIP 2\/1$/ }))?.props.color).toBe('red')
   expect(await ui.find({ type: 'Text', text: /#1 Issue 1 · to do$/ })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /PR #2 Pull 2 · waiting for review$/ })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /^Luca Verdi · @lverdi · Senior Supplier · WIP 0\/1$/ })).toBeTruthy()

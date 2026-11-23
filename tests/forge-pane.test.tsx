@@ -90,7 +90,7 @@ test('the drill-in shows the forge state of each open work package of the curren
 
   await $.command.run(RUN)
   const ui = await $.ui.mount(PANE)
-  expect(await ui.find({ type: 'Text', text: 'ready to close', color: 'green' })).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: 'ready to close' }))?.props.color).toBe('green')
 
   await ui.press({ key: 'open:/src/anaci' })
   await ui.press({ key: 'theme:WP-03' })
