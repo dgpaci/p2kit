@@ -609,7 +609,7 @@ preview the PM confirms; nothing is committed.
 | Create package | the milestone (created or reused), its items, a new `WP-<nn>.md` (`status: draft`) | open issues and pull requests |
 | Create work package | a new `WP-<nn>.md` for an existing milestone, listing its open items | a milestone no work package carries |
 | Assign / unassign | `PATCH issues/<n>` with the full `assignees` list, the login added or removed (pull requests too, both forges) | an open item; a login of `team.people` |
-| Assign to many | one `PATCH issues/<n>` per picked item, the login added to its `assignees` | open items not already held by that login (1–50); a login of `team.people` |
+| Assign to many | one `PATCH issues/<n>` per picked item, the login added to or removed from its `assignees` | open items that login does not hold (add) or holds (remove), 1–50; a login of `team.people` |
 | New issue | `POST issues` with `title`, `body`, and optionally `milestone` (the work package's, `number` on GitHub, `id` on Forgejo) and `assignees` (one login) | a title; a work package whose `milestone:` exists on the forge; a login of `team.people` |
 | Attach to a work package | `PATCH issues/<n>` with `milestone:` the key of the work package's milestone (`number` on GitHub, `id` on Forgejo); for a work package without `milestone:`, first the milestone named after its title (created, or reused when one carries that title), and after the patch its `milestone:` key | an open item; a work package whose `milestone:` exists on the forge, or one with a title and no `milestone:` |
 
@@ -621,17 +621,18 @@ preview. Items already in another milestone move only when ticked in the preview
 (`GET issues/<n>`) and shows its reference, title and kind with the assignees before and after; the
 hash covers them, so a change of the assignees on the forge between preview and confirm is refused.
 A login outside `team.people`, a closed item, adding someone already assigned or removing someone
-who is not are refused. The browser page offers it as an *Assign…* select on the open issues and
-pull requests of the Activity and Team tabs: each team member with a login, `+` to add or `−` to
-remove by the item's assignees (both when they are not known). No action is accepted — and no
-select is shown — when the checkout has no `.pm/` (`.pm/` read from git: the desk is read-only).
+who is not are refused. The browser page sends it only on a drop of an item on a team member (`add`);
+rows carry no per-row select (issue #58). No action is accepted — and no control is shown — when the
+checkout has no `.pm/` (`.pm/` read from git: the desk is read-only).
 
-**Assign to many.** `{ kind: 'assign-many', numbers: [<n>, …], login }`, from the *Assign to…*
-select of the Activity tab's selection bar (the checked issues and pull requests). The preview reads
-every item and lists each with its assignees before and after; closed items and those the login
-already holds are listed as *Left out* instead of refusing the whole action, which is refused only
-when nothing is left. Confirm patches the items in order and stops at the first failure, saying
-which were done. Only `add`: unassigning stays per item.
+**Assign to many.** `{ kind: 'assign-many', numbers: [<n>, …], login, op: 'add' | 'remove' }` (`op`
+defaults to `add`), from the *Assign to…* select of the selection bar of the Team and Activity tabs,
+which share one selection of checked issues and pull requests: an *Assign* group (`+`) and an
+*Unassign* group (`−`), each with the team members that have a login. The preview reads every item
+and lists each with its assignees before and after; closed items, and those the login already holds
+(`add`) or does not hold (`remove`), are listed as *Left out* instead of refusing the whole action,
+which is refused only when nothing is left. Confirm patches the items in order and stops at the
+first failure, saying which were done.
 
 **Attach to a work package.** `{ kind: 'issue-milestone', number, wp: 'WP-<nn>' }`. The preview
 reads the work package's `milestone:`, finds that milestone on the forge and reads the item; it

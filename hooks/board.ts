@@ -343,7 +343,7 @@ function previewOf(preview, extra) {
   if (preview.kind === 'assign-many') return [
     el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
     el('div', { className: 'diff' }, ...preview.items.map(i => el('div', {}, el('strong', { textContent: i.ref + ' ' }), i.title,
-      el('div', { className: 'del', textContent: '- assignees: ' + (i.before.join(', ') || 'none') }), el('div', { className: 'add', textContent: '+ assignees: ' + i.after.join(', ') })))),
+      el('div', { className: 'del', textContent: '- assignees: ' + (i.before.join(', ') || 'none') }), el('div', { className: 'add', textContent: '+ assignees: ' + (i.after.join(', ') || 'none') })))),
     preview.skipped.length ? el('div', {}, el('h3', { textContent: 'Left out' }), ...preview.skipped.map(i => el('div', { className: 'dim', textContent: i.ref + ' · ' + i.reason }))) : null]
   if (preview.kind !== 'package') return [el('p', { className: 'dim mono', textContent: preview.file }),
     ...preview.changes.map(c => el('div', { className: 'diff' }, el('div', { className: 'dim', textContent: 'line ' + c.line }),
@@ -419,20 +419,6 @@ function placeControls(p, w) {
     onchange: () => act(p, { kind: 'wp-rank', target: w.id, value: rank.value === '' ? '' : Number(rank.value) }) })
   return el('span', { className: 'place' }, horizon, rank)
 }
-// Assign or unassign a team member on an open issue or pull request: a select of the members with a login, each option adding or
-// removing them by the item's assignees; with no assignees known both are offered and the helper's preview refuses what cannot be.
-// Only with the helper, and never on a project whose .pm/ is read from git.
-function assignControl(p, number, assignees) {
-  const members = p.team.filter(m => m.login)
-  if (!server || p.pmRef || !members.length) return null
-  const held = assignees ? new Set(assignees.map(a => (a.login || a).toLowerCase())) : null
-  const options = members.flatMap(m => held ? [[held.has(m.login.toLowerCase()) ? 'remove' : 'add', m]] : [['add', m], ['remove', m]])
-  const pick = el('select', { className: 'assign', title: 'assign a team member', onclick: e => e.stopPropagation(),
-    onchange: () => { const [op, login] = pick.value.split(':'); pick.value = ''; if (login) act(p, { kind: 'assign', number, login, op }) } },
-    el('option', { value: '', textContent: 'Assign…' }),
-    ...options.map(([op, m]) => el('option', { value: op + ':' + m.login, textContent: (op === 'add' ? '+ ' : '− ') + m.person })))
-  return pick
-}
 // A new issue on the project's forge, optionally in a work package's milestone and assigned to a team member: the helper previews
 // it and creates it on Confirm. Without the helper, or for the readiness headings, the pm-issue skill drafts it in a session.
 // Starting the work is the developer's move, from their forge desk's Solve.
@@ -460,13 +446,16 @@ function newIssueButton(p, wp, label = 'New issue') {
   if (!server || p.pmRef) return null
   return el('button', { className: 'act', textContent: label, title: 'create an issue' + (wp ? ' in ' + wp : ''), onclick: e => { e.stopPropagation(); issueDialog(p, wp) } })
 }
-// Assign one team member to every picked issue and pull request: one preview lists them all, with those left out.
+// Assign or unassign one team member on every picked issue and pull request (the only assign control besides a drop on a member,
+// issue #58): one preview lists them all, with those left out. Only with the helper, and never on a project whose .pm/ is read from git.
+const canAssign = p => server && !p.pmRef && p.team.some(m => m.login)
 function assignManyControl(p, numbers) {
+  if (!canAssign(p)) return null
   const members = p.team.filter(m => m.login)
-  if (!server || p.pmRef || !members.length) return null
-  const pick = el('select', { className: 'assign', title: 'assign a team member to the selected items',
-    onchange: () => { const login = pick.value; pick.value = ''; if (login) act(p, { kind: 'assign-many', numbers, login }) } },
-    el('option', { value: '', textContent: 'Assign to…' }), ...members.map(m => el('option', { value: m.login, textContent: m.person })))
+  const group = (op, label) => el('optgroup', { label }, ...members.map(m => el('option', { value: op + ':' + m.login, textContent: (op === 'add' ? '+ ' : '− ') + m.person })))
+  const pick = el('select', { className: 'assign', title: 'assign or unassign a team member on the selected items',
+    onchange: () => { const [op, login] = pick.value.split(':'); pick.value = ''; if (login) act(p, { kind: 'assign-many', numbers, login, op }) } },
+    el('option', { value: '', textContent: 'Assign to…' }), group('add', 'Assign'), group('remove', 'Unassign'))
   return pick
 }
 function packageDialog(p, refs) {
@@ -731,13 +720,35 @@ function themePanel(p, w) {
 const wpLink = (p, w) => w.delivery ? link([w.delivery.issue === null ? '' : '#' + w.delivery.issue, w.delivery.milestone, w.delivery.branch].filter(Boolean).join(' · ') || 'theme', p.path + '/theme/' + w.id) : linkAction(p, w) || el('span', { className: 'dim', textContent: '—' })
 
 const STATUS_LABEL = { review: 'review asked', inprogress: 'in progress', todo: 'to do', waiting: 'waiting for review', stalled: 'stalled' }
+// The issues and pull requests checked on the Team and Activity tabs: one page-local selection shared by both, keyed 'i<n>' or
+// 'p<n>' with the reference; another project starts with nothing picked. A reload waits until nothing is picked.
+const pickedItems = new Map()
+let pickedItemsFor = ''
+function itemPicks(p) {
+  if (pickedItemsFor !== p.path) { pickedItems.clear(); pickedItemsFor = p.path }
+  return {
+    cell: (key, ref) => el('td', { className: 'sel-col' }, el('input', { type: 'checkbox', checked: pickedItems.has(key),
+      onchange: () => { pickedItems.has(key) ? pickedItems.delete(key) : pickedItems.set(key, ref); draw() } })),
+    rowClass: key => pickedItems.has(key) ? 'checked' : '',
+    refs: [...pickedItems.values()],
+    numbers: () => [...pickedItems.values()].map(r => Number(r.replace(/^(PR )?#/, ''))),
+    clear: el('a', { href: '#', textContent: 'clear', onclick: e => { e.preventDefault(); pickedItems.clear(); draw() } }),
+  }
+}
 // Member filter of the Team tab: page-local, everyone shown when none is picked; another project starts unfiltered.
+// The items are checked as on the Activity tab and assigned or unassigned from the one control on top.
 const picked = new Set()
 let pickedFor = ''
 function team(p) {
   if (pickedFor !== p.path) { picked.clear(); pickedFor = p.path }
   const shown = picked.size ? p.team.filter(m => picked.has(m.person)) : p.team
   const toggle = name => { picked.has(name) ? picked.delete(name) : picked.add(name); draw() }
+  const sel = itemPicks(p)
+  const assignable = canAssign(p)
+  const selectionBar = !assignable ? null : sel.refs.length
+    ? el('div', { className: 'activity-bar' }, el('strong', { textContent: sel.refs.length + ' selected' }), el('span', { className: 'refs', textContent: sel.refs.join(' ') }),
+        assignManyControl(p, sel.numbers()), sel.clear)
+    : el('div', { className: 'activity-bar idle dim', textContent: 'Check issues or pull requests to assign or unassign them.' })
   return el('div', {},
     // The roles on top, one chip each with its people; each person's card below names their own roles.
     el('div', { className: 'members' }, el('span', { className: 'label', textContent: 'Roles' }),
@@ -745,43 +756,41 @@ function team(p) {
     el('div', { className: 'members' }, el('span', { className: 'label', textContent: 'Members' }),
       ...p.team.map(m => el('button', { className: 'member-chip' + (picked.has(m.person) ? ' sel' : ''), onclick: () => toggle(m.person) }, m.person)),
       picked.size ? el('a', { href: '#', textContent: 'all', onclick: e => { e.preventDefault(); picked.clear(); draw() } }) : null),
+    selectionBar,
     ...shown.map(m => dropTarget(p, el('div', { className: 'person' + (m.isOverLimit ? ' over' : '') },
       el('div', { className: 'person-head' },
         el('div', { className: 'who' }, el('strong', { textContent: m.person }), el('small', { textContent: (m.login ? '@' + m.login : 'no forge login') + ' · ' + m.roles.join(', ') })),
         m.login ? pill('WIP ' + m.wip + '/' + m.wipLimit, m.isOverLimit ? 'wip-over' : '') : el('span', { className: 'dim', textContent: 'add team.people in project.yaml' })),
       !m.login ? null : m.items.length
-        ? el('table', {}, el('tbody', {}, ...m.items.map(i => draggable(p, el('tr', {},
+        ? el('table', {}, el('tbody', {}, ...m.items.map(i => draggable(p, el('tr', { className: sel.rowClass(i.kind[0] + i.number) },
+            assignable ? sel.cell(i.kind[0] + i.number, (i.kind === 'pr' ? 'PR #' : '#') + i.number) : null,
             el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: (i.kind === 'pr' ? 'PR #' : '#') + i.number })),
             el('td', { textContent: i.title }),
             el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
-            el('td', { style: 'width:150px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status)),
-            el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, i.number, i.assignees || assigneesOf(p, i)))),
+            el('td', { style: 'width:150px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status))),
           dragItem(i.kind, Object.assign({}, (i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => x.number === i.number), { number: i.number, assignees: i.assignees || assigneesOf(p, i) }))))))
         : el('div', { className: 'empty dim', textContent: 'No open item.' })), x => assignRequest(x, m), m.person)))
 }
 
 // Activity tab: the open milestones with their work package, the open pull requests, the open issues grouped by milestone.
-// The "Not ready only" toggle filters the issues and the picked issues and pull requests are page-local, like the member filter;
-// another project starts unfiltered, with nothing picked. The page never writes: Create package only opens a session.
+// The "Not ready only" toggle filters the issues, page-local like the member filter; another project starts unfiltered. The
+// checked issues and pull requests are the selection shared with the Team tab (itemPicks). Without the helper the page never
+// writes: Create package only opens a session.
 let notReadyOnly = false
-const pickedItems = new Map()
 let activityFor = ''
 // The package link carries the prompt last: the picked references are appended to it (hooks/actions.ts getPackageLink).
 const packageLink = (p, refs) => p.packageLink + encodeURIComponent(' ' + refs.join(' '))
 const blockTitle = (title, sub) => el('div', { className: 'block-title' }, el('h3', { textContent: title }), el('span', { className: 'n', textContent: sub }))
 function activity(p) {
-  if (activityFor !== p.path) { notReadyOnly = false; pickedItems.clear(); activityFor = p.path }
+  if (activityFor !== p.path) { notReadyOnly = false; activityFor = p.path }
   const today = data.refreshedAt.slice(0, 10)
-  const pick = (key, ref) => el('td', { className: 'sel-col' }, el('input', { type: 'checkbox', checked: pickedItems.has(key),
-    onchange: () => { pickedItems.has(key) ? pickedItems.delete(key) : pickedItems.set(key, ref); draw() } }))
-  const rowClass = key => pickedItems.has(key) ? 'checked' : ''
-  const refs = [...pickedItems.values()]
+  const sel = itemPicks(p)
+  const pick = sel.cell, rowClass = sel.rowClass, refs = sel.refs
   const selectionBar = refs.length
     ? el('div', { className: 'activity-bar' }, el('strong', { textContent: refs.length + ' selected' }), el('span', { className: 'refs', textContent: refs.join(' ') }),
         server ? el('button', { className: 'btn-primary', textContent: 'Create package', onclick: () => packageDialog(p, refs) })
           : el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: 'Create package' }),
-        assignManyControl(p, refs.map(r => Number(r.replace(/^(PR )?#/, '')))),
-        el('a', { href: '#', textContent: 'clear', onclick: e => { e.preventDefault(); pickedItems.clear(); draw() } }),
+        assignManyControl(p, sel.numbers()), sel.clear,
         el('span', { className: 'dim hint', textContent: server ? 'previews the milestone and the work package, then writes them on Confirm' : 'opens a Claude session on ' + p.name + ' with the pm-package skill: ' + refs.join(' ') }))
     : el('div', { className: 'activity-bar idle dim', textContent: 'Check issues or pull requests to group them into a work package or assign them.' })
 
@@ -807,15 +816,13 @@ function activity(p) {
     el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: pr.url, className: 'mono', textContent: 'PR #' + pr.number })),
     el('td', { textContent: pr.title }),
     el('td', { style: 'width:220px; text-align:right' }, pr.milestone ? pill(pr.milestone) : null, ' ', pr.draft ? pill('draft') : pr.inReview ? pill('in review', 'review') : null),
-    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: pr.updatedAt }),
-    el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, pr.number, pr.assignees))), dragItem('pr', pr))
+    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: pr.updatedAt })), dragItem('pr', pr))
 
   const issueRow = i => draggable(p, el('tr', { className: rowClass('i' + i.number) }, pick('i' + i.number, '#' + i.number),
     el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: '#' + i.number })),
     el('td', { textContent: i.title }),
     el('td', { style: 'width:100px; text-align:right' }, notReadyPill(i.missing || [])),
-    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
-    el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, i.number, i.assignees))), dragItem('issue', i))
+    el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt })), dragItem('issue', i))
 
   // Issues by milestone: the open ones in their order, then any other title (closed, or past the one-page read), then "No milestone".
   const shown = notReadyOnly ? p.forgeIssues.filter(i => (i.missing || []).length) : p.forgeIssues

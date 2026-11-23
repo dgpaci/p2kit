@@ -40,7 +40,7 @@ the PM reads it before it is saved.
 | Close / reopen a commit note | `status:` of one note in `commit-notes.yaml` | button, preview, confirm |
 | Link an issue, milestone or branch | `issue:`, `milestone:`, `branch:` of a work package | button, preview, confirm |
 | Group issues and pull requests into a package | a forge milestone, and a new `WP-<nn>.md` | button, preview of the plan, confirm |
-| Assign / unassign a team member | the assignees of an open issue or pull request on the forge | select, preview before / after, confirm |
+| Assign / unassign a team member | the assignees of the open issues and pull requests checked on the Team or Activity tab | checkboxes and one *Assign to…* select on top, or a drop on a member; preview before / after, confirm |
 | Create an issue | a new forge issue, optionally in a work package's milestone and assigned to a team member | dialog, preview, confirm |
 | Attach an issue or pull request to a work package | the milestone of an open item on the forge: the work package's `milestone:`, created after the work package's title when it has none | select or drop, preview old / new milestone, confirm |
 | Digest, Highlight Report, Presentation, Retrospective, issue draft | new text | opens a session with the skill |
