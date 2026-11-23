@@ -615,8 +615,9 @@ today and, after the user's OK, saves it as `reports/<date>-highlight.md` and se
 ## Desk actions
 
 What acts directly and what opens a session is set in [scope.md](scope.md). An action changes one
-line of one `.pm/` file — or, for a package, the forge and one new work package file — only after a
-preview the PM confirms; nothing is committed.
+line of one `.pm/` file — or, for a package, the forge and one new work package file; for Place, the
+`rank:` lines of its horizon when renumbered — only after a preview the PM confirms; nothing is
+committed.
 
 | Action | Change | Allowed |
 |---|---|---|
@@ -729,8 +730,9 @@ attention, once overdue. A project's form has eight tabs, in this order:
 - **Team** — the roles as chips on top, then one card per person.
 - **Work packages** — grouped Now / Next / Later / Not placed; estimate, actual and deviation
   only when some work package has them.
-- **Documents** — the `.pm/` products and the `documents` folders, then the Daily log.
-- **Registers** — Risks, Approvals, Problems (the PRINCE2 issue register, renamed next to the
+- **Documents** — the `.pm/` products and the `documents` folders, then the Daily log (filters by
+  day, kind and text on the page).
+- **Registers** — Risks (with response and verdict), Approvals, Problems (the PRINCE2 issue register, renamed next to the
   forge's issues), Lessons, Iterations; the empty ones share one line naming the skill that
   starts each. Its count: open risks, open problems and open lesson actions.
 - **Metrics** — the flow of the last 30 and 90 days.

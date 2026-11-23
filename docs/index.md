@@ -44,13 +44,15 @@ tolerances, and *Needs attention*.
 
 **Board** — one swimlane per work package: To do, In progress, In review, Done. *Unplanned* holds
 the open items that belong to no work package. Drag an item onto a lane to put it in that work
-package, or create a new issue in it with *+ issue*; assigning is on the Team and Activity tabs.
+package, or create a new issue in it with *+ issue* (or with *New issue* in the tab's header);
+assigning is on the Team and Activity tabs.
 (The demo page here is read-only, so those buttons are not shown.)
 
 ![Board](images/board.png)
 
 **Team** — each person with their open items and whose move it is. Luca is over his WIP limit of 2;
-Giulia has a review waiting for her.
+Giulia has a review waiting for her. Check items here or on Activity — the selection is shared —
+and assign or unassign them with the one *Assign to…* control on top, or drop an item on a person.
 
 ![Team](images/team.png)
 
@@ -60,7 +62,8 @@ internal notes on its commits (here an open blocker).
 ![Work theme](images/work-theme.png)
 
 **Work packages** grouped by roadmap horizon, with estimate, actual and deviation — drag one into
-another horizon, or above or below another, to place it; **Metrics** gives
+another horizon, or above or below another, to place it, or onto *Not placed* to take it off the
+roadmap (an empty horizon shows as a drop zone); **Metrics** gives
 lead time, review and merge time and the weekly throughput.
 
 ![Work packages](images/work-packages.png)
@@ -68,9 +71,11 @@ lead time, review and merge time and the weekly throughput.
 ![Metrics](images/metrics.png)
 
 The other tabs: **Activity** (milestones, open issues and pull requests, with a selection bar to
-package or assign many at once), **Documents** (the `.pm/` products and the Daily Log; a Markdown
-document opens as a readable HTML page when the desk helper serves the page),
-**Registers** (risks, approvals, problems, lessons, iterations).
+package or assign many at once), **Documents** (the `.pm/` products and the Daily Log, each kind
+of entry in its own colour and filterable by day, kind and text; a Markdown document opens as a
+readable HTML page when the desk helper serves the page), **Registers** (risks with their response
+and Claude's verdict on it, approvals, problems, lessons, iterations; a high risk stays in *Needs
+attention* until its response is adequate and you confirm the closure).
 
 ## A task from assignment to merge
 
