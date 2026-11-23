@@ -431,25 +431,6 @@ function assignControl(p, number, assignees) {
     ...options.map(([op, m]) => el('option', { value: op + ':' + m.login, textContent: (op === 'add' ? '+ ' : '− ') + m.person })))
   return pick
 }
-// The work packages an open issue or pull request can be attached to: those with a milestone, not archived or cancelled, other
-// than the one whose milestone the item already has (item.milestone is its title, '' when none); newMilestoneTargets those with
-// a title and no milestone, neither completed, archived nor cancelled, which get a milestone named after them.
-const attachTargets = (p, item) => p.workPackages.filter(w => w.delivery && w.delivery.milestone && !['archived', 'cancelled'].includes(w.status)
-  && w.delivery.milestone !== item.milestone)
-const newMilestoneTargets = p => p.workPackages.filter(w => w.title && !(w.delivery && w.delivery.milestone) && !['completed', 'archived', 'cancelled'].includes(w.status))
-// Attach an open issue or pull request to a work package's milestone: a select of attachTargets, previewed by the helper (a move
-// when the item is in another milestone). Only with the helper, and never on a project whose .pm/ is read from git.
-function attachControl(p, item) {
-  const targets = attachTargets(p, item)
-  const fresh = newMilestoneTargets(p)
-  if (!server || p.pmRef || !(targets.length || fresh.length)) return null
-  const pick = el('select', { className: 'assign', title: 'attach to a work package', onclick: e => e.stopPropagation(),
-    onchange: () => { const wp = pick.value; pick.value = ''; if (wp) act(p, { kind: 'issue-milestone', number: item.number, wp }) } },
-    el('option', { value: '', textContent: 'Attach to…' }),
-    ...targets.map(w => el('option', { value: w.id, textContent: w.id + ' ' + w.title })),
-    fresh.length ? el('optgroup', { label: 'New milestone' }, ...fresh.map(w => el('option', { value: w.id, textContent: w.id + ' ' + w.title + ' — create milestone' }))) : null)
-  return pick
-}
 // A new issue on the project's forge, optionally in a work package's milestone and assigned to a team member: the helper previews
 // it and creates it on Confirm. Without the helper, or for the readiness headings, the pm-issue skill drafts it in a session.
 // Starting the work is the developer's move, from their forge desk's Solve.
@@ -495,7 +476,8 @@ function packageDialog(p, refs) {
   title.focus()
 }
 
-// Drag and drop: the same actions as the selects, through the same preview and Confirm. An issue or pull request dropped on a
+// Drag and drop: the same preview and Confirm as the selects; attaching one issue or pull request to a work package is a drop only
+// (no per-row select, issue #57), a checked group goes through Create package. An issue or pull request dropped on a
 // member is assigned to them, on a work package attached to its milestone; a milestone dropped on a work package is linked to it.
 // While a drag is on, a dock lists the members and work packages that accept it, from any tab; Board lanes and Team members
 // accept a drop too. Only with the helper, and never on a project whose .pm/ is read from git. dragging holds the reload.
@@ -824,14 +806,14 @@ function activity(p) {
     el('td', { textContent: pr.title }),
     el('td', { style: 'width:220px; text-align:right' }, pr.milestone ? pill(pr.milestone) : null, ' ', pr.draft ? pill('draft') : pr.inReview ? pill('in review', 'review') : null),
     el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: pr.updatedAt }),
-    el('td', { style: 'width:1%; white-space:nowrap' }, attachControl(p, pr), ' ', assignControl(p, pr.number, pr.assignees))), dragItem('pr', pr))
+    el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, pr.number, pr.assignees))), dragItem('pr', pr))
 
   const issueRow = i => draggable(p, el('tr', { className: rowClass('i' + i.number) }, pick('i' + i.number, '#' + i.number),
     el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: '#' + i.number })),
     el('td', { textContent: i.title }),
     el('td', { style: 'width:100px; text-align:right' }, notReadyPill(i.missing || [])),
     el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
-    el('td', { style: 'width:1%; white-space:nowrap' }, attachControl(p, i), ' ', assignControl(p, i.number, i.assignees))), dragItem('issue', i))
+    el('td', { style: 'width:1%; white-space:nowrap' }, assignControl(p, i.number, i.assignees))), dragItem('issue', i))
 
   // Issues by milestone: the open ones in their order, then any other title (closed, or past the one-page read), then "No milestone".
   const shown = notReadyOnly ? p.forgeIssues.filter(i => (i.missing || []).length) : p.forgeIssues
