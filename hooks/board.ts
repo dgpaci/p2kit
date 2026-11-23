@@ -64,7 +64,7 @@ export function renderBoard(input: BoardInput): string {
 }
 
 const STYLE = `
-:root { --bg: #ffffff; --fg: #1f2328; --dim: #656d76; --line: #d0d7de; --chip: #f6f8fa; --on: #0969da;
+:root { color-scheme: light dark; --bg: #ffffff; --fg: #1f2328; --dim: #656d76; --line: #d0d7de; --chip: #f6f8fa; --on: #0969da;
   --green: #1a7f37; --amber: #9a6700; --red: #cf222e; --purple: #8250df; --none: #8c959f; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0d1117; --fg: #e6edf3; --dim: #8d96a0;
   --line: #30363d; --chip: #161b22; --on: #58a6ff; --green: #3fb950; --amber: #d29922; --red: #f85149; --purple: #a371f7; --none: #6e7681; } }
@@ -96,6 +96,14 @@ th { color: var(--dim); font-weight: 500; font-size: 13px; }
 .pill.wip-over { color: #fff; background: var(--red); border-color: var(--red); }
 .forge { display: flex; flex-wrap: wrap; gap: 6px; }
 button { border: 1px solid var(--line); background: var(--chip); color: var(--fg); border-radius: 999px; padding: 3px 10px; font: inherit; cursor: pointer; }
+/* Form controls share one look, themed like the buttons: the native ones stay light in dark mode and are tiny on macOS. Selects
+   draw their own chevron from two gradients, so it follows --dim in both themes. */
+select, textarea, input[type=text], input[type=number], input[type=search] { font: inherit; font-size: 13px; color: var(--fg); background-color: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-height: 28px; }
+select { appearance: none; -webkit-appearance: none; padding-right: 26px; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+select:hover, textarea:hover, input[type=text]:hover, input[type=number]:hover, input[type=search]:hover { border-color: var(--dim); }
+select:focus-visible, textarea:focus-visible, input[type=text]:focus-visible, input[type=number]:focus-visible, input[type=search]:focus-visible { outline: none; border-color: var(--on); box-shadow: 0 0 0 3px color-mix(in srgb, var(--on) 25%, transparent); }
 .project { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
 .project-head { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 10px 12px; cursor: pointer; background: var(--chip); }
 .project-head:hover { filter: brightness(0.98); }
@@ -175,17 +183,16 @@ tr.checked td { background: color-mix(in srgb, var(--on) 8%, transparent); }
 .group-head:first-child { border-top: 0; }
 button.primary, button.btn-primary { background: var(--on); border-color: var(--on); color: #fff; font-weight: 600; }
 .act { font-size: 12px; padding: 1px 8px; margin-left: 6px; }
-.place select, .place input { font: inherit; font-size: 12px; margin-left: 6px; }
-.place input { width: 52px; }
-select.assign { font: inherit; font-size: 12px; }
+.place { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.place select { min-width: 84px; }
+.place input { width: 60px; }
 .dialog { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 60px 16px; }
 .dialog-box { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; width: min(640px, 100%); max-height: calc(100vh - 120px); overflow: auto; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
 .dialog-box h3 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--fg); margin: 0 0 10px; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .dialog-row { display: flex; gap: 8px; } .dialog-row input { flex: 1; }
-.dialog textarea { flex: 1; font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.dialog textarea { flex: 1; }
 .dialog-row + .dialog-row { margin-top: 8px; }
-.dialog input[type=text], .dialog select { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .diff { font-family: ui-monospace, monospace; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diff .del { color: var(--red); } .diff .add { color: var(--green); }
 .warn { color: var(--amber); }
