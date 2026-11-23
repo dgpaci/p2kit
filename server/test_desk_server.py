@@ -71,28 +71,58 @@ class FileActions(unittest.TestCase):
             self.p.act(kind='wp-status', target='WP-01', value='cancelled')
 
     def test_a_preview_applies_only_to_the_file_it_showed(self):
-        answer, _ = ds.run_action(self.p.home, {'project': self.p.root, 'kind': 'wp-horizon', 'target': 'WP-01', 'value': 'now'})
+        action = {'project': self.p.root, 'kind': 'wp-link', 'target': 'WP-01', 'field': 'branch', 'value': 'feature/1-x'}
+        answer, _ = ds.run_action(self.p.home, action)
         self.p.write('.pm/work-packages/WP-01.md', WP.format(status='completed') + '\nedited\n')
         with self.assertRaisesRegex(ds.ActionError, 'changed since the preview'):
-            ds.run_action(self.p.home, {'project': self.p.root, 'kind': 'wp-horizon', 'target': 'WP-01', 'value': 'now', 'confirm': answer['hash']})
-        self.assertNotIn('horizon', self.p.read('.pm/work-packages/WP-01.md'))
+            ds.run_action(self.p.home, {**action, 'confirm': answer['hash']})
+        self.assertNotIn('branch', self.p.read('.pm/work-packages/WP-01.md'))
 
-    def test_horizon_and_rank_are_added_before_the_closing_line_and_removed(self):
-        self.p.act(kind='wp-horizon', target='WP-01', value='next')
-        self.p.act(kind='wp-rank', target='WP-01', value=2)
-        text = self.p.read('.pm/work-packages/WP-01.md')
-        self.assertIn('issue: 498\nhorizon: next\nrank: 2\n---\n', text)
-        self.p.act(kind='wp-horizon', target='WP-01', value='')
-        self.assertNotIn('horizon', self.p.read('.pm/work-packages/WP-01.md'))
-        with self.assertRaisesRegex(ds.ActionError, 'now, next or later'):
-            self.p.act(kind='wp-horizon', target='WP-01', value='soon')
-        with self.assertRaisesRegex(ds.ActionError, 'number from 1'):
-            self.p.act(kind='wp-rank', target='WP-01', value='2')
+    def wps(self, *fronts):
+        """Work packages WP-01.. with the given extra frontmatter lines, all in progress."""
+        for n, front in enumerate(fronts, 1):
+            self.p.write(f'.pm/work-packages/WP-{n:02d}.md', f'---\nid: WP-{n:02d}\ntitle: T{n}\nstatus: in-progress\n{front}---\n\n# Body\nrank: 9\n')
 
-    def test_a_key_written_twice_is_refused(self):
-        self.p.write('.pm/work-packages/WP-01.md', '---\nid: WP-01\nhorizon: now\nhorizon: next\n---\n')
+    def test_a_drop_places_and_renumbers_the_group_in_one_preview(self):
+        self.wps('horizon: now\nrank: 1\n', 'horizon: now\nrank: 2\n', '')
+        result, preview = self.p.act(kind='wp-place', target='WP-03', horizon='now', beside='WP-02', side='above')
+        self.assertTrue(result['applied'])
+        self.assertEqual(preview['summary'], 'Place WP-03 in Now at rank 2, renumbering 1 more')
+        self.assertEqual([f['file'] for f in preview['files']], ['.pm/work-packages/WP-03.md', '.pm/work-packages/WP-02.md'])
+        self.assertEqual(preview['files'][1]['changes'], [{'line': 6, 'before': 'rank: 2', 'after': 'rank: 3'}])
+        self.assertIn('status: in-progress\nhorizon: now\nrank: 2\n---\n', self.p.read('.pm/work-packages/WP-03.md'))
+        self.assertIn('horizon: now\nrank: 3\n---\n\n# Body\nrank: 9\n', self.p.read('.pm/work-packages/WP-02.md'))
+        self.assertIn('rank: 1\n---\n', self.p.read('.pm/work-packages/WP-01.md'))
+
+    def test_a_drop_on_not_placed_clears_horizon_and_rank(self):
+        self.wps('horizon: later\nrank: 4\n')
+        _, preview = self.p.act(kind='wp-place', target='WP-01', horizon='')
+        self.assertEqual(preview['summary'], 'Take WP-01 off the roadmap')
+        self.assertEqual(self.p.read('.pm/work-packages/WP-01.md'), '---\nid: WP-01\ntitle: T1\nstatus: in-progress\n---\n\n# Body\nrank: 9\n')
+        with self.assertRaisesRegex(ds.ActionError, 'is not placed'):
+            self.p.act(kind='wp-place', target='WP-01', horizon='')
+
+    def test_a_drop_applies_only_to_the_roadmap_it_showed(self):
+        self.wps('horizon: now\nrank: 1\n', '', 'horizon: next\n')
+        action = {'project': self.p.root, 'kind': 'wp-place', 'target': 'WP-02', 'horizon': 'now'}
+        answer, _ = ds.run_action(self.p.home, action)
+        # A work package the drop does not write moved meanwhile: the order the preview showed is gone.
+        self.p.write('.pm/work-packages/WP-03.md', '---\nid: WP-03\nstatus: draft\nhorizon: now\nrank: 2\n---\n')
+        with self.assertRaisesRegex(ds.ActionError, 'changed since the preview'):
+            ds.run_action(self.p.home, {**action, 'confirm': answer['hash']})
+        self.assertNotIn('horizon', self.p.read('.pm/work-packages/WP-02.md'))
+
+    def test_a_drop_is_validated(self):
+        self.wps('horizon: now\nrank: 1\n', '')
+        for request, error in (({'horizon': 'soon'}, 'now, next or later'), ({'horizon': ['now']}, 'now, next or later'),
+                               ({'horizon': 'now', 'beside': 'WP-02'}, 'beside itself'), ({'horizon': 'now', 'beside': '../x'}, 'not a work package id'),
+                               ({'horizon': 'now', 'beside': 'WP-01', 'side': 'over'}, 'above or below'), ({'horizon': 'next', 'beside': 'WP-01', 'side': 'above'}, 'not in Next')):
+            with self.subTest(request):
+                with self.assertRaisesRegex(ds.ActionError, error):
+                    self.p.act(kind='wp-place', target='WP-02', **request)
+        self.p.write('.pm/work-packages/WP-02.md', '---\nid: WP-02\nstatus: draft\nhorizon: now\nhorizon: next\n---\n')
         with self.assertRaisesRegex(ds.ActionError, 'more than once'):
-            self.p.act(kind='wp-horizon', target='WP-01', value='later')
+            self.p.act(kind='wp-place', target='WP-02', horizon='later')
 
     def test_links_are_validated_and_quoted_within_the_subset(self):
         self.p.act(kind='wp-link', target='WP-01', field='milestone', value="l'anagrafica: soci")
@@ -126,10 +156,12 @@ class FileActions(unittest.TestCase):
 
     def test_only_registered_projects_and_known_work_packages(self):
         with self.assertRaisesRegex(ds.ActionError, 'not in projects.yaml'):
-            ds.run_action(self.p.home, {'project': self.p.home, 'kind': 'wp-horizon', 'target': 'WP-01', 'value': 'now'})
+            ds.run_action(self.p.home, {'project': self.p.home, 'kind': 'wp-place', 'target': 'WP-01', 'horizon': 'now'})
         for target in ('../x', 'WP-1', 'WP-09'):
             with self.assertRaises(ds.ActionError):
-                self.p.act(kind='wp-horizon', target=target, value='now')
+                self.p.act(kind='wp-place', target=target, horizon='now')
+            with self.assertRaises(ds.ActionError):
+                self.p.act(kind='wp-link', target=target, field='branch', value='x')
 
 
 def shared_cases():
@@ -157,6 +189,14 @@ class SharedCases(unittest.TestCase):
                     run = lambda: ds.set_key(case['text'], case['key'], case['value'])
                 elif case['op'] == 'status':
                     run = lambda: ds.set_wp_status(case['text'], case['id'], case['value'])
+                elif case['op'] == 'place':
+                    with self.subTest(case['name']):
+                        if 'error' in case:
+                            with self.assertRaisesRegex(ds.ActionError, case['error']):
+                                ds.place_wp(case['files'], case['target'], case['horizon'], case['beside'], case['side'])
+                        else:
+                            self.assertEqual(ds.place_wp(case['files'], case['target'], case['horizon'], case['beside'], case['side']), case['expect'])
+                    continue
                 else:
                     run = lambda: ds.set_note_status(case['text'], case['sha'], case['noteText'], case['value'])
                 if 'error' in case:
@@ -554,7 +594,7 @@ class Server(unittest.TestCase):
         self.assertEqual(self.request('GET', '/', Host='evil.example')[0], 403)
 
     def test_an_action_needs_host_origin_and_token(self):
-        action = {'project': self.p.root, 'kind': 'wp-horizon', 'target': 'WP-01', 'value': 'now'}
+        action = {'project': self.p.root, 'kind': 'wp-link', 'target': 'WP-01', 'field': 'branch', 'value': 'feature/1-x'}
         self.assertEqual(self.request('POST', '/action', action, Origin='https://evil.example')[0], 403)
         self.assertEqual(self.request('POST', '/action', action, Origin=None)[0], 403)
         self.assertEqual(self.request('POST', '/action', action, **{ds.TOKEN_HEADER: 'x'})[0], 403)
@@ -564,7 +604,7 @@ class Server(unittest.TestCase):
         self.assertEqual(status, 200)
         digest = json.loads(body)['hash']
         self.assertEqual(self.request('POST', '/action', {**action, 'confirm': digest})[0], 200)
-        self.assertIn('horizon: now', self.p.read('.pm/work-packages/WP-01.md'))
+        self.assertIn('branch: feature/1-x', self.p.read('.pm/work-packages/WP-01.md'))
         status, body = self.request('POST', '/action', {**action, 'confirm': digest})
         self.assertEqual(status, 409)
 

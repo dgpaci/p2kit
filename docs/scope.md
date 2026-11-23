@@ -36,7 +36,7 @@ the PM reads it before it is saved.
 |---|---|---|
 | Archive a work package | `status: completed` → `archived` | button, preview, confirm |
 | Mark a work package completed | `status:` → `completed` — a Board decision the PM states | button, explicit confirm |
-| Set horizon / rank | `horizon:`, `rank:` of a work package | button, preview, confirm |
+| Place a work package on the roadmap | `horizon:`, `rank:` of a work package, the ranks of its horizon when renumbered | drag and drop in the Work packages tab, preview of every file, confirm |
 | Close / reopen a commit note | `status:` of one note in `commit-notes.yaml` | button, preview, confirm |
 | Link an issue, milestone or branch | `issue:`, `milestone:`, `branch:` of a work package | button, preview, confirm |
 | Group issues and pull requests into a package | a forge milestone, and a new `WP-<nn>.md` | button, preview of the plan, confirm |

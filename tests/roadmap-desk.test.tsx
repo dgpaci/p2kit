@@ -55,6 +55,11 @@ test('the Work packages tab groups the work packages by horizon and the generate
   expect(script).toContain("['Not placed', p.workPackages.filter(w => !placed.has(w.id))]")
   expect(script).toContain(`" — run /pm-roadmap in the project's repo to place them"`)
   expect(script).not.toContain('${')
+  // Horizon and rank are set by drag and drop (issue #67): no select or rank input, one wp-place action.
+  expect(script).not.toContain("'wp-horizon'")
+  expect(script).not.toContain("'wp-rank'")
+  expect(script).toContain("{ kind: 'wp-place', target: item.id, horizon, beside, side }")
+  expect(script).toContain("draggable(p, tr, { kind: 'wp', ref: w.id, id: w.id, isPlaced:")
 
   // The pane, from a real read.
   mock.store(on)
@@ -65,7 +70,18 @@ test('the Work packages tab groups the work packages by horizon and the generate
   on('fs.exists', (_, e) => ({ value: e.path in FILES || e.path in DIRS }))
   on('fs.read', (_, e) => ({ value: FILES[e.path] ?? '' }))
   on('fs.list', (_, e) => ({ value: (DIRS[e.path] ?? []).map(name => ({ name, kind: 'file' as const, size: 0, mtimeMs: 0, isLink: false })) }))
-  on('fs.write', () => ({ value: undefined }))
+  const written: Record<string, string> = {}
+  on('fs.write', (_, e) => {
+    written[e.path] = e.text
+    return { value: undefined }
+  })
+  const asked: string[] = []
+  // $.ui.ask is a call of the AskUserQuestion tool: answered here with "Now".
+  on('tool.call', (_, e) => {
+    const questions = (e as unknown as { questions: { question: string }[] }).questions
+    asked.push(questions[0].question)
+    return { result: { questions, answers: { [questions[0].question]: 'Now' } } }
+  })
   on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   await $.command.run(RUN)
 
@@ -79,6 +95,10 @@ test('the Work packages tab groups the work packages by horizon and the generate
   expect(await ui.find({ type: 'Text', text: 'Next · 0' })).toBeFalsy()
   expect(await ui.find({ type: 'Button', key: 'move:WP-01' })).toBeTruthy()
   expect(await ui.find({ type: 'Button', key: 'move:WP-04', text: 'place WP-04' })).toBeTruthy()
+  // The pane places by the desk helper's rule: last in Now, after WP-02 (rank 1) and WP-01 (rank 2).
+  await ui.press({ key: 'move:WP-04' })
+  expect(asked.at(-1)).toContain('Move WP-04 WP-04 title (off the roadmap) to? It goes last there')
+  expect(written['/t/road/.pm/work-packages/WP-04.md']).toBe(wpText('WP-04', 'draft', 'horizon: now\nrank: 3\n'))
   await ui.press({ key: 'tab:documents' })
   expect(await ui.find({ type: 'Button', text: 'Roadmap · draft' })).toBeTruthy()
   expect(await ui.find({ type: 'Button', text: 'Roadmap (external) · draft' })).toBeTruthy()

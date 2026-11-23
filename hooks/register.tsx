@@ -4,7 +4,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import { openFile, openSession } from './actions'
 import { getOpenBlockers, renderBoard } from './board'
 import type { CommitNote, Light, MilestoneItem, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpDelivery, WpForge } from '../types'
-import { EditError, setFrontmatterKey, setNoteStatus, setWpStatus } from './edits'
+import { EditError, placeWp, setNoteStatus, setWpStatus } from './edits'
 import type { LineChange } from './edits'
 import { getFlowCell } from './flow'
 import { getBoardLanes } from './lanes'
@@ -173,18 +173,25 @@ async function editFromPane($: EngineInterface, path: string, summary: string, e
 
 const HORIZON_CHOICES = [['Now', 'now'], ['Next', 'next'], ['Later', 'later'], ['Off the roadmap', '']] as const
 
-/** Moves a work package to another horizon, or off the roadmap: the choice is the confirmation, the line is written only if unchanged. */
-async function moveFromPane($: EngineInterface, wp: WorkPackage): Promise<void> {
+/**
+ * Moves a work package last into another horizon, or off the roadmap, by the desk helper's rule (`placeWp`): the choice is the
+ * confirmation; the files are read after it and written at once.
+ */
+async function moveFromPane($: EngineInterface, p: Project, wp: WorkPackage): Promise<void> {
   const options = HORIZON_CHOICES.filter(([, value]) => value !== wp.horizon)
   const now = wp.horizon ? HORIZON_LABEL[wp.horizon as keyof typeof HORIZON_LABEL] : 'off the roadmap'
-  const answer = await $.ui.ask(`Move ${wp.id} ${wp.title} (${now}) to? It writes horizon: in its file; nothing is committed.`,
+  const answer = await $.ui.ask(`Move ${wp.id} ${wp.title} (${now}) to? It goes last there, writing horizon: and rank: in its file and renumbering the horizon when needed; nothing is committed.`,
     { options: options.map(([label]) => label), header: 'Roadmap' }).catch(() => '')
   const chosen = options.find(([label]) => label === answer)
   if (!chosen) return
   try {
-    const text = await $.fs.read(wp.path)
-    await $.fs.write(wp.path, setFrontmatterKey(text, 'horizon', chosen[1] || null).text)
-    $.ui.toast(`${wp.id}: ${chosen[0]}`)
+    const paths = new Map<string, string>()
+    for (const one of p.workPackages) if (!paths.has(one.id)) paths.set(one.id, one.path)
+    const files: Record<string, string> = {}
+    for (const [id, path] of paths) files[id] = await $.fs.read(path)
+    const placed = placeWp(files, wp.id, chosen[1])
+    for (const one of placed.files) await $.fs.write(paths.get(one.id)!, one.text)
+    $.ui.toast(`${placed.summary}: done`)
     await reload($, true)
   } catch (error) {
     $.ui.toast(`${wp.id}: ${error instanceof EditError ? error.message : String(error)}`)
@@ -525,7 +532,7 @@ export const register: Register = on => {
                   )}
                   {getWpEffortText(wp) && <Text dimColor>{getWpEffortText(wp)}</Text>}
                   {!['completed', 'archived', 'cancelled'].includes(wp.status) && (
-                    <Button key={`move:${wp.id}`} plain onPress={() => void moveFromPane($, wp)}>{placedIds.has(wp.id) ? 'move' : `place ${wp.id}`}</Button>
+                    <Button key={`move:${wp.id}`} plain onPress={() => void moveFromPane($, p, wp)}>{placedIds.has(wp.id) ? 'move' : `place ${wp.id}`}</Button>
                   )}
                 </Box>
               )),

@@ -59,7 +59,8 @@ internal notes on its commits (here an open blocker).
 
 ![Work theme](images/work-theme.png)
 
-**Work packages** grouped by roadmap horizon, with estimate, actual and deviation; **Metrics** gives
+**Work packages** grouped by roadmap horizon, with estimate, actual and deviation — drag one into
+another horizon, or above or below another, to place it; **Metrics** gives
 lead time, review and merge time and the weekly throughput.
 
 ![Work packages](images/work-packages.png)
