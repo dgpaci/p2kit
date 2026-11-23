@@ -71,10 +71,10 @@ lead time, review and merge time and the weekly throughput.
 ![Metrics](images/metrics.png)
 
 The other tabs: **Activity** (milestones, open issues and pull requests, with a selection bar to
-package or assign many at once), **Documents** (the `.pm/` products and the Daily Log, each kind
-of entry in its own colour and filterable by day, kind and text; a Markdown document opens as a
+package or assign many at once), **Documents** (the `.pm/` products; a Markdown document opens as a
 readable HTML page when the desk helper serves the page), **Registers** (risks with their response
-and Claude's verdict on it, approvals, problems, lessons, iterations; a high risk stays in *Needs
+and Claude's verdict on it, approvals, problems, lessons, iterations, then the Daily Log, each kind
+of entry in its own colour and filterable by day, kind and text; a high risk stays in *Needs
 attention* until its response is adequate and you confirm the closure).
 
 ## A task from assignment to merge

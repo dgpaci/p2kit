@@ -65,7 +65,7 @@ test('the Daily log tells its kinds apart and filters by day, kind and text, in 
 
   const ui = await $.ui.mount(PANE)
   await ui.press({ key: 'open:/t/logged' })
-  await ui.press({ key: 'tab:documents' })
+  await ui.press({ key: 'tab:registers' })
   expect((await ui.find({ type: 'Text', text: 'D-002 · decision · keep the old layout' }))?.props.color).toBe('cyan')
   expect((await ui.find({ type: 'Text', text: 'D-003 · action · book the room · done' }))?.props.color).toBe('yellow')
   expect((await ui.find({ type: 'Text', text: 'D-004 · problem · test server down' }))?.props.color).toBe('magenta')

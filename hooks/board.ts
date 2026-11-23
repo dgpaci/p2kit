@@ -925,17 +925,13 @@ function metrics(p) {
 function documents(p) {
   const own = p.documents.filter(d => !d.folder)
   const folders = [...new Set(p.documents.filter(d => d.folder).map(d => d.folder))]
-  const open = openLogActions(p).length
   return el('div', {},
     p.documents.length ? null : el('p', { className: 'dim', textContent: 'None yet.' }),
     own.length ? tableOf(['Document', 'Status', 'Version'], own.map(d => [docLink(d.path, d.title), d.status, d.version])) : null,
     // Every folder's File column has the same width, so the folders line up one under the other.
     ...folders.map(f => el('div', { className: 'doc-folder' },
       el('h3', { textContent: f }),
-      tableOf(['Document', 'File'], p.documents.filter(d => d.folder === f).map(d => [docLink(d.path, d.title), el('span', { className: 'dim mono', textContent: d.path.split('/').pop() })])))),
-    // The Daily Log closes the tab.
-    blockTitle('Daily log', open ? open + ' open actions' : ''),
-    dailyLog(p))
+      tableOf(['Document', 'File'], p.documents.filter(d => d.folder === f).map(d => [docLink(d.path, d.title), el('span', { className: 'dim mono', textContent: d.path.split('/').pop() })])))))
 }
 
 // The Lessons Log: the last retrospective, the actions open first, the lessons newest first.
@@ -1026,6 +1022,8 @@ const REGISTERS = [
     p => tableOf(['', 'Problem', 'Type', 'Priority', 'Status'], openFirst(p.issues).map(i => dimUnlessOpen(i.status, [i.id, i.title, i.type, i.priority, i.status])))],
   ['lessons', 'Lessons', p => p.actions.length + p.lessons.length + (p.lastRetro ? 1 : 0), p => openActions(p).length + ' open actions', '/pm-retro', lessons],
   ['iterations', 'Iterations', p => p.iterations.length, p => String(p.iterations.length), '/pm-iterate', iterations],
+  // The Daily Log closes the tab: the longest register, with filters of its own. Its open actions stay out of the tab count.
+  ['log', 'Daily log', p => logOf(p).length, p => openLogActions(p).length + ' open actions', '/pm-log', dailyLog],
 ]
 const registersCount = p => p.risks.filter(r => isOpen(r.status)).length + p.issues.filter(i => isOpen(i.status)).length + openActions(p).length
 function registers(p) {
@@ -1065,7 +1063,6 @@ function logDays(p, entries) {
       [d.id, logKind(d), logText(d), d.issue === null ? '' : issueLink(p, d.issue), d.owner, d.isOverdue ? el('span', { className: 'err', textContent: d.due }) : d.due, d.status])))))
 }
 function dailyLog(p) {
-  if (!logOf(p).length) return el('p', { className: 'dim', textContent: "No daily log yet: run /pm-log in the project's repo." })
   if (logFor !== p.path) { logFilter.day = ''; logFilter.kinds.clear(); logFilter.text = ''; logFor = p.path }
   const list = el('div', {})
   const count = el('span', { className: 'n' })
