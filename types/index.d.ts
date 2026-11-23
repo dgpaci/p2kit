@@ -35,7 +35,22 @@ export type WorkPackage = {
 // packages naming it, not cancelled, and `done` how many of them are completed or archived.
 export type Objective = { id: string; title: string; isMet: boolean; isDropped: boolean; wps: string[]; done: number }
 
-export type Risk = { id: string; title: string; probability: string; impact: string; status: string; owner: string; score: number }
+// `response` is the response type (reduce, accept, …), `responseActions` how the risk is actually handled; `verdict` is Claude's
+// assessment of those actions, 'adequate' or 'not-adequate' ('' when not assessed), with its one line of reasoning. A snapshot written by
+// older code has none of the four.
+export type Risk = {
+  id: string
+  title: string
+  probability: string
+  impact: string
+  status: string
+  owner: string
+  score: number
+  response?: string
+  responseActions?: string
+  verdict?: '' | 'adequate' | 'not-adequate'
+  verdictReason?: string
+}
 
 export type Issue = { id: string; title: string; type: string; priority: string; status: string }
 

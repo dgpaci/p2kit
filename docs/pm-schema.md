@@ -16,7 +16,7 @@ committed with the code. The skills write it; the project desk reads it.
   reports/<date>-<kind>.md  highlight, checkpoint, exception, end-stage, end-project reports
   presentations/WP-<nn>.md  presentation of a work package to its users and the Board (/pm-present), listed under Documents
   digests/<date>.md         weekly digests (/pm-digest), listed under Documents after the reports
-  registers/risks.yaml      Risk Register
+  registers/risks.yaml      Risk Register: response and Claude's verdict on it (/pm-risk)
   registers/issues.yaml     Issue Register
   registers/commit-notes.yaml  internal notes on the commits of work-package branches (/pm-note)
   registers/iterations.yaml timeboxed iterations of the stage (/pm-iterate)
@@ -451,10 +451,27 @@ risks:
     owner: Marco Bianchi
     status: open                  # open | closed
     response: reduce              # avoid | reduce | fallback | transfer | accept | share | exploit | enhance
+    response_actions: "sandbox keys requested twice a week, mock provider for the tests, go-live date with a week of slack"
+    verdict: adequate             # adequate | not-adequate — Claude's assessment of response_actions
+    verdict_reason: "covers the cause and cuts the impact; the probability stays with the provider"
 ```
 
 Score = probability × impact with low = 1, medium = 2, high = 3. The desk counts as **high** an
 open risk scoring 6 or more (high × medium, high × high).
+
+`response` is the response type; `response_actions` says how the risk is actually handled, the
+concrete actions taken, on one line (double quotes when it holds a `,` or a `'`). `verdict` and
+`verdict_reason` are Claude's assessment of those actions against the risk's cause, probability
+and impact — `adequate` or `not-adequate` (`not adequate` reads the same), with one line of
+reasoning — written by `/pm-risk` only after the user's OK, and cleared when the actions change.
+All four are optional: a risk without them has no response.
+
+A risk is **covered** when it has `response_actions` and `verdict: adequate`. The desk shows every
+open risk in Needs attention: red with `no response`, `response not assessed` or
+`response not adequate: <reason>` until covered, then plain with `response adequate: confirm the
+closure`. An adequate verdict never closes a risk: it stays `open`, and in Needs attention, until
+the user confirms the closure in chat and `/pm-risk` writes `status: closed`. The Risks section of
+the Registers tab shows the response and the verdict next to each risk.
 
 ### `registers/issues.yaml`
 

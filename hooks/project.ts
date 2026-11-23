@@ -214,6 +214,14 @@ function readRegister(name: string, raw: string | undefined, key: string, errors
   }
 }
 
+/** Claude's verdict on a risk's response: 'adequate' or 'not-adequate' (also read from `not adequate`); anything else goes to `errors`. */
+function readVerdict(risk: Doc, errors: string[]): '' | 'adequate' | 'not-adequate' {
+  const verdict = text(risk.verdict).trim().toLowerCase().replace(/[\s_]+/g, '-')
+  if (verdict === '' || verdict === 'adequate' || verdict === 'not-adequate') return verdict
+  errors.push(`risks.yaml: ${text(risk.id)} verdict '${text(risk.verdict)}' is neither adequate nor not-adequate`)
+  return ''
+}
+
 /** The iterations register, ascending number; an open entry or a work package unknown goes to `errors`. */
 function readIterations(raw: string | undefined, workPackages: WorkPackage[], errors: string[]): Iteration[] {
   const iterations: Iteration[] = readRegister('iterations.yaml', raw, 'iterations', errors).map(one => ({
@@ -338,6 +346,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     return {
       id: text(risk.id), title: text(risk.title), probability, impact,
       status: text(risk.status) || 'open', owner: text(risk.owner), score: getScore(probability, impact),
+      response: text(risk.response), responseActions: text(risk.response_actions), verdict: readVerdict(risk, errors), verdictReason: text(risk.verdict_reason),
     }
   })
   const issues: Issue[] = readRegister('issues.yaml', files.issues, 'issues', errors).map(issue => ({

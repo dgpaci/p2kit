@@ -28,7 +28,9 @@ writes only after the user's OK, and commits nothing.
      objective the work packages in `wps` with `done` of them completed; none when the list is
      empty. Ticking one is never this skill's job: when one looks met, say so in **Blockers and
      decisions for the Board**;
-   - the open high risks of `risks` (`score ≥ 6`), with owner;
+   - the open high risks of `risks` (`score ≥ 6`), with owner, `responseActions` and `verdict`
+     (`no response` when it has none); then the open risks of any score whose response is missing
+     or not adequate, in one line each;
    - the work packages of the current stage with status `completed` or `archived` — all of them: a work
      package carries no completion date, so the section says they are the stage's, not the
      period's — and the open ones of the stage with status and due date;

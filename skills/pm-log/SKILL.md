@@ -67,7 +67,9 @@ register or the forge only after a second OK for that one entry, and commits not
    meeting raised) out of the diary:
    - into the Issue Register `.pm/registers/issues.yaml` (`type: problem`, `priority` asked,
      `status: open`, `raised: <day>`, the next `I-<nnn>`) — or, for a risk, the Risk Register
-     `.pm/registers/risks.yaml` (probability, impact, owner asked; the next `R-<nnn>`);
+     `.pm/registers/risks.yaml` (probability, impact, owner asked; the next `R-<nnn>`; its
+     response and Claude's verdict on it as skills/pm-risk/SKILL.md steps 3–4 do, when the
+     meeting said how it is handled);
    - or into a forge issue, drafted and created exactly as skills/pm-issue/SKILL.md steps 3–5 do,
      with last line `Daily Log: <D-id> — <project code>`.
 
