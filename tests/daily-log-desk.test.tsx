@@ -26,7 +26,8 @@ const PANE = {
 const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 140 } } as const
 
 test('the desk shows a Daily log tab and the overdue actions, in the page and the pane', async ($, on) => {
-  // wf:contract: The Daily log is the last section of the Registers tab (board.ts REGISTERS, register.tsx registers), headed "Daily log · <n> open actions" (#75).
+  // wf:contract: The Daily log is the last section of the Registers tab (board.ts REGISTERS, register.tsx registers), headed "Daily log · <n> open actions" (#75);
+  // wf:contract: its open actions add to the Registers tab count.
   // wf:contract: Its body: a block per day, newest first, the entries in file order; with no log it is named on the "Empty: …" line with /pm-log.
   // wf:contract: Recap, page and pane: in Needs attention one red line per overdue action, "<id> <text> · <owner> · due <due>" (owner part only when set).
   // wf:contract: The page script still contains no "${"; the pane state shape becomes projects-15.
@@ -36,6 +37,7 @@ test('the desk shows a Daily log tab and the overdue actions, in the page and th
   const data = JSON.parse(page.slice(page.indexOf('<script type="application/json" id="data">') + 42, page.indexOf('</script>')))
   expect(data.projects[0].dailyLog).toEqual(logged.dailyLog)
   const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
+  expect(script).toContain("openActions(p).length + openLogActions(p).length\n")
   expect(script).toContain("['log', 'Daily log', p => logOf(p).length, p => openLogActions(p).length + ' open actions', '/pm-log', dailyLog],\n]")
   expect(script).toContain("...logOf(p).filter(d => d.isOverdue)")
   expect(script).not.toContain('${')
@@ -56,6 +58,7 @@ test('the desk shows a Daily log tab and the overdue actions, in the page and th
   const ui = await $.ui.mount(PANE)
   await ui.press({ key: 'open:/t/logged' })
   expect(await ui.find({ type: 'Text', text: 'D-002 send the price list · Marco Bianchi · due 2026-11-19' })).toBeTruthy()
+  expect(await ui.find({ type: 'Button', key: 'tab:registers', text: 'Registers 1' })).toBeTruthy()
   await ui.press({ key: 'tab:registers' })
   expect(await ui.find({ type: 'Text', text: 'Daily log · 1 open actions' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: '2026-11-18' })).toBeTruthy()

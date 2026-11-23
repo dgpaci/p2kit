@@ -551,7 +551,7 @@ export const register: Register = on => {
       {
         // Registers: one section per PRINCE2 register, the non-empty ones first; the empty ones share a line naming the skill that
         // starts each. The PRINCE2 issue register is called Problems here, next to the forge's issues.
-        id: 'registers', label: 'Registers', count: openRisks.length + openIssues.length + openActions.length,
+        id: 'registers', label: 'Registers', count: openRisks.length + openIssues.length + openActions.length + openLogCount,
         render: () => {
           const registers = [
             // Each risk on two lines: id, score and title, then its response and Claude's verdict, red while an open risk is not covered.
@@ -592,7 +592,7 @@ export const register: Register = on => {
             </Text>
           )
         }) },
-            // The Daily Log closes the tab, a block per day, newest first. Its open actions stay out of the tab count.
+            // The Daily Log closes the tab, a block per day, newest first.
             { id: 'log', label: 'Daily log', size: log.length, sub: `${openLogCount} open actions`, skill: '/pm-log', render: () => logDays.flatMap(day => [
           <Text bold>{day}</Text>,
           ...log.filter(one => one.date === day).map(one => (

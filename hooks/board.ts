@@ -1022,10 +1022,11 @@ const REGISTERS = [
     p => tableOf(['', 'Problem', 'Type', 'Priority', 'Status'], openFirst(p.issues).map(i => dimUnlessOpen(i.status, [i.id, i.title, i.type, i.priority, i.status])))],
   ['lessons', 'Lessons', p => p.actions.length + p.lessons.length + (p.lastRetro ? 1 : 0), p => openActions(p).length + ' open actions', '/pm-retro', lessons],
   ['iterations', 'Iterations', p => p.iterations.length, p => String(p.iterations.length), '/pm-iterate', iterations],
-  // The Daily Log closes the tab: the longest register, with filters of its own. Its open actions stay out of the tab count.
+  // The Daily Log closes the tab: the longest register, with filters of its own.
   ['log', 'Daily log', p => logOf(p).length, p => openLogActions(p).length + ' open actions', '/pm-log', dailyLog],
 ]
-const registersCount = p => p.risks.filter(r => isOpen(r.status)).length + p.issues.filter(i => isOpen(i.status)).length + openActions(p).length
+// The tab count: open risks, open problems, open actions of the Lessons and the Daily Log.
+const registersCount = p => p.risks.filter(r => isOpen(r.status)).length + p.issues.filter(i => isOpen(i.status)).length + openActions(p).length + openLogActions(p).length
 function registers(p) {
   const full = REGISTERS.filter(r => r[2](p))
   const empty = REGISTERS.filter(r => !r[2](p))

@@ -733,8 +733,8 @@ attention, once overdue. A project's form has eight tabs, in this order:
 - **Documents** — the `.pm/` products and the `documents` folders.
 - **Registers** — Risks (with response and verdict), Approvals, Problems (the PRINCE2 issue register, renamed next to the
   forge's issues), Lessons, Iterations, then the Daily log (filters by day, kind and text on the page); the empty ones
-  share one line naming the skill that starts each. Its count: open risks, open problems and open lesson actions — not
-  the Daily Log's open actions.
+  share one line naming the skill that starts each. Its count: open risks, open problems and the open actions of the
+  Lessons and the Daily Log.
 - **Metrics** — the flow of the last 30 and 90 days.
 
 ## The desk snapshot
