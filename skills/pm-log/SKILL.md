@@ -77,6 +77,6 @@ register or the forge only after a second OK for that one entry, and commits not
    else changed. No OK → the entry stays in the log only. A failed creation → report it and write
    nothing for that entry.
 8. Tell the user in a few lines what was written (entries by id, actions closed, what went to a
-   register or the forge) and that the desk shows them in the Daily log section of its Documents tab at the next refresh,
+   register or the forge) and that the desk shows them in the Daily log section of its Registers tab at the next refresh,
    with an open action past its due in Needs attention. Nothing is committed: `.pm/` is committed
    with the code, when the user decides.

@@ -541,30 +541,17 @@ export const register: Register = on => {
         },
       },
       {
-        // Documents, then the Daily Log.
         id: 'documents', label: 'Documents', count: p.documents.length,
-        render: () => [
-          ...(p.documents.length === 0 ? [<Text dimColor>None yet.</Text>] : p.documents.map(doc => (
-            <Button key={`doc:${doc.path}`} plain onPress={() => void openFile($, doc.path)}>
-              {doc.folder ? `${doc.folder} · ${doc.title}` : `${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
-            </Button>
-          ))),
-          <Text bold>{`Daily log${openLogCount ? ` · ${openLogCount} open actions` : ''}`}</Text>,
-          ...(log.length === 0 ? [<Text dimColor>No daily log yet: run /pm-log in the project's repo.</Text>] : logDays.flatMap(day => [
-            <Text bold>{day}</Text>,
-            ...log.filter(one => one.date === day).map(one => (
-              <Text color={one.isOverdue ? 'red' : LOG_KIND_COLORS[one.kind]} dimColor={one.status === 'done'} wrap="truncate-end">
-                {[one.id, one.kind, one.text, one.ref, one.register ? `→ ${one.register}` : '', one.issue === null ? '' : `#${one.issue}`, one.owner,
-                  one.due ? `due ${one.due}` : '', one.status].filter(Boolean).join(' · ')}
-              </Text>
-            )),
-          ])),
-        ],
+        render: () => p.documents.length === 0 ? <Text dimColor>None yet.</Text> : p.documents.map(doc => (
+          <Button key={`doc:${doc.path}`} plain onPress={() => void openFile($, doc.path)}>
+            {doc.folder ? `${doc.folder} · ${doc.title}` : `${doc.title} · ${doc.status}${doc.version ? ` v${doc.version}` : ''}`}
+          </Button>
+        )),
       },
       {
         // Registers: one section per PRINCE2 register, the non-empty ones first; the empty ones share a line naming the skill that
         // starts each. The PRINCE2 issue register is called Problems here, next to the forge's issues.
-        id: 'registers', label: 'Registers', count: openRisks.length + openIssues.length + openActions.length,
+        id: 'registers', label: 'Registers', count: openRisks.length + openIssues.length + openActions.length + openLogCount,
         render: () => {
           const registers = [
             // Each risk on two lines: id, score and title, then its response and Claude's verdict, red while an open risk is not covered.
@@ -605,6 +592,16 @@ export const register: Register = on => {
             </Text>
           )
         }) },
+            // The Daily Log closes the tab, a block per day, newest first.
+            { id: 'log', label: 'Daily log', size: log.length, sub: `${openLogCount} open actions`, skill: '/pm-log', render: () => logDays.flatMap(day => [
+          <Text bold>{day}</Text>,
+          ...log.filter(one => one.date === day).map(one => (
+            <Text color={one.isOverdue ? 'red' : LOG_KIND_COLORS[one.kind]} dimColor={one.status === 'done'} wrap="truncate-end">
+              {[one.id, one.kind, one.text, one.ref, one.register ? `→ ${one.register}` : '', one.issue === null ? '' : `#${one.issue}`, one.owner,
+                one.due ? `due ${one.due}` : '', one.status].filter(Boolean).join(' · ')}
+            </Text>
+          )),
+        ]) },
           ]
           const empty = registers.filter(one => !one.size)
           return [

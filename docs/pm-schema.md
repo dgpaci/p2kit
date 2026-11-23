@@ -593,7 +593,7 @@ entries:
   closed on the same day shows only as closed. The **last log** is the latest `date`.
 - Errors: a parse failure is one error `daily-log.yaml: <reason>` and the list stays empty.
 - The desk: one red line per overdue action in Needs attention (`<id> <text> · <owner> · due
-  <due>`), and a Daily log section closing the Documents tab, headed by the open actions: a block per day, newest
+  <due>`), and a Daily log section closing the Registers tab, headed by the open actions: a block per day, newest
   first, the entries in file order with kind and source, text and ref, issue, owner, due and
   status; an overdue due is red, a done action dimmed. Each kind has its colour (event plain,
   decision blue, action amber, problem purple, note green; in the pane cyan, yellow, magenta,
@@ -730,11 +730,11 @@ attention, once overdue. A project's form has eight tabs, in this order:
 - **Team** — the roles as chips on top, then one card per person.
 - **Work packages** — grouped Now / Next / Later / Not placed; estimate, actual and deviation
   only when some work package has them.
-- **Documents** — the `.pm/` products and the `documents` folders, then the Daily log (filters by
-  day, kind and text on the page).
+- **Documents** — the `.pm/` products and the `documents` folders.
 - **Registers** — Risks (with response and verdict), Approvals, Problems (the PRINCE2 issue register, renamed next to the
-  forge's issues), Lessons, Iterations; the empty ones share one line naming the skill that
-  starts each. Its count: open risks, open problems and open lesson actions.
+  forge's issues), Lessons, Iterations, then the Daily log (filters by day, kind and text on the page); the empty ones
+  share one line naming the skill that starts each. Its count: open risks, open problems and the open actions of the
+  Lessons and the Daily Log.
 - **Metrics** — the flow of the last 30 and 90 days.
 
 ## The desk snapshot
