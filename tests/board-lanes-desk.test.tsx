@@ -76,6 +76,12 @@ test('the browser page has a Board tab after Metrics, its count the Unplanned it
   expect(script).not.toContain('${')
   // A hand-built project without lanes still renders: the count reads them as empty.
   expect(script).toContain('const lanesOf = p => p.lanes || []')
+  // Issue #66: the board header is one flex row, the text shrinking and the larger New issue button kept on the right.
+  expect(script).toContain("el('div', { className: 'board-head' }")
+  expect(script).toContain("newIssueButton(p, '', 'New issue', 'btn-primary new-issue')")
+  expect(page).toContain('.board-head { display: flex;')
+  expect(page).toContain('.board-head p { flex: 1; min-width: 0;')
+  expect(page).toContain('.new-issue { flex-shrink: 0; margin-left: auto;')
 })
 
 const FILES: Record<string, string> = {

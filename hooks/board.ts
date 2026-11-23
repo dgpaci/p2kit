@@ -183,6 +183,9 @@ tr.checked td { background: color-mix(in srgb, var(--on) 8%, transparent); }
 .group-head:first-child { border-top: 0; }
 button.primary, button.btn-primary { background: var(--on); border-color: var(--on); color: #fff; font-weight: 600; }
 .act { font-size: 12px; padding: 1px 8px; margin-left: 6px; }
+.board-head { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.board-head p { flex: 1; min-width: 0; margin: 0; }
+.new-issue { flex-shrink: 0; margin-left: auto; font-size: 14px; padding: 6px 16px; white-space: nowrap; }
 .place { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
 .place select { min-width: 84px; }
 .place input { width: 60px; }
@@ -452,9 +455,9 @@ function issueDialog(p, wp) {
     buttons(closeButton('Cancel'), el('button', { className: 'primary', textContent: 'Preview', onclick: preview })))
   title.focus()
 }
-function newIssueButton(p, wp, label = 'New issue') {
+function newIssueButton(p, wp, label = 'New issue', className = 'act') {
   if (!server || p.pmRef) return null
-  return el('button', { className: 'act', textContent: label, title: 'create an issue' + (wp ? ' in ' + wp : ''), onclick: e => { e.stopPropagation(); issueDialog(p, wp) } })
+  return el('button', { className, textContent: label, title: 'create an issue' + (wp ? ' in ' + wp : ''), onclick: e => { e.stopPropagation(); issueDialog(p, wp) } })
 }
 // Assign or unassign one team member on every picked issue and pull request (the only assign control besides a drop on a member,
 // issue #58): one preview lists them all, with those left out. Only with the helper, and never on a project whose .pm/ is read from git.
@@ -1057,11 +1060,14 @@ function boardLane(p, l) {
   const w = l.wp && p.workPackages.find(x => x.id === l.wp)
   return w ? dropTarget(p, lane, x => wpRequest(p, x, w), w.id + ' ' + w.title) : lane
 }
+// The board header: the text on the left, the New issue button on the right of the same line at any width (issue #66).
+const boardHead = (p, text) => el('div', { className: 'board-head' }, el('p', { className: 'dim', textContent: text }),
+  newIssueButton(p, '', 'New issue', 'btn-primary new-issue'))
 function board(p) {
   const lanes = lanesOf(p)
-  if (lanes.length <= 1 && !unplannedCount(p)) return el('p', { className: 'dim' }, "No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo. ", newIssueButton(p, ''))
-  return el('div', {}, el('p', { className: 'dim' }, "Open items by work package: To do, In progress, In review; Done is the milestone's closed count. The tab count is the open items in no work package. " +
-    'An issue is in progress from its first commit, or once a pull request closes it; assigned alone it is still to do. ', newIssueButton(p, '')),
+  if (lanes.length <= 1 && !unplannedCount(p)) return boardHead(p, "No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo.")
+  return el('div', {}, boardHead(p, "Open items by work package: To do, In progress, In review; Done is the milestone's closed count. The tab count is the open items in no work package. " +
+    'An issue is in progress from its first commit, or once a pull request closes it; assigned alone it is still to do.'),
     ...lanes.map(l => boardLane(p, l)))
 }
 
