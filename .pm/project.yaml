@@ -44,3 +44,11 @@ approvals:
     by: Davide Paci
     date: 2026-11-18
     note: brief v0.2 with objectives checklist O-1..O-7 approved in chat, O-1 met
+  - decision: objectives-met
+    by: Davide Paci
+    date: 2026-11-23
+    note: O-2..O-6 met, delivered by WP-05, stated in chat; O-7 stays open, still to improve
+  - decision: approve-brief-v0.3
+    by: Davide Paci
+    date: 2026-11-23
+    note: O-7 redefined as an objectives review ending in a document the Board decides on, approved in chat

@@ -1,9 +1,9 @@
 ---
 title: Project Brief
 product: brief
-version: 0.2
+version: 0.3
 status: approved
-updated: 2026-11-18
+updated: 2026-11-23
 ---
 
 # Project Brief — p2kit
@@ -29,25 +29,29 @@ management products, not instead of them. No end date: continuous delivery, pace
 Ticked only after the Board states in chat that the objective is met.
 
 - [x] **O-1** Management products prepared by skills — brief, PID, stage plan, work packages,
-  Highlight Report, weekly digest, Daily Log, Lessons Log, roadmap. *Done when:* each has its
-  skill and appears on the desk. Delivered by WP-04, concluded 2026-11-18.
-- [ ] **O-2** Nothing gets lost — every open issue and pull request of the project is visible on
-  the desk, either inside a work package or in an "unpackaged" lane. *Done when:* on anaci the
-  certifications change requests show under the certifications block.
-- [ ] **O-3** Assign from the desk — issues and pull requests are assigned to a team member from
-  the board, also by dragging them onto the person. *Done when:* a change request is taken in
-  charge from the desk without opening the forge.
-- [ ] **O-4** Package from the desk — issues and milestones are attached to a work package by
+  Highlight Report, weekly digest, Daily Log, Lessons Log, roadmap. *Done when:* each has its skill
+  and appears on the desk. Delivered by WP-04, concluded 2026-11-18.
+- [x] **O-2** Nothing gets lost — every open issue and pull request of the project is visible on the
+  desk, either inside a work package or in an "unpackaged" lane. *Done when:* on anaci the
+  certifications change requests show under the certifications block. Delivered by WP-05, met
+  2026-11-23.
+- [x] **O-3** Assign from the desk — issues and pull requests are assigned to a team member from the
+  board, also by dragging them onto the person. *Done when:* a change request is taken in charge
+  from the desk without opening the forge. Delivered by WP-05, met 2026-11-23.
+- [x] **O-4** Package from the desk — issues and milestones are attached to a work package by
   dragging them onto it. *Done when:* the forge milestone and the WP file agree after the drag.
-- [ ] **O-5** Graphical progress — each work package shows as a flow (to do → in progress → in
-  review → done) with its issues, and what is missing is evident. *Done when:* the state of a
-  block like anaci's certifications is readable at a glance, without reading tables.
-- [ ] **O-6** Create and start from the desk — a new issue is drafted from the desk and the work on
-  it starts in a Claude session with one action. *Done when:* from need to running session
-  without leaving the desk except to confirm.
-- [ ] **O-7** Measured against the brief — the weekly digest reports, per objective, the work
-  packages serving it, their progress and what is missing. *Done when:* the digest has the
-  section and flags objectives no work package serves.
+  Delivered by WP-05, met 2026-11-23.
+- [x] **O-5** Graphical progress — each work package shows as a flow (to do → in progress → in
+  review → done) with its issues, and what is missing is evident. *Done when:* the state of a block
+  like anaci's certifications is readable at a glance, without reading tables. Delivered by WP-05,
+  met 2026-11-23.
+- [x] **O-6** Create and start from the desk — a new issue is drafted from the desk and the work on
+  it starts in a Claude session with one action. *Done when:* from need to running session without
+  leaving the desk except to confirm. Delivered by WP-05, met 2026-11-23.
+- [ ] **O-7** Measured against the brief — a review checks each objective against its *done when* on
+  a real project and ends in a document the Board decides on. *Done when:* the review document
+  records, per objective, the evidence, the proposed verdict and the Board's decision, and the
+  brief's checklist is ticked from it.
 
 ## Desired outcome
 A project manager runs a project from the desk without falling back to the forge's web UI or to
