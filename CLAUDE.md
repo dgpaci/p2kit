@@ -40,6 +40,11 @@ allowed.
 
 ## Mod notes (learned in the stage-delivery, desk-redesign, team-wip, planning-signals and flow-reporting workflows)
 
+- To watch board changes live, keep the dev desk running in a terminal:
+  `~/.claude/p2kit/dev-desk/run.sh <p2kit checkout or worktree> [port, default 8765]`, then open
+  `http://127.0.0.1:8765/` (`http://127.0.0.1:8764/refresh` re-reads the forge). It renders the board
+  outside any session and serves it through the tree's own `server/desk_server.py`, so drag & drop and
+  the actions work, on the real projects and forge; it restarts on a change under `hooks/` or `server/`.
 - `claude plugin test` runs every `*.test.ts(x)` under the folder but skips dot folders, so tests
   under `.phased/` and worktrees under `.claude/` never run by accident.
 - `$.http.fetch` takes no timeout. A hung call stalls every later refresh behind the `isLoading`
