@@ -199,9 +199,12 @@ button.primary, button.btn-primary { background: var(--on); border-color: var(--
 /* Drag and drop: rows and cards that can be dragged, the targets under a dragged item, the dock of targets. */
 .drag { cursor: grab; }
 .drop-over { outline: 2px solid var(--on); outline-offset: -2px; background: color-mix(in srgb, var(--on) 10%, transparent); }
-.dock { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; max-width: min(900px, calc(100vw - 32px)); padding: 10px 14px; border: 1px solid var(--on); border-radius: 10px; background: var(--bg); box-shadow: 0 8px 30px rgba(0,0,0,.25); font-size: 13px; }
+/* The dock never changes size under a drag: the target line has its own reserved height and adds nothing to the width (width 0,
+   min-width 100%), so naming a target never moves the chips away from the pointer, which would end the hover and loop. */
+.dock { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9; max-width: min(900px, calc(100vw - 32px)); padding: 10px 14px; border: 1px solid var(--on); border-radius: 10px; background: var(--bg); box-shadow: 0 8px 30px rgba(0,0,0,.25); font-size: 13px; }
+.dock-row { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
 .dock .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-left: 6px; }
-.dock-target { margin-left: auto; color: var(--on); }
+.dock-target { display: block; width: 0; min-width: 100%; min-height: 1.45em; margin-top: 6px; color: var(--on); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .drag-ghost { position: fixed; top: -100px; left: 0; padding: 2px 8px; border: 1px solid var(--on); border-radius: 999px; background: var(--bg); color: var(--fg); font: 12px ui-monospace, monospace; }
 .drop-chip { border: 1px dashed var(--line); border-radius: 999px; padding: 4px 10px; background: var(--chip); }
 /* Board tab: one swimlane per work package, four columns; cards carry data-number and lanes data-wp for drag and drop. */
@@ -528,12 +531,12 @@ function showDock(p, item) {
   const chip = (label, request) => dropTarget(p, el('span', { className: 'drop-chip', textContent: label }), request, label)
   const members = item.kind === 'milestone' ? [] : p.team.filter(m => assignRequest(item, m))
   const packages = p.workPackages.filter(w => wpRequest(p, item, w))
-  const dock = el('div', { className: 'dock', id: 'dock' }, el('strong', { textContent: 'Drop ' + item.ref + ' on' }),
+  const dock = el('div', { className: 'dock', id: 'dock' }, el('div', { className: 'dock-row' }, el('strong', { textContent: 'Drop ' + item.ref + ' on' }),
     members.length ? el('span', { className: 'label', textContent: 'Assign to' }) : null,
     ...members.map(m => chip(m.person, x => assignRequest(x, m))),
     packages.length ? el('span', { className: 'label', textContent: item.kind === 'milestone' ? 'Link to' : 'Attach to' }) : null,
     ...packages.map(w => chip(w.id + ' ' + w.title, x => wpRequest(p, x, w))),
-    members.length || packages.length ? null : el('span', { className: 'dim', textContent: 'no member or work package accepts it' }),
+    members.length || packages.length ? null : el('span', { className: 'dim', textContent: 'no member or work package accepts it' })),
     el('strong', { className: 'dock-target', id: 'dock-target' }))
   document.body.append(dock)
 }
