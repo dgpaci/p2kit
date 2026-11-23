@@ -15,6 +15,7 @@ Each write also stamps ~/.claude/p2kit/desk-changed.json, so every session reads
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -52,7 +53,10 @@ SPECIAL = re.compile(r'^([-+.\d]+|true|false|null|yes|no)$', re.I)
 REF = re.compile(r'^(PR )?#(\d+)$')
 # A status moves only along these edges: completing is the PM stating the Board's decision.
 STATUS_FROM = {'completed': ('authorized', 'in-progress'), 'archived': ('completed',)}
-HORIZONS = ('now', 'next', 'later', '')
+HORIZON_LABEL = {'now': 'Now', 'next': 'Next', 'later': 'Later'}
+CLOSED = ('completed', 'archived', 'cancelled')
+RANK = re.compile(r'^\d+(\.\d+)?$')
+MAX_RANK = 999
 NOTE_STATUS = ('open', 'closed')
 LINK_KEYS = ('issue', 'milestone', 'branch')
 
@@ -168,6 +172,86 @@ def set_note_status(text, sha, note_text, status):
     after = re.sub(r'\bstatus:\s*(open|closed)\b', 'status: ' + status, line, count=1)
     lines[index] = after
     return ''.join(lines), {'line': index + 1, 'before': line.rstrip('\n'), 'after': after.rstrip('\n')}
+
+
+def place_fields(text):
+    """Status, horizon and rank of a work package as the desk reads them: a horizon or a rank it does not take reads as none."""
+    horizon = read_key(text, 'horizon') or ''
+    rank = read_key(text, 'rank')
+    return read_key(text, 'status') or 'draft', horizon if horizon in HORIZON_LABEL else '', float(rank) if rank and RANK.match(rank) else None
+
+
+def place_wp(files, target, horizon, beside=None, side=None):
+    """Places an open work package in a horizon, above or below `beside` or last; horizon '' takes it off the roadmap.
+
+    files: {id: text} of every work package. The target keeps its rank when it fits between its new neighbours, else takes
+    the first free one between them; a group with no room, a tie or a work package with no rank is renumbered 1..n.
+    Returns {summary, files: [{id, text, changes}]}, the target first; refuses a move that changes nothing.
+    """
+    if not isinstance(horizon, str) or horizon not in HORIZON_LABEL and horizon != '':
+        raise ActionError('horizon is now, next or later')
+    if target not in files:
+        raise ActionError(f'{target} not found')
+    fields = {}
+    for wp, text in files.items():
+        try:
+            fields[wp] = place_fields(text)
+        except ActionError:
+            if wp == target:
+                raise
+    status, current, rank = fields[target]
+    if status in CLOSED:
+        raise ActionError(f'{target} is {status}: only an open work package is placed')
+    edits = {target: []}
+    if not horizon:
+        edits[target] = [(key, None) for key in ('horizon', 'rank') if read_key(files[target], key) is not None]
+        if not edits[target]:
+            raise ActionError(f'{target} is not placed')
+        summary = f'Take {target} off the roadmap'
+    else:
+        label = HORIZON_LABEL[horizon]
+        group = sorted((wp for wp, (s, h, _) in fields.items() if wp != target and s not in CLOSED and h == horizon),
+                       key=lambda wp: (math.inf if fields[wp][2] is None else fields[wp][2], wp))
+        if beside is None:
+            index = len(group)
+        elif beside == target:
+            raise ActionError('a work package is not placed beside itself')
+        elif beside not in group:
+            raise ActionError(f'{beside} is not in {label}')
+        elif side not in ('above', 'below'):
+            raise ActionError('a work package goes above or below another one')
+        else:
+            index = group.index(beside) + (side == 'below')
+        ranks = [fields[wp][2] for wp in group]
+        low = ranks[index - 1] if index else 0
+        high = ranks[index] if index < len(group) else MAX_RANK + 1
+        ranked = None not in ranks and all(a < b for a, b in zip(ranks, ranks[1:]))
+        if ranked and rank is not None and low < rank < high:
+            ranking = {target: rank}
+        elif ranked and math.floor(low) + 1 < high:
+            ranking = {target: math.floor(low) + 1}
+        else:
+            ranking = {wp: n for n, wp in enumerate(group[:index] + [target] + group[index:], 1)}
+        if current != horizon:
+            edits[target].append(('horizon', horizon))
+        if ranking[target] != rank:
+            edits[target].append(('rank', str(ranking[target])))
+        for wp in group:
+            if wp in ranking and ranking[wp] != fields[wp][2]:
+                edits[wp] = [('rank', str(ranking[wp]))]
+        more = len(edits) - 1
+        shown = int(ranking[target]) if ranking[target] == int(ranking[target]) else ranking[target]
+        summary = f'Place {target} in {label} at rank {shown}' + (f', renumbering {more} more' if more else '')
+    if not any(edits.values()):
+        raise ActionError(f'{target} is already there')
+    out = []
+    for wp, keys in edits.items():
+        text, changes = files[wp], []
+        for key, rendered in keys:
+            text, change = set_key(text, key, rendered)
+            changes.append(change)
+        out.append({'id': wp, 'text': text, 'changes': changes})
+    return {'summary': summary, 'files': out}
 
 
 # ---------------------------------------------------------------- projects
@@ -297,16 +381,6 @@ def plan_file_action(root, request):
                 raise ActionError('a work package is set completed or archived here')
             new_text, change = set_wp_status(text, target, value)
             summary = f'Set {target} {value}'
-        elif kind == 'wp-horizon':
-            if value not in HORIZONS:
-                raise ActionError('horizon is now, next or later')
-            new_text, change = set_key(text, 'horizon', value or None)
-            summary = f'Place {target} in {value.capitalize()}' if value else f'Take {target} off the roadmap'
-        elif kind == 'wp-rank':
-            if value not in ('', None) and not (isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 999):
-                raise ActionError('rank is a number from 1')
-            new_text, change = set_key(text, 'rank', None if value in ('', None) else str(value))
-            summary = f'Rank {target} {value}' if value not in ('', None) else f'Drop the rank of {target}'
         elif kind == 'wp-link':
             field = request.get('field')
             if field not in LINK_KEYS:
@@ -332,6 +406,42 @@ def plan_file_action(root, request):
         'file': os.path.relpath(path, root), 'fileHash': file_hash(text), 'changes': [change],
     }
     return preview, lambda: write_text(path, new_text)
+
+
+def work_package_files(root):
+    """{id: (path, text)} of the project's work packages: the id is the frontmatter's, else the file name's, as the desk reads it."""
+    folder = os.path.join(root, '.pm', 'work-packages')
+    found = {}
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        if not name.endswith('.md'):
+            continue
+        path = os.path.join(folder, name)
+        text = read_text(path)
+        try:
+            wp = read_key(text, 'id') or name[:-3]
+        except ActionError:
+            wp = name[:-3]
+        found.setdefault(wp, (path, text))
+    return found
+
+
+def plan_place(root, request):
+    """The preview of a drop in the Work packages tab: every file it changes; the hash covers every work package read."""
+    target = request.get('target')
+    if not isinstance(target, str) or not WP_ID.match(target):
+        raise ActionError('not a work package id')
+    beside = request.get('beside')
+    if beside is not None and (not isinstance(beside, str) or not WP_ID.match(beside)):
+        raise ActionError('not a work package id')
+    found = work_package_files(root)
+    placed = place_wp({wp: text for wp, (_, text) in found.items()}, target, request.get('horizon'), beside, request.get('side'))
+    preview = {
+        'kind': 'wp-place', 'project': root, 'summary': placed['summary'],
+        'roadmapHash': file_hash(''.join(wp + text for wp, (_, text) in sorted(found.items()))),
+        'files': [{'file': os.path.relpath(found[f['id']][0], root), 'fileHash': file_hash(found[f['id']][1]), 'changes': f['changes']}
+                  for f in placed['files']],
+    }
+    return preview, lambda: [write_text(found[f['id']][0], f['text']) for f in placed['files']]
 
 
 def write_text(path, text):
@@ -759,6 +869,9 @@ def run_action(home, request, forge=None):
     elif request.get('kind') == 'package':
         preview, forge, existing = plan_package(root, home, request, forge)
         apply = lambda: apply_package(root, preview, forge, existing, request.get('move') or [])
+    elif request.get('kind') == 'wp-place':
+        preview, write = plan_place(root, request)
+        apply = lambda: (write(), ['written'])[1]
     else:
         preview, write = plan_file_action(root, request)
         apply = lambda: (write(), ['written'])[1]

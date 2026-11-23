@@ -1,5 +1,5 @@
 // One-line edits of .pm/ files, as the pane applies them: the same rules and messages as the desk helper
-// (server/desk_server.py `set_key`, `set_note_status`), checked by both suites on server/edit-cases.mjs.
+// (server/desk_server.py `set_key`, `set_note_status`, `place_wp`), checked by both suites on server/edit-cases.mjs.
 
 export class EditError extends Error {}
 
@@ -88,4 +88,83 @@ export function setWpStatus(text: string, id: string, value: 'completed' | 'arch
   const status = readFrontmatterKey(text, 'status')
   if (!STATUS_FROM[value].includes(status ?? '')) throw new EditError(`${id} is ${status}: only ${STATUS_FROM[value].join(' or ')} becomes ${value}`)
   return setFrontmatterKey(text, 'status', value)
+}
+
+const HORIZON_LABEL: Record<string, string> = { now: 'Now', next: 'Next', later: 'Later' }
+const CLOSED = ['completed', 'archived', 'cancelled']
+const MAX_RANK = 999
+
+export type PlaceEdit = { id: string; text: string; changes: Omit<LineChange, 'text'>[] }
+
+/** Status, horizon and rank of a work package as the desk reads them: a horizon or a rank it does not take reads as none. */
+function getPlaceFields(text: string): { status: string; horizon: string; rank: number | null } {
+  const horizon = readFrontmatterKey(text, 'horizon') ?? ''
+  const rank = readFrontmatterKey(text, 'rank')
+  return { status: readFrontmatterKey(text, 'status') || 'draft', horizon: horizon in HORIZON_LABEL ? horizon : '', rank: rank && /^\d+(\.\d+)?$/.test(rank) ? Number(rank) : null }
+}
+
+/**
+ * Places an open work package in a horizon, above or below `beside` or last; horizon '' takes it off the roadmap (the desk
+ * helper's `place_wp`). files: id → text of every work package. The target keeps its rank when it fits between its new
+ * neighbours, else takes the first free one between them; a group with no room, a tie or a work package with no rank is
+ * renumbered 1..n. The target's file comes first; a move that changes nothing is refused.
+ */
+export function placeWp(files: Record<string, string>, target: string, horizon: string, beside: string | null = null, side: string | null = null): { summary: string; files: PlaceEdit[] } {
+  if (!(horizon in HORIZON_LABEL) && horizon !== '') throw new EditError('horizon is now, next or later')
+  if (!(target in files)) throw new EditError(`${target} not found`)
+  const fields: Record<string, ReturnType<typeof getPlaceFields>> = {}
+  for (const [id, text] of Object.entries(files)) {
+    try {
+      fields[id] = getPlaceFields(text)
+    } catch (error) {
+      if (id === target || !(error instanceof EditError)) throw error
+    }
+  }
+  const { status, horizon: current, rank } = fields[target]
+  if (CLOSED.includes(status)) throw new EditError(`${target} is ${status}: only an open work package is placed`)
+  const edits = new Map<string, [string, string | null][]>([[target, []]])
+  let summary: string
+  if (!horizon) {
+    edits.set(target, ['horizon', 'rank'].filter(key => readFrontmatterKey(files[target], key) !== null).map(key => [key, null]))
+    if (!edits.get(target)!.length) throw new EditError(`${target} is not placed`)
+    summary = `Take ${target} off the roadmap`
+  } else {
+    const label = HORIZON_LABEL[horizon]
+    const rankOf = (id: string) => fields[id].rank ?? Infinity
+    const group = Object.keys(fields).filter(id => id !== target && !CLOSED.includes(fields[id].status) && fields[id].horizon === horizon)
+      .sort((a, b) => rankOf(a) - rankOf(b) || (a < b ? -1 : a > b ? 1 : 0))
+    let index = group.length
+    if (beside !== null) {
+      if (beside === target) throw new EditError('a work package is not placed beside itself')
+      if (!group.includes(beside)) throw new EditError(`${beside} is not in ${label}`)
+      if (side !== 'above' && side !== 'below') throw new EditError('a work package goes above or below another one')
+      index = group.indexOf(beside) + (side === 'below' ? 1 : 0)
+    }
+    const ranks = group.map(id => fields[id].rank)
+    const low = index ? ranks[index - 1]! : 0
+    const high = index < group.length ? ranks[index]! : MAX_RANK + 1
+    const isRanked = ranks.every((r, i) => r !== null && (i === 0 || ranks[i - 1]! < r))
+    const ranking = new Map<string, number>()
+    if (isRanked && rank !== null && low < rank && rank < high) ranking.set(target, rank)
+    else if (isRanked && Math.floor(low) + 1 < high) ranking.set(target, Math.floor(low) + 1)
+    else [...group.slice(0, index), target, ...group.slice(index)].forEach((id, n) => ranking.set(id, n + 1))
+    if (current !== horizon) edits.get(target)!.push(['horizon', horizon])
+    if (ranking.get(target) !== rank) edits.get(target)!.push(['rank', String(ranking.get(target))])
+    for (const id of group) if (ranking.has(id) && ranking.get(id) !== fields[id].rank) edits.set(id, [['rank', String(ranking.get(id))]])
+    const more = edits.size - 1
+    summary = `Place ${target} in ${label} at rank ${ranking.get(target)}` + (more ? `, renumbering ${more} more` : '')
+  }
+  if (![...edits.values()].some(keys => keys.length)) throw new EditError(`${target} is already there`)
+  return {
+    summary,
+    files: [...edits].map(([id, keys]) => {
+      let text = files[id]
+      const changes = keys.map(([key, rendered]) => {
+        const { text: next, ...change } = setFrontmatterKey(text, key, rendered)
+        text = next
+        return change
+      })
+      return { id, text, changes }
+    }),
+  }
 }

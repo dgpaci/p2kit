@@ -186,9 +186,6 @@ button.primary, button.btn-primary { background: var(--on); border-color: var(--
 .board-head { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
 .board-head p { flex: 1; min-width: 0; margin: 0; }
 .new-issue { flex-shrink: 0; margin-left: auto; font-size: 14px; padding: 6px 16px; white-space: nowrap; }
-.place { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
-.place select { min-width: 84px; }
-.place input { width: 60px; }
 .dialog { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 60px 16px; }
 .dialog-box { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; width: min(640px, 100%); max-height: calc(100vh - 120px); overflow: auto; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
 .dialog-box h3 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--fg); margin: 0 0 10px; }
@@ -202,6 +199,8 @@ button.primary, button.btn-primary { background: var(--on); border-color: var(--
 /* Drag and drop: rows and cards that can be dragged, the targets under a dragged item, the dock of targets. */
 .drag { cursor: grab; }
 .drop-over { outline: 2px solid var(--on); outline-offset: -2px; background: color-mix(in srgb, var(--on) 10%, transparent); }
+/* A work package row under a dragged one: the line it goes in at, above or below the row. */
+.drop-above > td { box-shadow: inset 0 3px 0 var(--on); } .drop-below > td { box-shadow: inset 0 -3px 0 var(--on); }
 /* The dock never changes size under a drag: the target line has its own reserved height and adds nothing to the width (width 0,
    min-width 100%), so naming a target never moves the chips away from the pointer, which would end the hover and loop. */
 .dock { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9; max-width: min(900px, calc(100vw - 32px)); padding: 10px 14px; border: 1px solid var(--on); border-radius: 10px; background: var(--bg); box-shadow: 0 8px 30px rgba(0,0,0,.25); font-size: 13px; }
@@ -336,6 +335,10 @@ function actionButton(label, run, fallback) {
   if (server) return el('button', { className: 'act', textContent: label, onclick: e => { e.stopPropagation(); run() } })
   return fallback ? el('a', { className: 'btn act', href: fallback, textContent: label, title: 'opens a Claude session: the desk helper is not running', onclick: e => e.stopPropagation() }) : null
 }
+// One file of a preview: its path, then each line before and after.
+const fileChanges = f => [el('p', { className: 'dim mono', textContent: f.file }),
+  ...f.changes.map(c => el('div', { className: 'diff' }, el('div', { className: 'dim', textContent: 'line ' + c.line }),
+    c.before ? el('div', { className: 'del', textContent: '- ' + c.before }) : null, c.after ? el('div', { className: 'add', textContent: '+ ' + c.after }) : null))]
 // What an action will change: the line before and after, or the plan of a package with the items to move picked here.
 function previewOf(preview, extra) {
   if (preview.kind === 'issue-milestone') return [
@@ -363,9 +366,9 @@ function previewOf(preview, extra) {
     el('div', { className: 'diff' }, ...preview.items.map(i => el('div', {}, el('strong', { textContent: i.ref + ' ' }), i.title,
       el('div', { className: 'del', textContent: '- assignees: ' + (i.before.join(', ') || 'none') }), el('div', { className: 'add', textContent: '+ assignees: ' + (i.after.join(', ') || 'none') })))),
     preview.skipped.length ? el('div', {}, el('h3', { textContent: 'Left out' }), ...preview.skipped.map(i => el('div', { className: 'dim', textContent: i.ref + ' · ' + i.reason }))) : null]
-  if (preview.kind !== 'package') return [el('p', { className: 'dim mono', textContent: preview.file }),
-    ...preview.changes.map(c => el('div', { className: 'diff' }, el('div', { className: 'dim', textContent: 'line ' + c.line }),
-      c.before ? el('div', { className: 'del', textContent: '- ' + c.before }) : null, c.after ? el('div', { className: 'add', textContent: '+ ' + c.after }) : null))]
+  // A drop in the Work packages tab writes one file or, renumbering the horizon, several.
+  if (preview.kind === 'wp-place') return preview.files.flatMap(fileChanges)
+  if (preview.kind !== 'package') return fileChanges(preview)
   const m = preview.milestone
   extra.move = []
   const item = i => el('div', { textContent: i.ref + ' ' + i.title })
@@ -428,15 +431,6 @@ function noteAction(n) {
   return actionButton(value === 'closed' ? 'Close' : 'Reopen', () => act(p, { kind: 'note-status', target: { sha: n.sha, text: n.text }, value }),
     skillLink(p, 'pm-note', (value === 'closed' ? 'close' : 'reopen') + ' the note on ' + n.sha + ': ' + n.text))
 }
-// Horizon and rank of a work package, each change previewed; only with the helper.
-function placeControls(p, w) {
-  if (!server) return null
-  const horizon = el('select', { title: 'horizon', onchange: () => act(p, { kind: 'wp-horizon', target: w.id, value: horizon.value }) },
-    ...[['', '—'], ['now', 'Now'], ['next', 'Next'], ['later', 'Later']].map(([v, l]) => el('option', { value: v, textContent: l, selected: w.horizon === v })))
-  const rank = el('input', { type: 'number', min: 1, title: 'rank', value: w.rank === null ? '' : String(w.rank),
-    onchange: () => act(p, { kind: 'wp-rank', target: w.id, value: rank.value === '' ? '' : Number(rank.value) }) })
-  return el('span', { className: 'place' }, horizon, rank)
-}
 // A new issue on the project's forge, optionally in a work package's milestone and assigned to a team member: the helper previews
 // it and creates it on Confirm. Without the helper, or for the readiness headings, the pm-issue skill drafts it in a session.
 // Starting the work is the developer's move, from their forge desk's Solve.
@@ -489,16 +483,30 @@ function packageDialog(p, refs) {
 // (no per-row select, issue #57), a checked group goes through Create package. An issue or pull request dropped on a
 // member is assigned to them, on a work package attached to its milestone; a milestone dropped on a work package is linked to it.
 // While a drag is on, a dock lists the members and work packages that accept it, from any tab; Board lanes and Team members
-// accept a drop too. Only with the helper, and never on a project whose .pm/ is read from git. dragging holds the reload.
+// accept a drop too. An open work package dragged in the Work packages tab is placed: dropped on a horizon group (or its dock
+// chip) it goes last there, on Not placed it leaves the roadmap, above or below a row it takes that place (issue #67).
+// Only with the helper, and never on a project whose .pm/ is read from git. dragging holds the reload.
 let dragging = null
 const loginsOf = assignees => assignees ? assignees.map(a => (a.login || a).toLowerCase()) : null
 // The request a drop of item on a member or a work package makes; null when that target does not accept it.
 function assignRequest(item, m) {
-  if (item.kind === 'milestone' || !m.login || (item.logins && item.logins.includes(m.login.toLowerCase()))) return null
+  if (item.kind === 'milestone' || item.kind === 'wp' || !m.login || (item.logins && item.logins.includes(m.login.toLowerCase()))) return null
   return { kind: 'assign', number: item.number, login: m.login, op: 'add' }
 }
+// The request a drop of a work package makes in a horizon ('' for Not placed), above or below the row beside or last; null
+// when it would leave the roadmap as it is.
+function placeRequest(p, item, horizon, beside, side) {
+  if (item.kind !== 'wp' || beside === item.id) return null
+  if (!horizon) return item.isPlaced ? { kind: 'wp-place', target: item.id, horizon: '' } : null
+  const order = (p.roadmap && p.roadmap[horizon]) || []
+  const others = order.filter(id => id !== item.id)
+  const index = beside ? others.indexOf(beside) + (side === 'below' ? 1 : 0) : others.length
+  if (order.indexOf(item.id) === index) return null
+  return beside ? { kind: 'wp-place', target: item.id, horizon, beside, side } : { kind: 'wp-place', target: item.id, horizon }
+}
+const placeText = r => (r.horizon ? HORIZONS.find(h => h[0] === r.horizon)[1] : 'Not placed') + (r.beside ? ', ' + r.side + ' ' + r.beside : r.horizon ? ', last' : '')
 function wpRequest(p, item, w) {
-  if (['archived', 'cancelled'].includes(w.status)) return null
+  if (item.kind === 'wp' || ['archived', 'cancelled'].includes(w.status)) return null
   const milestone = w.delivery ? w.delivery.milestone : ''
   if (item.kind === 'milestone') return milestone === item.title ? null : { kind: 'wp-link', target: w.id, field: 'milestone', value: item.title }
   if (!milestone) return w.title && w.status !== 'completed' ? { kind: 'issue-milestone', number: item.number, wp: w.id } : null
@@ -508,25 +516,34 @@ function endDrag() {
   dragging = null
   const dock = document.getElementById('dock')
   if (dock) dock.remove()
-  document.querySelectorAll('.drop-over').forEach(n => n.classList.remove('drop-over'))
+  document.querySelectorAll('.drop-over').forEach(unmark)
 }
+const unmark = n => n.classList.remove('drop-over', 'drop-above', 'drop-below')
 // The dock names the target under the pointer: the dragged image may cover it.
 const showTarget = text => { const shown = document.getElementById('dock-target'); if (shown) shown.textContent = text }
 // A drop target: highlighted, and named in the dock, while a dragged item it accepts is over it; the drop opens the preview
-// of request(item).
+// of request(item, event). A target inside another one (a work package row in its horizon group) is the only one highlighted;
+// one that stops accepting under the pointer (a row over itself) lets go of its highlight.
 function dropTarget(p, node, request, label) {
   node.addEventListener('dragover', e => {
-    const wanted = dragging && request(dragging)
-    if (!wanted) return
+    const wanted = dragging && request(dragging, e)
+    if (!wanted) {
+      if (node.classList.contains('drop-over')) { unmark(node); showTarget('') }
+      return
+    }
     e.preventDefault()
     e.stopPropagation()
     e.dataTransfer.dropEffect = 'link'
+    document.querySelectorAll('.drop-over').forEach(n => { if (n !== node) unmark(n) })
     node.classList.add('drop-over')
-    showTarget('→ ' + (wanted.kind === 'assign' ? 'assign to ' : wanted.kind === 'wp-link' ? 'link to ' : 'attach to ') + label)
+    node.classList.toggle('drop-above', wanted.side === 'above')
+    node.classList.toggle('drop-below', wanted.side === 'below')
+    showTarget('→ ' + (wanted.kind === 'wp-place' ? 'place in ' + placeText(wanted)
+      : (wanted.kind === 'assign' ? 'assign to ' : wanted.kind === 'wp-link' ? 'link to ' : 'attach to ') + label))
   })
-  node.addEventListener('dragleave', e => { if (!node.contains(e.relatedTarget)) { node.classList.remove('drop-over'); showTarget('') } })
+  node.addEventListener('dragleave', e => { if (!node.contains(e.relatedTarget)) { unmark(node); showTarget('') } })
   node.addEventListener('drop', e => {
-    const wanted = dragging && request(dragging)
+    const wanted = dragging && request(dragging, e)
     endDrag()
     if (!wanted) return
     e.preventDefault()
@@ -539,16 +556,21 @@ function showDock(p, item) {
   const chip = (label, request) => dropTarget(p, el('span', { className: 'drop-chip', textContent: label }), request, label)
   const members = item.kind === 'milestone' ? [] : p.team.filter(m => assignRequest(item, m))
   const packages = p.workPackages.filter(w => wpRequest(p, item, w))
+  // A work package goes last in a horizon from its chip: the only way into a horizon with no work package, which shows no group.
+  const places = item.kind === 'wp' ? HORIZONS.concat([['', 'Not placed']]).filter(([key]) => placeRequest(p, item, key)) : []
   const dock = el('div', { className: 'dock', id: 'dock' }, el('div', { className: 'dock-row' }, el('strong', { textContent: 'Drop ' + item.ref + ' on' }),
     members.length ? el('span', { className: 'label', textContent: 'Assign to' }) : null,
     ...members.map(m => chip(m.person, x => assignRequest(x, m))),
     packages.length ? el('span', { className: 'label', textContent: item.kind === 'milestone' ? 'Link to' : 'Attach to' }) : null,
     ...packages.map(w => chip(w.id + ' ' + w.title, x => wpRequest(p, x, w))),
-    members.length || packages.length ? null : el('span', { className: 'dim', textContent: 'no member or work package accepts it' })),
+    places.length ? el('span', { className: 'label', textContent: 'Place in' }) : null,
+    ...places.map(([key, label]) => chip(label, x => placeRequest(p, x, key))),
+    members.length || packages.length || places.length ? null : el('span', { className: 'dim', textContent: 'no member or work package accepts it' })),
     el('strong', { className: 'dock-target', id: 'dock-target' }))
   document.body.append(dock)
 }
-// Makes a row or a card draggable; item: { kind: 'issue' | 'pr' | 'milestone', ref, number, title, milestone, logins }.
+// Makes a row or a card draggable; item: { kind: 'issue' | 'pr' | 'milestone', ref, number, title, milestone, logins }, or
+// { kind: 'wp', ref, id, isPlaced } for a work package row.
 function draggable(p, node, item) {
   if (!server || p.pmRef) return node
   node.draggable = true
@@ -591,10 +613,11 @@ function progressText(d) {
   return s.total ? s.done + '/' + s.total + (s.current ? ' · ' + s.current : '') : ''
 }
 
-function tableOf(head, rows) {
+// decorate(tr, index) may make a row draggable or a drop target.
+function tableOf(head, rows, decorate = tr => tr) {
   if (!rows.length) return el('p', { className: 'dim', textContent: 'None.' })
   return el('table', {}, el('thead', {}, el('tr', {}, ...head.map(h => el('th', { textContent: h })))),
-    el('tbody', {}, ...rows.map(r => el('tr', {}, ...r.map(c => el('td', {}, c))))))
+    el('tbody', {}, ...rows.map((r, i) => decorate(el('tr', {}, ...r.map(c => el('td', {}, c))), i))))
 }
 
 function noteLine(n) {
@@ -949,17 +972,33 @@ function workPackages(p) {
   const byId = ids => ids.map(id => p.workPackages.find(w => w.id === id)).filter(Boolean)
   const placed = new Set(HORIZONS.flatMap(([key]) => p.roadmap[key]))
   const hasEffort = p.workPackages.some(w => w.estimate !== null || w.actual !== null)
-  const head = ['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', ...(hasEffort ? ['Estimate', 'Actual', 'Deviation'] : []), 'Link', server ? 'Place' : '']
+  const head = ['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', ...(hasEffort ? ['Estimate', 'Actual', 'Deviation'] : []), 'Link']
   // The id opens the work package's own page when it has one (a delivery to follow), else its file.
   const row = w => [w.delivery ? link(w.id, p.path + '/theme/' + w.id) : fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), el('span', {}, w.status, statusAction(p, w)), w.teamManager, w.due,
-    ...(hasEffort ? [hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation)] : []), wpLink(p, w), placeControls(p, w)]
+    ...(hasEffort ? [hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation)] : []), wpLink(p, w)]
   const groups = [...HORIZONS.map(([key, label]) => [label, byId(p.roadmap[key])]), ['Not placed', p.workPackages.filter(w => !placed.has(w.id))]]
   const empty = groups.filter(g => !g[1].length).map(g => g[0])
+  const canPlace = server && !p.pmRef && p.workPackages.some(isOpenWp)
+  // Placed by drag and drop: an open work package's row is dragged; a horizon's row takes it above or below itself (by the half
+  // of the row under the pointer), the group's title takes it last, Not placed anywhere takes it off the roadmap.
+  const placeRow = (tr, w, key) => {
+    if (!isOpenWp(w)) return tr
+    draggable(p, tr, { kind: 'wp', ref: w.id, id: w.id, isPlaced: Boolean(w.horizon) || (w.rank !== null && w.rank !== undefined) })
+    const side = e => e.clientY > tr.getBoundingClientRect().top + tr.offsetHeight / 2 ? 'below' : 'above'
+    return key ? dropTarget(p, tr, (x, e) => placeRequest(p, x, key, w.id, side(e))) : tr
+  }
+  const group = (label, list) => {
+    const key = (HORIZONS.find(h => h[1] === label) || [''])[0]
+    const block = el('div', {}, blockTitle(label, String(list.length)), tableOf(head, list.map(row), (tr, i) => placeRow(tr, list[i], key)))
+    return canPlace ? dropTarget(p, block, (x, e) => key && e.target.closest && e.target.closest('tbody tr') ? null : placeRequest(p, x, key), label) : block
+  }
   return el('div', {},
     p.effort ? el('p', { textContent: stageEffort(p.effort) }) : null,
-    ...groups.filter(g => g[1].length).map(([label, list]) => el('div', {}, blockTitle(label, String(list.length)), tableOf(head, list.map(row)))),
+    canPlace ? el('p', { className: 'dim', textContent: 'Drag a work package to another horizon, or above or below another one, to place it.' }) : null,
+    ...groups.filter(g => g[1].length).map(([label, list]) => group(label, list)),
     empty.length ? el('p', { className: 'dim', textContent: 'Empty: ' + empty.join(' · ') + (placed.size ? '' : " — run /pm-roadmap in the project's repo to place them") }) : null)
 }
+const isOpenWp = w => !['completed', 'archived', 'cancelled'].includes(w.status)
 
 // Registers: one section per PRINCE2 register, the non-empty ones first; the empty ones share one line naming the skill that starts
 // each. The PRINCE2 issue register is called Problems here, next to the forge's issues. Risks and problems list every entry, the

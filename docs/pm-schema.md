@@ -435,7 +435,8 @@ horizon are *not on the roadmap*, by id.
 
 Nothing reads them back but the Documents list. The desk's Work packages tab groups the work
 packages in Now, Next and Later blocks, then *Not placed* with every other one (open with no
-horizon, or closed); the snapshot carries `roadmap: { now, next, later, unplaced }` (ids).
+horizon, or closed); the snapshot carries `roadmap: { now, next, later, unplaced }` (ids). In the
+browser page an open work package is placed by drag and drop (see Desk actions, *Place*).
 
 ## Registers
 
@@ -621,7 +622,7 @@ preview the PM confirms; nothing is committed.
 |---|---|---|
 | Archive | `status: completed` → `archived` | a `completed` work package |
 | Mark completed | `status:` → `completed`, the Board's decision stated by the PM | `authorized` or `in-progress` |
-| Horizon, rank | `horizon:` (`now` / `next` / `later`, or removed), `rank:` (1–999, or removed) | any work package |
+| Place | `horizon:` (`now` / `next` / `later`, or removed with `rank:`), `rank:` (1–999) of the work package, and the `rank:` of the others of its horizon when it is renumbered | an open work package |
 | Link | `issue:` (a number), `milestone:` (a title, quoted within the YAML subset), `branch:` | any work package |
 | Close / reopen a note | `status:` of the note of `commit-notes.yaml` with that `sha` and that exact `text` | a flow-map note line |
 | Create package | the milestone (created or reused), its items, a new `WP-<nn>.md` (`status: draft`) | open issues and pull requests |
@@ -669,6 +670,20 @@ milestone that are not archived or cancelled, less the one the item is already i
 a title and no milestone that are not completed. Rows carry no per-row select for it; a checked
 group goes through *Create package*. Hidden on a read-only project.
 
+**Place.** `{ kind: 'wp-place', target: 'WP-<nn>', horizon: 'now' | 'next' | 'later' | '', beside?:
+'WP-<nn>', side?: 'above' | 'below' }`, from a drag and drop in the Work packages tab (issue #67): an
+open work package's row dropped above or below a row of a horizon (by the half of the row under the
+pointer), on a horizon's group or its chip in the drag dock (last there; the chip is the way into an
+empty horizon), or on *Not placed* (`horizon: ''`, which removes `horizon:` and `rank:`). The
+horizon's group is its open work packages ordered as the desk orders them. The work package keeps its
+rank when it fits between its new neighbours, else takes the first free one between them; a group
+with no room, a tie or a work package without a rank is renumbered 1..n, writing only the files whose
+rank changes. The preview lists every file it writes, the moved work package first; its hash covers
+every work package file, so a change to any of them between preview and confirm is refused. Refused:
+a closed work package, a `beside` that is not in the horizon or is the work package itself, a move
+that changes nothing. The rule is `place_wp` in the helper and `placeWp` in `hooks/edits.ts`, on the
+shared cases. Hidden on a read-only project.
+
 **New issue.** `{ kind: 'issue-create', title, body?, wp?, login? }`, from the *New issue* button of
 the Board tab or a lane's *+ issue* (its work package picked). The preview shows the forge, the
 title and body, the milestone and the assignee, and says that an issue cannot be deleted once
@@ -698,7 +713,9 @@ links to a session with their skill, and the others are not offered.
 
 **Pane.** The Desktop pane writes the file itself (`hooks/edits.ts`, the helper's rules, checked
 by both suites on `server/edit-cases.mjs`): Archive and Mark completed in a work theme, close /
-reopen on a note, move / place in the Work packages tab, each confirmed in a dialog showing the line.
+reopen on a note, each confirmed in a dialog showing the line; move / place in the Work packages tab,
+which puts the work package last in the horizon chosen by the Place rule, the choice being the
+confirmation.
 
 ## Desk layout
 
