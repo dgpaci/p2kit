@@ -98,3 +98,6 @@ allowed.
   `server/edit-cases.mjs`, one JSON array behind `export default`, which `server/test_desk_server.py` reads by splitting it off.
 - The browser actions go through `server/desk_server.py` (stdlib only, its tests `python3 -m unittest discover -s server`); keep its
   rules and messages equal to `hooks/edits.ts`, the pane's copy, and add a shared case for any change.
+- The browser page tidies its `tableOf` tables after each draw (`hooks/board.ts:tidyTables`): short columns stay on one line and
+  tables sharing a header line up. Code that redraws part of the page outside `draw()` calls `tidyTables` on what it filled once it
+  is in the document (the Daily Log filters do). Tables built by hand (Activity, Team) line up through `table.rows` and fixed widths.
