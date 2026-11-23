@@ -644,11 +644,11 @@ refused. A work package without `milestone:` gets one named after its `title`: t
 then writes the line, stopping at the first failure and saying what was done. The work package's
 file hash is in the preview, so an edit between preview and confirm is refused before any forge
 write. Refused: a closed item, an item already in that milestone, a work package with neither
-`milestone:` nor `title`, a `milestone:` missing on the forge. The browser page offers it as an
-*Attach to…* select on the open issues and pull requests of the Activity tab, listing the work
-packages with a milestone that are not archived or cancelled, less the one the item is already in,
-then under *New milestone* those with a title and no milestone that are not completed, archived or
-cancelled; a drop on such a work package opens the same preview. Hidden on a read-only project.
+`milestone:` nor `title`, a `milestone:` missing on the forge. The browser page offers it as a drop
+of an open issue or pull request on a work package (the drag dock or a Board lane): those with a
+milestone that are not archived or cancelled, less the one the item is already in, and those with
+a title and no milestone that are not completed. Rows carry no per-row select for it; a checked
+group goes through *Create package*. Hidden on a read-only project.
 
 **New issue.** `{ kind: 'issue-create', title, body?, wp?, login? }`, from the *New issue* button of
 the Board tab or a lane's *+ issue* (its work package picked). The preview shows the forge, the
