@@ -31,7 +31,8 @@ task's journey from assignment to merge.
   and to merge as median and p90 — and the weekly throughput. Work packages may carry estimated
   and actual effort in hours: the desk shows each one's deviation and the current stage's, which
   feeds an `effort` tolerance. The Work packages tab groups them in Now, Next, Later and Not placed
-  (`/pm-roadmap`); Documents ends with the Daily log, and Registers holds risks, approvals,
+  (`/pm-roadmap`); Documents ends with the Daily log — in the browser, with the helper, a Markdown
+  document opens rendered as a page styled like the desk — and Registers holds risks, approvals,
   problems (the PRINCE2 issue register), lessons and iterations. The same desk is a local browser page, where
   checked issues and pull requests are grouped into a work package.
 - **Actions on the desk.** Archive or complete a work package, place it on the roadmap, link it,
