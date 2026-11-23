@@ -85,6 +85,8 @@ allowed.
 - The desk tests pin the shape of `hooks/board.ts` `TABS` entries with regexes: the `wps` entry stays exactly two lines
   (`tests/iterations-desk.test.tsx`) and `lessons` stays one line (`tests/lessons-desk.test.tsx`). A new column goes inside the
   two `wps` lines; a new tab goes after an existing line, never between `wps` and `iterations` or `iterations` and `lessons`.
+- `ui.find` matches only `type`, `key`, `text` and `in`: a `color` key in the query is silently ignored. Assert a colour on the
+  found element, `expect((await ui.find({ type: 'Text', text: … }))?.props.color).toBe('red')` (`tests/daily-log-filters-desk.test.tsx`).
 - `claude plugin test` does not typecheck: the hand-built `Project` fixtures of `tests/board.test.ts` and `tests/team-desk.test.tsx`
   keep passing when `Project` gains a field, so board and pane code must tolerate the field missing (`p.effort ? … : null`).
 - A hooks module and its tests import only code files (`.ts`, `.mjs`, …), never `.json`: data shared with the Python helper is

@@ -65,9 +65,9 @@ export function renderBoard(input: BoardInput): string {
 
 const STYLE = `
 :root { --bg: #ffffff; --fg: #1f2328; --dim: #656d76; --line: #d0d7de; --chip: #f6f8fa; --on: #0969da;
-  --green: #1a7f37; --amber: #9a6700; --red: #cf222e; --none: #8c959f; }
+  --green: #1a7f37; --amber: #9a6700; --red: #cf222e; --purple: #8250df; --none: #8c959f; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0d1117; --fg: #e6edf3; --dim: #8d96a0;
-  --line: #30363d; --chip: #161b22; --on: #58a6ff; --green: #3fb950; --amber: #d29922; --red: #f85149; --none: #6e7681; } }
+  --line: #30363d; --chip: #161b22; --on: #58a6ff; --green: #3fb950; --amber: #d29922; --red: #f85149; --purple: #a371f7; --none: #6e7681; } }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.45 -apple-system, system-ui, sans-serif; }
 h1 { font-size: 18px; margin: 0 0 4px; }
@@ -152,6 +152,12 @@ a.btn-primary { background: var(--on); border-color: var(--on); color: #fff; fon
 .block-title { display: flex; align-items: baseline; gap: 8px; margin: 22px 0 4px; }
 .block-title h3 { margin: 0; }
 .block-title .n { font-size: 12px; color: var(--dim); }
+.pill.kind-decision { color: var(--on); border-color: var(--on); } .pill.kind-action { color: var(--amber); border-color: var(--amber); }
+.pill.kind-problem { color: var(--purple); border-color: var(--purple); } .pill.kind-note { color: var(--green); border-color: var(--green); }
+.log-source { margin-left: 6px; color: var(--dim); cursor: help; }
+.log-filters { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 8px 0; }
+.log-filters input[type=search] { flex: 1 1 180px; min-width: 0; max-width: 320px; }
+.log-filters .n { font-size: 12px; color: var(--dim); }
 /* Fixed layout: the ref, pill and date columns line up across the separate group tables. */
 table.rows { table-layout: fixed; }
 .sel-col { width: 28px; padding-right: 0 !important; }
@@ -961,17 +967,54 @@ function registers(p) {
     empty.length ? el('p', { className: 'dim', textContent: 'Empty: ' + empty.map(r => r[1] + ' (' + r[4] + ')').join(' · ') }) : null)
 }
 
-// The Daily Log: a block per day, newest first, its entries in file order; an open action past its due is red.
-// p.dailyLog is missing on a project built by older code: read as empty.
+// The Daily Log: a filter bar (day, kinds, free text), then a block per day, newest first, its entries in file order; an open action
+// past its due is red. Each kind has its colour, each source its symbol. The filters are page-local, like the Activity ones: another
+// project starts unfiltered, and the page does not reload itself while a filter is set. A change redraws only the list, so the search
+// box keeps the focus. p.dailyLog is missing on a project built by older code: read as empty.
 const logOf = p => p.dailyLog || []
 const openLogActions = p => logOf(p).filter(d => d.status === 'open')
 const logText = d => d.text + (d.ref ? ' ' + d.ref : '') + (d.register ? ' → ' + d.register : '')
+const LOG_KINDS = ['event', 'decision', 'action', 'problem', 'note']
+const LOG_SOURCES = { forge: ['⑂', 'from the forge'], meeting: ['◎', 'from a meeting'], manual: ['✎', 'from notes'] }
+const logFilter = { day: '', kinds: new Set(), text: '' }
+let logFor = ''
+const isLogFiltered = () => Boolean(logFilter.day || logFilter.kinds.size || logFilter.text)
+const logHaystack = d => [d.id, d.kind, d.source, d.text, d.ref, d.register, d.owner, d.due, d.status, d.issue === null ? '' : '#' + d.issue].join(' ').toLowerCase()
+const logMatches = d => (!logFilter.day || d.date === logFilter.day) && (!logFilter.kinds.size || logFilter.kinds.has(d.kind))
+  && logFilter.text.toLowerCase().split(/\\s+/).filter(Boolean).every(w => logHaystack(d).includes(w))
+const logKind = d => {
+  const source = LOG_SOURCES[d.source]
+  return el('span', {}, pill(d.kind || '—', 'kind-' + d.kind),
+    d.source ? el('span', { className: 'log-source', title: source ? source[1] : d.source, textContent: source ? source[0] : d.source }) : null)
+}
+function logDays(p, entries) {
+  if (!entries.length) return [el('p', { className: 'dim', textContent: 'No entry matches the filters.' })]
+  const days = [...new Set(entries.map(d => d.date))].sort().reverse()
+  return days.map(day => el('div', {}, el('h3', { textContent: day }),
+    tableOf(['', 'Kind', 'Entry', 'Issue', 'Owner', 'Due', 'Status'], entries.filter(d => d.date === day).map(d => dimUnlessOpen(d.status || 'open',
+      [d.id, logKind(d), logText(d), d.issue === null ? '' : issueLink(p, d.issue), d.owner, d.isOverdue ? el('span', { className: 'err', textContent: d.due }) : d.due, d.status])))))
+}
 function dailyLog(p) {
   if (!logOf(p).length) return el('p', { className: 'dim', textContent: "No daily log yet: run /pm-log in the project's repo." })
-  const days = [...new Set(logOf(p).map(d => d.date))].sort().reverse()
-  return el('div', {}, ...days.map(day => el('div', {}, el('h3', { textContent: day }),
-    tableOf(['', 'Kind', 'Entry', 'Issue', 'Owner', 'Due', 'Status'], logOf(p).filter(d => d.date === day).map(d => dimUnlessOpen(d.status || 'open',
-      [d.id, d.kind + (d.source ? ' · ' + d.source : ''), logText(d), d.issue === null ? '' : issueLink(p, d.issue), d.owner, d.isOverdue ? el('span', { className: 'err', textContent: d.due }) : d.due, d.status]))))))
+  if (logFor !== p.path) { logFilter.day = ''; logFilter.kinds.clear(); logFilter.text = ''; logFor = p.path }
+  const list = el('div', {})
+  const count = el('span', { className: 'n' })
+  const kinds = LOG_KINDS.filter(k => logOf(p).some(d => d.kind === k))
+  const chips = kinds.map(k => el('button', { className: 'member-chip' + (logFilter.kinds.has(k) ? ' sel' : ''), textContent: k,
+    onclick: () => { logFilter.kinds.has(k) ? logFilter.kinds.delete(k) : logFilter.kinds.add(k); chips.forEach((c, i) => c.classList.toggle('sel', logFilter.kinds.has(kinds[i]))); show() } }))
+  const day = el('select', { title: 'day', onchange: () => { logFilter.day = day.value; show() } }, el('option', { value: '', textContent: 'All days' }),
+    ...[...new Set(logOf(p).map(d => d.date))].sort().reverse().map(d => el('option', { value: d, textContent: d, selected: d === logFilter.day })))
+  const search = el('input', { type: 'search', placeholder: 'Search the log', value: logFilter.text, oninput: () => { logFilter.text = search.value; show() } })
+  const clear = el('a', { href: '#', textContent: 'clear', onclick: e => {
+    e.preventDefault(); logFilter.day = ''; logFilter.kinds.clear(); logFilter.text = ''; day.value = ''; search.value = ''; chips.forEach(c => c.classList.remove('sel')); show() } })
+  function show() {
+    const entries = logOf(p).filter(logMatches)
+    count.textContent = isLogFiltered() ? entries.length + ' of ' + logOf(p).length + ' entries' : logOf(p).length + ' entries'
+    clear.hidden = !isLogFiltered()
+    fill(list, ...logDays(p, entries))
+  }
+  show()
+  return el('div', {}, el('div', { className: 'log-filters' }, day, ...chips, search, count, clear), list)
 }
 
 // Board: a swimlane per work package with a milestone (p.lanes, hooks/lanes.ts), its open items in To do / In progress / In review,
@@ -1066,5 +1109,5 @@ function draw() {
 draw()
 // A reload would drop the picked issues and pull requests: it waits until nothing is picked.
 // An open dialog holds it too, and so does a drag in progress.
-setInterval(() => { if (dialogOpen || dragging) return; if (!pickedItems.size) location.reload() }, data.reloadMs)
+setInterval(() => { if (dialogOpen || dragging) return; if (isLogFiltered()) return; if (!pickedItems.size) location.reload() }, data.reloadMs)
 `

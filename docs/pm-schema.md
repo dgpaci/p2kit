@@ -576,7 +576,13 @@ entries:
 - The desk: one red line per overdue action in Needs attention (`<id> <text> · <owner> · due
   <due>`), and a Daily log section closing the Documents tab, headed by the open actions: a block per day, newest
   first, the entries in file order with kind and source, text and ref, issue, owner, due and
-  status; an overdue due is red, a done action dimmed.
+  status; an overdue due is red, a done action dimmed. Each kind has its colour (event plain,
+  decision blue, action amber, problem purple, note green; in the pane cyan, yellow, magenta,
+  green), each source a symbol on the page (`⑂` forge, `◎` meeting, `✎` manual).
+- On the page a filter bar heads the list: a day, the kinds present (none picked = all) and a
+  free-text search on id, kind, source, text, ref, register, owner, due, status and `#issue`
+  (every word must match). The filters are page-local and reset for another project; while one
+  is set the page does not reload itself.
 
 ## Next report due
 
