@@ -307,7 +307,7 @@ class Assign(unittest.TestCase):
 
 
 class AssignMany(unittest.TestCase):
-    """One member assigned to the issues and pull requests picked on the Activity tab, in one preview and one Confirm."""
+    """One member assigned to, or unassigned from, the issues and pull requests picked on the Activity or Team tab, in one preview and one Confirm."""
     setUp, tearDown = Assign.setUp, Assign.tearDown
 
     def assign_many(self, **request):
@@ -335,6 +335,19 @@ class AssignMany(unittest.TestCase):
         for numbers in ([], None, [True], ['12'], list(range(1, ds.MAX_ASSIGN_MANY + 2))):
             with self.assertRaises(ds.ActionError):
                 self.assign_many(numbers=numbers, login='dgpaci')
+
+    def test_remove_unassigns_the_member_and_leaves_out_who_does_not_hold_it(self):
+        answer, result = self.assign_many(numbers=[12, 18, 20], login='dgpaci', op='remove')
+        preview = answer['preview']
+        self.assertEqual(preview['summary'], 'Unassign Davide Paci from 1 item')
+        self.assertEqual([(i['ref'], i['before'], i['after']) for i in preview['items']], [('#12', ['dgpaci'], [])])
+        self.assertEqual(preview['skipped'], [{'ref': 'PR #18', 'reason': 'dgpaci not assigned'}, {'ref': '#20', 'reason': 'closed'}])
+        self.assertEqual([c for c in self.forge.calls if c[0] == 'PATCH'], [('PATCH', 'repos/o/r/issues/12', {'assignees': []})])
+        self.assertEqual(result['done'], ['#12 assignees: none'])
+        with self.assertRaisesRegex(ds.ActionError, 'nothing to unassign'):
+            self.assign_many(numbers=[18], login='mbianchi', op='remove')
+        with self.assertRaisesRegex(ds.ActionError, 'op is add or remove'):
+            self.assign_many(numbers=[12], login='dgpaci', op='swap')
 
 
 class IssueMilestone(unittest.TestCase):

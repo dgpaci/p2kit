@@ -98,3 +98,20 @@ test('the browser page embeds the package link, the pull requests and the work p
   expect(script).toContain('function draw()')
   expect(script).not.toContain('${')
 })
+
+test('Team and Activity assign through the checked items and one control on top, with no per-row select (issue #58)', () => {
+  const page = renderBoard({ projects: [buildProject(files('/p'), '2026-11-13')], refreshedAt: 0, errors: [] })
+  const script = page.slice(page.lastIndexOf('<script>') + 8, page.lastIndexOf('</script>'))
+  expect(script).not.toContain('function assignControl')
+  expect(script).not.toContain("'Assign…'")
+  // One selection shared by both tabs, each with its checkbox column and the control on its selection bar.
+  for (const tab of [script.slice(script.indexOf('function team('), script.indexOf('function activity(')), script.slice(script.indexOf('function activity('), script.indexOf('const milestoneRow'))]) {
+    expect(tab).toContain('itemPicks(p)')
+    expect(tab).toContain('assignManyControl(p, sel.numbers())')
+  }
+  expect(script).toContain("sel.cell(i.kind[0] + i.number, (i.kind === 'pr' ? 'PR #' : '#') + i.number)")
+  // The control assigns or unassigns: the op travels with the request, previewed before Confirm.
+  const control = script.slice(script.indexOf('function assignManyControl'), script.indexOf('function packageDialog'))
+  expect(control).toContain("group('add', 'Assign'), group('remove', 'Unassign')")
+  expect(control).toContain("act(p, { kind: 'assign-many', numbers, login, op })")
+})

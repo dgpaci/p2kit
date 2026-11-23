@@ -518,9 +518,12 @@ def apply_assign(preview, forge):
 
 
 def plan_assign_many(root, home, request, forge=None):
-    """Assigning one team member to several issues or pull requests: each item with its assignees before and after; the closed
-    ones and those the member already holds are left out, so one stale row does not block the rest."""
-    numbers, login = request.get('numbers'), request.get('login')
+    """Assigning one team member to several issues or pull requests, or unassigning them (op add or remove, add by default):
+    each item with its assignees before and after; the closed ones, and those the member already holds (add) or does not hold
+    (remove), are left out, so one stale row does not block the rest."""
+    numbers, login, op = request.get('numbers'), request.get('login'), request.get('op', 'add')
+    if op not in ('add', 'remove'):
+        raise ActionError('op is add or remove')
     if not isinstance(numbers, list) or not numbers or len(numbers) > MAX_ASSIGN_MANY:
         raise ActionError(f'pick from 1 to {MAX_ASSIGN_MANY} issues or pull requests')
     if not all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in numbers):
@@ -536,15 +539,19 @@ def plan_assign_many(root, home, request, forge=None):
         before = [a['login'] for a in item.get('assignees') or [] if a.get('login')]
         if item.get('state') != 'open':
             skipped.append({'ref': ref, 'reason': 'closed'})
-        elif login.lower() in (a.lower() for a in before):
+        elif op == 'add' and login.lower() in (a.lower() for a in before):
             skipped.append({'ref': ref, 'reason': f'{login} already assigned'})
+        elif op == 'remove' and login.lower() not in (a.lower() for a in before):
+            skipped.append({'ref': ref, 'reason': f'{login} not assigned'})
         else:
-            items.append({'ref': ref, 'number': number, 'title': item.get('title', ''), 'before': before, 'after': before + [login]})
+            after = before + [login] if op == 'add' else [a for a in before if a.lower() != login.lower()]
+            items.append({'ref': ref, 'number': number, 'title': item.get('title', ''), 'before': before, 'after': after})
     if not items:
-        raise ActionError(f'nothing to assign: {", ".join(s["ref"] + " " + s["reason"] for s in skipped)}')
+        raise ActionError(f'nothing to {"assign" if op == "add" else "unassign"}: {", ".join(s["ref"] + " " + s["reason"] for s in skipped)}')
+    count = f'{len(items)} item' + ('s' if len(items) > 1 else '')
     return {
         'kind': 'assign-many', 'project': root, 'forge': f'{forge.host}/{forge.repo}',
-        'summary': f'Assign {people[login]} to {len(items)} item' + ('s' if len(items) > 1 else ''),
+        'summary': f'Assign {people[login]} to {count}' if op == 'add' else f'Unassign {people[login]} from {count}',
         'items': items, 'skipped': skipped,
     }, forge
 
@@ -555,7 +562,7 @@ def apply_assign_many(preview, forge):
     try:
         for item in preview['items']:
             forge.call('PATCH', f"repos/{forge.repo}/issues/{item['number']}", {'assignees': item['after']})
-            done.append(f"{item['ref']} assignees: {', '.join(item['after'])}")
+            done.append(f"{item['ref']} assignees: {', '.join(item['after']) or 'none'}")
     except ActionError as error:
         raise ActionError(f"{error} — done before it: {', '.join(done) or 'nothing'}") from None
     return done
