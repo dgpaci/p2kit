@@ -87,7 +87,7 @@ th { color: var(--dim); font-weight: 500; font-size: 13px; }
 .phases i { width: 12px; height: 8px; border-radius: 2px; background: var(--line); }
 .phases i.done { background: var(--green); } .phases i.in-progress { background: var(--on); }
 .phases i.failed { background: var(--red); } .phases i.blocked { background: var(--amber); }
-.pill { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; font-size: 12px; color: var(--dim); }
+.pill { white-space: nowrap; display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; font-size: 12px; color: var(--dim); }
 .pill.open { color: var(--on); border-color: var(--on); } .pill.merged, .pill.ready { color: var(--green); border-color: var(--green); }
 .pill.red { color: var(--red); border-color: var(--red); }
 .pill.review { color: var(--amber); border-color: var(--amber); } .pill.inprogress { color: var(--on); border-color: var(--on); }
@@ -163,12 +163,13 @@ a.btn-primary { background: var(--on); border-color: var(--on); color: #fff; fon
 .pill.kind-decision { color: var(--on); border-color: var(--on); } .pill.kind-action { color: var(--amber); border-color: var(--amber); }
 .pill.kind-problem { color: var(--purple); border-color: var(--purple); } .pill.kind-note { color: var(--green); border-color: var(--green); }
 .log-source { margin-left: 6px; color: var(--dim); cursor: help; }
-.log-day td:not(:nth-child(3)) { white-space: nowrap; }
 .log-filters { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 8px 0; }
 .log-filters input[type=search] { flex: 1 1 180px; min-width: 0; max-width: 320px; }
 .log-filters .n { font-size: 12px; color: var(--dim); }
 /* Fixed layout: the ref, pill and date columns line up across the separate group tables. */
 table.rows { table-layout: fixed; }
+/* Set by tidyTables on the columns of short cells. */
+td.nw, th.nw { white-space: nowrap; }
 .doc-folder table { table-layout: fixed; } .doc-folder th:last-child { width: 26em; } .doc-folder td:last-child { overflow-wrap: anywhere; }
 .sel-col { width: 28px; padding-right: 0 !important; }
 .sel-col input { margin: 0; cursor: pointer; }
@@ -617,8 +618,44 @@ function progressText(d) {
 // decorate(tr, index) may make a row draggable or a drop target.
 function tableOf(head, rows, decorate = tr => tr) {
   if (!rows.length) return el('p', { className: 'dim', textContent: 'None.' })
-  return el('table', {}, el('thead', {}, el('tr', {}, ...head.map(h => el('th', { textContent: h })))),
+  return el('table', { className: 'grid' }, el('thead', {}, el('tr', {}, ...head.map(h => el('th', { textContent: h })))),
     el('tbody', {}, ...rows.map((r, i) => decorate(el('tr', {}, ...r.map(c => el('td', {}, c))), i))))
+}
+
+// Once drawn, the tableOf tables of a view are tidied: a column whose cells are all short (an id, a date, a score, a name) never
+// wraps, and the tables sharing a header line up, each column as wide as its widest cell in the group, the longest column taking
+// the rest. While a table would overflow its box, short columns go back to wrapping, the longest first; ids never do.
+const SHORT_CELL = 28
+const MIN_FLEX = 180
+function tidyTables(root) {
+  const groups = new Map()
+  root.querySelectorAll('table.grid').forEach(t => {
+    const key = [...t.tHead.rows[0].cells].map(c => c.textContent).join('|')
+    groups.set(key, (groups.get(key) || []).concat(t))
+  })
+  for (const tables of groups.values()) {
+    const heads = tables.map(t => [...t.tHead.rows[0].cells])
+    const rows = tables.flatMap(t => [...t.rows])
+    const len = heads[0].map((_, i) => Math.max(...rows.map(r => r.cells[i] ? r.cells[i].textContent.trim().length : 0)))
+    const flex = len.indexOf(Math.max(...len))
+    const short = len.map((l, i) => i !== flex && l <= SHORT_CELL)
+    const apply = () => rows.forEach(r => [...r.cells].forEach((c, i) => c.classList.toggle('nw', Boolean(short[i]))))
+    apply()
+    const loosen = short.map((_, i) => i).filter(i => short[i] && len[i] > 8).sort((a, b) => len[b] - len[a])
+    while (loosen.length && tables.some(t => t.offsetWidth > t.parentElement.clientWidth + 1)) { short[loosen.shift()] = false; apply() }
+    if (tables.length < 2) continue
+    // A fixed layout holds the shared widths; when they leave the longest column too little room, the other wrapping columns
+    // give it back in proportion.
+    tables.forEach(t => { t.style.tableLayout = '' })
+    heads.forEach(h => h.forEach(c => { c.style.width = '' }))
+    const widths = heads[0].map((_, i) => Math.max(...heads.map(h => h[i].getBoundingClientRect().width)))
+    const free = tables[0].clientWidth - widths.reduce((a, w, i) => a + (i === flex ? 0 : w), 0)
+    const give = widths.map((w, i) => i !== flex && !short[i] ? w : 0)
+    const givable = give.reduce((a, w) => a + w, 0)
+    if (free < MIN_FLEX && givable) widths.forEach((w, i) => { widths[i] = w - give[i] * Math.min(1, (MIN_FLEX - free) / givable) })
+    heads.forEach(h => h.forEach((c, i) => { if (i !== flex) c.style.width = widths[i] + 'px' }))
+    tables.forEach(t => { t.style.tableLayout = 'fixed' })
+  }
 }
 
 function noteLine(n) {
@@ -811,12 +848,12 @@ function team(p) {
         el('div', { className: 'who' }, el('strong', { textContent: m.person }), el('small', { textContent: (m.login ? '@' + m.login : 'no forge login') + ' · ' + m.roles.join(', ') })),
         m.login ? pill('WIP ' + m.wip + '/' + m.wipLimit, m.isOverLimit ? 'wip-over' : '') : el('span', { className: 'dim', textContent: 'add team.people in project.yaml' })),
       !m.login ? null : m.items.length
-        ? el('table', {}, el('tbody', {}, ...m.items.map(i => draggable(p, el('tr', { className: sel.rowClass(i.kind[0] + i.number) },
+        ? el('table', { className: 'rows' }, el('tbody', {}, ...m.items.map(i => draggable(p, el('tr', { className: sel.rowClass(i.kind[0] + i.number) },
             assignable ? sel.cell(i.kind[0] + i.number, (i.kind === 'pr' ? 'PR #' : '#') + i.number) : null,
             el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: (i.kind === 'pr' ? 'PR #' : '#') + i.number })),
             el('td', { textContent: i.title }),
             el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
-            el('td', { style: 'width:150px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status))),
+            el('td', { style: 'width:200px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status))),
           dragItem(i.kind, Object.assign({}, (i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => x.number === i.number), { number: i.number, assignees: i.assignees || assigneesOf(p, i) }))))))
         : el('div', { className: 'empty dim', textContent: 'No open item.' })), x => assignRequest(x, m), m.person)))
 }
@@ -870,7 +907,7 @@ function activity(p) {
   const issueRow = i => draggable(p, el('tr', { className: rowClass('i' + i.number) }, pick('i' + i.number, '#' + i.number),
     el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: '#' + i.number })),
     el('td', { textContent: i.title }),
-    el('td', { style: 'width:100px; text-align:right' }, notReadyPill(i.missing || [])),
+    el('td', { style: 'width:220px; text-align:right' }, notReadyPill(i.missing || [])),
     el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt })), dragItem('issue', i))
 
   // Issues by milestone: the open ones in their order, then any other title (closed, or past the one-page read), then "No milestone".
@@ -1080,6 +1117,7 @@ function dailyLog(p) {
     count.textContent = isLogFiltered() ? entries.length + ' of ' + logOf(p).length + ' entries' : logOf(p).length + ' entries'
     clear.hidden = !isLogFiltered()
     fill(list, ...logDays(p, entries))
+    if (list.isConnected) tidyTables(list)
   }
   show()
   return el('div', {}, el('div', { className: 'log-filters' }, day, ...chips, search, count, clear), list)
@@ -1174,8 +1212,13 @@ function form(p, sub) {
 function draw() {
   const p = data.projects.filter(x => route === x.path || route.startsWith(x.path + '/')).sort((a, b) => b.path.length - a.path.length)[0]
   current = p || null
-  document.getElementById('app').replaceChildren(...(p ? form(p, route.slice(p.path.length + 1)) : overview()))
+  const app = document.getElementById('app')
+  app.replaceChildren(...(p ? form(p, route.slice(p.path.length + 1)) : overview()))
+  tidyTables(app)
 }
+// A narrower window may need columns back to wrapping, a wider one lets them stay on one line.
+let tidyTimer = 0
+addEventListener('resize', () => { clearTimeout(tidyTimer); tidyTimer = setTimeout(() => tidyTables(document.getElementById('app')), 150) })
 
 draw()
 // A reload would drop the picked issues and pull requests: it waits until nothing is picked.
