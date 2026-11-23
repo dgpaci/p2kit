@@ -32,7 +32,7 @@ const RUN = { command: 'pm-desk', args: '', origin: { kind: 'composer' }, presen
 test('the Work packages tab groups the work packages by horizon and the generated roadmaps are under Documents, in the page and the pane', async ($, on) => {
   // wf:contract: No Roadmap tab: the Work packages tab groups them in blocks "Now", "Next", "Later" in project.roadmap order, then
   // wf:contract: "Not placed" with every other work package (open with no horizon, or closed); empty groups share one "Empty: …" line,
-  // wf:contract: which points to /pm-roadmap while nothing is placed.
+  // wf:contract: which points to /pm-roadmap while nothing is placed; with the helper every group shows, an empty one as a drop zone.
   // wf:contract: Pane: a bold "<group> · <n>" line per non-empty group, then its work packages, each with a move (placed) or place button.
   // wf:contract: .pm/roadmap.md and .pm/roadmap-external.md, when present, are listed under Documents like every other .pm product.
   // wf:contract: The page script still contains no "${" and passes node --check; the pane state shape becomes projects-13.
@@ -60,6 +60,9 @@ test('the Work packages tab groups the work packages by horizon and the generate
   expect(script).not.toContain("'wp-rank'")
   expect(script).toContain("{ kind: 'wp-place', target: item.id, horizon, beside, side }")
   expect(script).toContain("draggable(p, tr, { kind: 'wp', ref: w.id, id: w.id, isPlaced:")
+  // With the helper an empty horizon is still a group to drop on: nothing placed yet leaves Now, Next and Later empty.
+  expect(script).toContain("groups.filter(g => canPlace || g[1].length)")
+  expect(script).toContain("el('div', { className: 'drop-zone', textContent: 'Drop a work package here' })")
 
   // The pane, from a real read.
   mock.store(on)

@@ -208,6 +208,7 @@ button.primary, button.btn-primary { background: var(--on); border-color: var(--
 .dock .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-left: 6px; }
 .dock-target { display: block; width: 0; min-width: 100%; min-height: 1.45em; margin-top: 6px; color: var(--on); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .drag-ghost { position: fixed; top: -100px; left: 0; padding: 2px 8px; border: 1px solid var(--on); border-radius: 999px; background: var(--bg); color: var(--fg); font: 12px ui-monospace, monospace; }
+.drop-zone { border: 1px dashed var(--line); border-radius: 8px; padding: 14px; text-align: center; color: var(--dim); }
 .drop-chip { border: 1px dashed var(--line); border-radius: 999px; padding: 4px 10px; background: var(--chip); }
 /* Board tab: one swimlane per work package, four columns; cards carry data-number and lanes data-wp for drag and drop. */
 .lane { border: 1px solid var(--line); border-radius: 8px; margin-top: 12px; overflow: hidden; }
@@ -987,16 +988,19 @@ function workPackages(p) {
     const side = e => e.clientY > tr.getBoundingClientRect().top + tr.offsetHeight / 2 ? 'below' : 'above'
     return key ? dropTarget(p, tr, (x, e) => placeRequest(p, x, key, w.id, side(e))) : tr
   }
+  // An empty group is still a drop zone while work packages can be placed: with nothing placed yet, Now, Next and Later have
+  // no row to drop on.
   const group = (label, list) => {
     const key = (HORIZONS.find(h => h[1] === label) || [''])[0]
-    const block = el('div', {}, blockTitle(label, String(list.length)), tableOf(head, list.map(row), (tr, i) => placeRow(tr, list[i], key)))
+    const body = list.length ? tableOf(head, list.map(row), (tr, i) => placeRow(tr, list[i], key)) : el('div', { className: 'drop-zone', textContent: 'Drop a work package here' })
+    const block = el('div', {}, blockTitle(label, String(list.length)), body)
     return canPlace ? dropTarget(p, block, (x, e) => key && e.target.closest && e.target.closest('tbody tr') ? null : placeRequest(p, x, key), label) : block
   }
   return el('div', {},
     p.effort ? el('p', { textContent: stageEffort(p.effort) }) : null,
     canPlace ? el('p', { className: 'dim', textContent: 'Drag a work package to another horizon, or above or below another one, to place it.' }) : null,
-    ...groups.filter(g => g[1].length).map(([label, list]) => group(label, list)),
-    empty.length ? el('p', { className: 'dim', textContent: 'Empty: ' + empty.join(' · ') + (placed.size ? '' : " — run /pm-roadmap in the project's repo to place them") }) : null)
+    ...groups.filter(g => canPlace || g[1].length).map(([label, list]) => group(label, list)),
+    empty.length && !canPlace ? el('p', { className: 'dim', textContent: 'Empty: ' + empty.join(' · ') + (placed.size ? '' : " — run /pm-roadmap in the project's repo to place them") }) : null)
 }
 const isOpenWp = w => !['completed', 'archived', 'cancelled'].includes(w.status)
 
