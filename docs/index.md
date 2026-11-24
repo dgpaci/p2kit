@@ -53,6 +53,8 @@ assigning is on the Team and Activity tabs.
 **Team** — each person with their open items and whose move it is. Luca is over his WIP limit of 2;
 Giulia has a review waiting for her. Check items here or on Activity — the selection is shared —
 and assign or unassign them with the one *Assign to…* control on top, or drop an item on a person.
+Under each person sit the open Daily Log actions they own, overdue in red; an action with no owner,
+or with someone outside the project's people, sits in the *No team member* card.
 
 ![Team](images/team.png)
 
@@ -61,7 +63,9 @@ internal notes on its commits (here an open blocker).
 
 ![Work theme](images/work-theme.png)
 
-**Work packages** grouped by roadmap horizon, with estimate, actual and deviation — drag one into
+**Work packages** grouped by roadmap horizon, with status, estimate, actual and deviation; the id
+opens the work package's page, and the last column holds its action — *Link…* while nothing is
+linked, *Mark completed*, *Archive* once completed — drag one into
 another horizon, or above or below another, to place it, or onto *Not placed* to take it off the
 roadmap (an empty horizon shows as a drop zone); **Metrics** gives
 lead time, review and merge time and the weekly throughput.
@@ -74,7 +78,8 @@ The other tabs: **Activity** (milestones, open issues and pull requests, with a 
 package or assign many at once), **Documents** (the `.pm/` products; a Markdown document opens as a
 readable HTML page when the desk helper serves the page), **Registers** (risks with their response
 and Claude's verdict on it, approvals, problems, lessons, iterations, then the Daily Log, each kind
-of entry in its own colour and filterable by day, kind and text; a high risk stays in *Needs
+of entry in its own colour and filterable by day, kind and text, its open actions checked and given
+an owner with *Assign to…*, which offers every person of `roles` and `team.people`; a high risk stays in *Needs
 attention* until its response is adequate and you confirm the closure).
 
 ## A task from assignment to merge

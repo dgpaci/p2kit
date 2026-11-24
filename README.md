@@ -21,7 +21,9 @@ task's journey from assignment to merge.
   and pull requests, commits with notes. The Team tab shows the roles on top, then each person with the
   open issues and pull requests that are theirs — to do, in progress, review asked, waiting for
   review, stalled — filterable by member; a red `WIP <person> n/limit` badge on the card and in
-  the recap flags anyone over their work-in-progress limit. Logins and limits come from the
+  the recap flags anyone over their work-in-progress limit. Under each person sit the open Daily Log
+  actions they own, overdue in red; actions with no owner, or an owner outside the project's people,
+  sit in a *No team member* card. Logins and limits come from the
   `team:` section of `project.yaml`. The Activity tab shows the repo's open milestones — progress,
   due day, stalled items, pulls in review, and the work package carrying each — its open pull
   requests, and its open issues grouped by milestone; an open issue missing a readiness heading
@@ -34,12 +36,13 @@ task's journey from assignment to merge.
   (`/pm-roadmap`, or drag and drop in the browser page); in Documents, in the
   browser with the helper, a Markdown document opens rendered as a page styled like the desk; and
   Registers holds risks (with their response and Claude's verdict on it), approvals, problems (the PRINCE2 issue register),
-  lessons, iterations and the Daily log, filterable by day, kind and text.
+  lessons, iterations and the Daily log, filterable by day, kind and text, whose open actions can be
+  given an owner from the browser page.
   The same desk is a local browser page, where
   checked issues and pull requests are grouped into a work package.
 - **Actions on the desk.** Archive or complete a work package, place it on the roadmap by drag and
   drop, link it, close a note, package issues, attach an item to a work package, create an issue,
-  assign or unassign checked items: each shows the change and writes it on Confirm, without opening a
+  assign or unassign checked items, give checked Daily Log actions an owner: each shows the change and writes it on Confirm, without opening a
   session; text — reports, digests, presentations — is still drafted in a session with its skill.
   In the browser the actions need **Python 3** (a standard-library helper the mod starts); without
   it the page stays read-only. What acts directly and why: [docs/scope.md](docs/scope.md).
