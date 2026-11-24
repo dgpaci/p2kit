@@ -153,6 +153,7 @@ actions:
   - { id: D-001, date: 2026-11-17, kind: event, source: forge, text: 'pull request opened: Three-step checkout', ref: '#20' }
   - { id: D-002, date: 2026-11-17, kind: decision, source: meeting, text: 'guest checkout goes to stage 3' }
   - { id: D-003, date: 2026-11-17, kind: action, source: meeting, text: 'ask the provider for the production keys', owner: Giulia Neri, due: 2026-11-20, status: open }
+  - { id: D-004, date: 2026-11-17, kind: action, source: meeting, text: 'send the email copy to Paolo for review', owner: Marco Bianchi, due: 2026-11-16, status: open }
 `,
 }
 
