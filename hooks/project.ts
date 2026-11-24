@@ -10,7 +10,7 @@ import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
 import { findPlanPath, getPhaseSummary, parseObjective, parsePhaseOutcomes, parsePhases } from './stage'
 import { getObjectives } from './objectives'
 import { readReadiness } from './readiness'
-import { getClosedRefs, hasCommitRef, isPlainIssue, logins, readTeam, toTeamItems, withItems } from './team'
+import { getClosedRefs, hasCommitRef, isPlainIssue, logins, readTeam, toTeamItems, withActions, withItems } from './team'
 import type { RestIssue, RestPull, TimelineEvent } from './team'
 import { isDoc, parseFrontmatter, parseYaml } from './yaml'
 import type { Doc, Value } from './yaml'
@@ -392,7 +392,8 @@ export function buildProject(files: ProjectFiles, today: string): Project {
   const due = every && since ? addDays(since, every) : ''
 
   const roles = getRoles(data.roles)
-  const team = readTeam(roles, data.team, errors)
+  const log = readDailyLog(files.dailyLog, today, errors)
+  const { team, strayActions } = withActions(readTeam(roles, data.team, errors), log.dailyLog)
   const readiness = readReadiness(data.readiness, errors)
 
   return {
@@ -405,6 +406,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     stage,
     roles,
     team,
+    strayActions,
     milestones: [],
     forgeIssues: [],
     forgePulls: [],
@@ -426,7 +428,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     iterations,
     iteration: getCurrentIteration(iterations, workPackages, today),
     ...readLessons(files.lessons, errors),
-    ...readDailyLog(files.dailyLog, today, errors),
+    ...log,
     roadmap: getRoadmap(workPackages),
     objectives: getObjectives(files.products.find(file => file.path === `${files.path}/.pm/brief.md`)?.text, workPackages, errors),
     openBlockers: notes.filter(note => note.kind === 'blocker' && note.status === 'open').length,

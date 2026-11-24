@@ -31,8 +31,10 @@ register or the forge only after a second OK for that one entry, and commits not
    notes). Read the file; it never goes into `.pm/` and is never quoted at length. Extract one
    line per entry, faithful to what was said, never inferred:
    - `decision` — something agreed;
-   - `action` — something someone will do: `owner` the person named (as written in `roles` when
-     it is one of them), `due` when a date was said, `status: open`;
+   - `action` — something someone will do: `owner` the one person named — for a person of the
+     roles, their name as written in `roles` without a trailing note in brackets
+     (`Finizio (Secretary)` → `owner: Finizio`), so the desk's Team tab finds it — `due` when a
+     date was said, `status: open`;
    - `problem` — something wrong or in the way, not yet in a register;
    - `event` — something that happened worth remembering (a meeting held, a release, a visit);
    - `note` — anything else useful later.
@@ -42,7 +44,9 @@ register or the forge only after a second OK for that one entry, and commits not
    without `owner`, and the draft says so: ask, never guess. Names of people outside the roles are
    written only when they own an action.
 4. **Closing actions**: when the user says a logged action is done, change its `status` to `done`.
-   List the open actions (`kind: action`, `status: open`) when the user asks which.
+   When they give an open action to someone else, change only its `owner`, by the same rule — the
+   desk's Daily log does it too, from the checkboxes of the open actions. List the open actions
+   (`kind: action`, `status: open`) when the user asks which.
 5. Show the exact entries as they will be written, flow maps within the YAML subset of
    docs/pm-schema.md, a text in single quotes, or in double quotes when it holds a `'` (the subset
    has no escapes):

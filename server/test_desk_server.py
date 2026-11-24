@@ -164,6 +164,94 @@ class FileActions(unittest.TestCase):
                 self.p.act(kind='wp-link', target=target, field='branch', value='x')
 
 
+PEOPLE = ('roles:\n'
+          '  executive: Anna Rossi\n'
+          '  senior_user: [Finizio (Secretary), Roberta, "Rossi, Mario"]\n'
+          '  project_manager: Davide Paci\n'
+          '  support:\n'
+          "    - Daniela D'Alessandro\n"
+          '    - roberta\n'
+          'team:\n'
+          '  wip_limit: 3\n'
+          '  people:\n'
+          '    Davide Paci: { login: dgpaci }\n'
+          '    Eva Neri: { login: eneri }\n'
+          'stage: { current: 1 }\n')
+LOG = ('entries:\n'
+       "  - { id: D-001, date: 2026-11-04, kind: event, source: meeting, text: 'monthly meeting, owner: nobody' }\n"
+       "  - { id: D-002, date: 2026-11-04, kind: action, source: meeting, text: 'send the file, today', owner: Roberta, due: 2026-11-04, status: open }\n"
+       '  - { id: D-003, date: 2026-11-04, kind: action, source: meeting, text: "l\'ordine", status: open }\n'
+       '  - { id: D-004, date: 2026-11-05, kind: action, source: manual, text: call back }\n'
+       '  - { id: D-005, date: 2026-11-05, kind: action, source: manual, text: done already, owner: Davide Paci, status: done }\n')
+
+
+class LogOwner(unittest.TestCase):
+    def setUp(self):
+        self.p = Project()
+        self.p.write('.pm/project.yaml', PEOPLE)
+        self.p.write('.pm/registers/daily-log.yaml', LOG)
+
+    def tearDown(self):
+        self.p.temp.cleanup()
+
+    def line(self, entry_id):
+        return next(line for line in self.p.read('.pm/registers/daily-log.yaml').splitlines() if f'id: {entry_id},' in line)
+
+    def test_the_people_are_the_roles_then_team_people_once_each_without_their_note(self):
+        self.assertEqual(ds.project_people(self.p.root), ['Anna Rossi', 'Finizio', 'Roberta', 'Rossi, Mario', 'Davide Paci', "Daniela D'Alessandro", 'Eva Neri'])
+
+    def test_reassigning_changes_only_the_owner_of_that_line(self):
+        before = LOG.splitlines()
+        result, preview = self.p.act(kind='log-owner', ids=['D-002'], owner='finizio')
+        self.assertTrue(result['applied'])
+        self.assertEqual(preview['summary'], 'Assign Finizio to D-002')
+        after = self.p.read('.pm/registers/daily-log.yaml').splitlines()
+        self.assertEqual(after[2], before[2].replace('owner: Roberta', 'owner: Finizio'))
+        self.assertEqual([a for i, a in enumerate(after) if i != 2], [b for i, b in enumerate(before) if i != 2])
+        self.assertEqual(preview['changes'], [{'line': 3, 'before': before[2], 'after': after[2]}])
+
+    def test_a_new_owner_goes_before_due_or_status_else_last_quoted_when_needed(self):
+        self.p.act(kind='log-owner', ids=['D-003', 'D-004'], owner='Rossi, Mario')
+        self.assertEqual(self.line('D-003'), '  - { id: D-003, date: 2026-11-04, kind: action, source: meeting, text: "l\'ordine", owner: \'Rossi, Mario\', status: open }')
+        self.assertEqual(self.line('D-004'), "  - { id: D-004, date: 2026-11-05, kind: action, source: manual, text: call back, owner: 'Rossi, Mario' }")
+
+    def test_removing_the_owner_drops_the_field(self):
+        result, preview = self.p.act(kind='log-owner', ids=['D-002'], owner='')
+        self.assertEqual(preview['summary'], 'Remove the owner of D-002')
+        self.assertEqual(self.line('D-002'), "  - { id: D-002, date: 2026-11-04, kind: action, source: meeting, text: 'send the file, today', due: 2026-11-04, status: open }")
+
+    def test_several_actions_with_those_left_out(self):
+        _, preview = self.p.act(kind='log-owner', ids=['D-001', 'D-002', 'D-003', 'D-005', 'D-009'], owner='Roberta')
+        self.assertEqual(preview['summary'], 'Assign Roberta to D-003')
+        self.assertEqual([s['reason'] for s in preview['skipped']], [
+            'D-001 is not an action: only an action has an owner', 'D-002 is already owned by Roberta',
+            'D-005 is done: only an open action is assigned', 'D-009 not found'])
+        self.assertIn('owner: Roberta, status: open', self.line('D-003'))
+
+    def test_refused(self):
+        cases = ((dict(ids=['D-002'], owner='Marco'), 'Marco is no person of roles or team.people'),
+                 (dict(ids=['D-002'], owner='Finizio (Secretary)'), 'is no person'),
+                 (dict(ids=['D-004'], owner=''), 'nothing to unassign: D-004 has no owner'),
+                 (dict(ids=[], owner='Roberta'), 'pick from 1 to 50 actions'),
+                 (dict(ids=['../x'], owner='Roberta'), 'pick from 1 to 50 actions'),
+                 (dict(ids=['D-002'], owner=None), 'an owner is a name'))
+        for request, message in cases:
+            with self.subTest(message), self.assertRaisesRegex(ds.ActionError, message):
+                self.p.act(kind='log-owner', **request)
+        self.assertEqual(self.p.read('.pm/registers/daily-log.yaml'), LOG)
+
+    def test_a_block_entry_is_not_edited(self):
+        self.p.write('.pm/registers/daily-log.yaml', 'entries:\n  - id: D-002\n    kind: action\n    text: x\n')
+        with self.assertRaisesRegex(ds.ActionError, 'D-002 is not a one-line entry'):
+            self.p.act(kind='log-owner', ids=['D-002'], owner='Roberta')
+
+    def test_a_change_after_the_preview_is_refused(self):
+        answer, _ = ds.run_action(self.p.home, {'project': self.p.root, 'kind': 'log-owner', 'ids': ['D-004'], 'owner': 'Roberta'})
+        self.p.write('.pm/registers/daily-log.yaml', LOG.replace('call back', 'call back soon'))
+        with self.assertRaisesRegex(ds.ActionError, 'changed since the preview'):
+            ds.run_action(self.p.home, {'project': self.p.root, 'kind': 'log-owner', 'ids': ['D-004'], 'owner': 'Roberta', 'confirm': answer['hash']})
+
+
 def shared_cases():
     """server/edit-cases.mjs: one JSON array behind `export default`, run by this suite and tests/edits.test.ts."""
     with open(os.path.join(os.path.dirname(__file__), 'edit-cases.mjs')) as handle:

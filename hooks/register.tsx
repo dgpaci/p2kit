@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { openFile, openSession } from './actions'
 import { getOpenBlockers, renderBoard } from './board'
-import type { CommitNote, Light, MilestoneItem, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpDelivery, WpForge } from '../types'
+import type { CommitNote, DailyEntry, Light, MilestoneItem, Phase, PhaseState, Project, Pull, TeamMember, TeamStatus, WorkPackage, WpDelivery, WpForge } from '../types'
 import { EditError, placeWp, setNoteStatus, setWpStatus } from './edits'
 import type { LineChange } from './edits'
 import { getFlowCell } from './flow'
@@ -116,6 +116,9 @@ const HORIZON_LABEL = { now: 'Now', next: 'Next', later: 'Later' } as const
 const BOARD_COLUMNS = [['todo', 'To do'], ['inprogress', 'In progress'], ['review', 'In review']] as const
 
 const getWipText = (member: TeamMember): string => `WIP ${member.person} ${member.wip}/${member.wipLimit}`
+// An open Daily Log action in the Team tab, with its owner when it is no member's.
+const getActionLine = (entry: DailyEntry, withOwner: boolean): string =>
+  `  ${entry.id} ${entry.text}${withOwner ? ` · ${entry.owner || 'no owner'}` : ''}${entry.due ? ` · due ${entry.due}` : ''} · action`
 
 /** Rewrites the browser board from the projects as they stand, and the JSON snapshot beside it; a failed snapshot is only logged. */
 async function writeBoard($: EngineInterface): Promise<void> {
@@ -504,8 +507,14 @@ export const register: Register = on => {
                 <Text wrap="truncate-end">{`  ${item.kind === 'pr' ? 'PR ' : ''}#${item.number} ${item.title} · ${STATUS_LABEL[item.status]}${item.kind === 'issue' ? notReadySuffix(item.number) : ''}`}</Text>
               ))}
               {member.login && member.items.length === 0 && <Text dimColor>{'  No open item.'}</Text>}
+              {(member.actions ?? []).map(entry => <Text color={entry.isOverdue ? 'red' : undefined} wrap="truncate-end">{getActionLine(entry, false)}</Text>)}
             </Box>
           )),
+          // The open Daily Log actions no person of the roles owns; a project held by older code has none.
+          ...(!pickedMembers.length && (p.strayActions ?? []).length ? [
+            <Text dimColor wrap="truncate-end">No team member · open Daily Log actions owned by nobody, or by someone not in the roles</Text>,
+            ...p.strayActions.map(entry => <Text color={entry.isOverdue ? 'red' : undefined} wrap="truncate-end">{getActionLine(entry, true)}</Text>),
+          ] : []),
         ],
       },
       {

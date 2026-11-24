@@ -24,9 +24,9 @@ test('the team is the people of the roles, once each, in role order, with their 
   const team = readTeam(ROLES, parseYaml(TEAM), errors)
   expect(errors).toEqual([])
   expect(team).toEqual([
-    { person: 'Anna Rossi', login: '', roles: ['Executive'], items: [], wip: 0, wipLimit: 4, isOverLimit: false },
-    { person: 'Davide Paci', login: 'dgpaci', roles: ['Project Manager', 'Senior Supplier'], items: [], wip: 0, wipLimit: 5, isOverLimit: false },
-    { person: 'Luca Verdi', login: 'lverdi', roles: ['Senior Supplier'], items: [], wip: 0, wipLimit: 4, isOverLimit: false },
+    { person: 'Anna Rossi', name: 'Anna Rossi', login: '', roles: ['Executive'], items: [], actions: [], wip: 0, wipLimit: 4, isOverLimit: false },
+    { person: 'Davide Paci', name: 'Davide Paci', login: 'dgpaci', roles: ['Project Manager', 'Senior Supplier'], items: [], actions: [], wip: 0, wipLimit: 5, isOverLimit: false },
+    { person: 'Luca Verdi', name: 'Luca Verdi', login: 'lverdi', roles: ['Senior Supplier'], items: [], actions: [], wip: 0, wipLimit: 4, isOverLimit: false },
   ])
 })
 

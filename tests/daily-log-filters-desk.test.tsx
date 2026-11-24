@@ -41,13 +41,13 @@ test('the Daily log tells its kinds apart and filters by day, kind and text, in 
   expect(script).toContain("const LOG_KINDS = ['event', 'decision', 'action', 'problem', 'note']")
   expect(script).toContain("const LOG_SOURCES = { forge: ['⑂', 'from the forge'], meeting: ['◎', 'from a meeting'], manual: ['✎', 'from notes'] }")
   expect(script).toContain("pill(d.kind || '—', 'kind-' + d.kind)")
-  expect(script).toContain("el('div', { className: 'log-filters' }, day, ...chips, search, count, clear), list)")
+  expect(script).toContain("el('div', { className: 'log-filters' }, day, ...chips, search, count, clear), owning ? bar : null, list)")
   expect(script).toContain("placeholder: 'Search the log'")
   expect(script).toContain("'No entry matches the filters.'")
   expect(script).toContain('if (logFor !== p.path) {')
   // The search splits on whitespace: the template literal must keep the backslash.
   expect(script).toContain('.split(/\\s+/)')
-  expect(script).toContain('if (dialogOpen || dragging) return; if (isLogFiltered()) return; if (!pickedItems.size) location.reload()')
+  expect(script).toContain('if (dialogOpen || dragging) return; if (isLogFiltered()) return; if (!pickedItems.size && !pickedActions.size) location.reload()')
   expect(script).not.toContain('${')
 
   // The pane, from a real read. ui.find ignores a color key: the colour is read from the found element's props.

@@ -371,6 +371,8 @@ function previewOf(preview, extra) {
     preview.skipped.length ? el('div', {}, el('h3', { textContent: 'Left out' }), ...preview.skipped.map(i => el('div', { className: 'dim', textContent: i.ref + ' · ' + i.reason }))) : null]
   // A drop in the Work packages tab writes one file or, renumbering the horizon, several.
   if (preview.kind === 'wp-place') return preview.files.flatMap(fileChanges)
+  if (preview.kind === 'log-owner') return [...fileChanges(preview),
+    preview.skipped.length ? el('div', {}, el('h3', { textContent: 'Left out' }), ...preview.skipped.map(i => el('div', { className: 'dim', textContent: i.reason }))) : null]
   if (preview.kind !== 'package') return fileChanges(preview)
   const m = preview.milestone
   extra.move = []
@@ -860,7 +862,24 @@ function team(p) {
             el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
             el('td', { style: 'width:200px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status))),
           dragItem(i.kind, Object.assign({}, (i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => x.number === i.number), { number: i.number, assignees: i.assignees || assigneesOf(p, i) }))))))
-        : el('div', { className: 'empty dim', textContent: 'No open item.' })), x => assignRequest(x, m), m.person)))
+        : el('div', { className: 'empty dim', textContent: 'No open item.' }),
+      actionRows(m.actions || [], false, assignable && m.login && m.items.length)), x => assignRequest(x, m), m.person)),
+    // The open actions of the Daily Log no person of the roles owns, last and only while no member is picked.
+    !picked.size && (p.strayActions || []).length ? el('div', { className: 'person' },
+      el('div', { className: 'person-head' }, el('div', { className: 'who' }, el('strong', { textContent: 'No team member' }),
+        el('small', { textContent: 'open Daily Log actions owned by nobody, or by someone not in the roles' }))),
+      actionRows(p.strayActions, true)) : null)
+}
+// A person's open actions of the Daily Log under their issues and pull requests, assigned from the Daily log section of Registers:
+// the id, the text (with the owner when it is not theirs), the due date, red once past; lead keeps a blank check column, in line
+// with the checked items above.
+function actionRows(actions, withOwner, lead) {
+  if (!actions.length) return null
+  return el('table', { className: 'rows' }, el('tbody', {}, ...actions.map(d => el('tr', {}, lead ? el('td', { className: 'sel-col' }) : null,
+    el('td', { className: 'mono', style: 'width:80px; white-space:nowrap', textContent: d.id }),
+    el('td', {}, d.text, withOwner ? el('span', { className: 'dim', textContent: ' · ' + (d.owner || 'no owner') }) : null),
+    el('td', { style: 'width:100px; white-space:nowrap' }, dueCell(d)),
+    el('td', { style: 'width:200px; text-align:right' }, pill('action', 'kind-action'))))))
 }
 
 // Activity tab: the open milestones with their work package, the open pull requests, the open issues grouped by milestone.
@@ -1100,16 +1119,50 @@ const logKind = d => {
   return el('span', {}, pill(d.kind || '—', 'kind-' + d.kind),
     d.source ? el('span', { className: 'log-source', title: source ? source[1] : d.source, textContent: source ? source[0] : d.source }) : null)
 }
-function logDays(p, entries) {
+const dueCell = d => d.isOverdue ? el('span', { className: 'err', textContent: d.due }) : d.due
+// The open actions checked in the Daily Log, given an owner or relieved of it from the one control on top: page-local like the
+// filters, another project starts with none; a reload waits until none is checked. Only with the helper, and never on a project
+// whose .pm/ is read from git. The people offered are those of the roles, by name (a note in brackets dropped), not only those
+// with a forge login.
+const pickedActions = new Set()
+const canOwn = p => server && !p.pmRef && p.team.length > 0
+const nameOf = m => m.name || m.person
+const isOpenAction = d => d.kind === 'action' && d.status === 'open'
+function ownerControl(p, ids) {
+  const names = [...new Map(p.team.map(m => [nameOf(m).toLowerCase(), nameOf(m)])).values()]
+  const pick = el('select', { className: 'assign', title: 'set or remove the owner of the selected actions',
+    onchange: () => { const owner = pick.value; pick.value = ''; if (owner) act(p, { kind: 'log-owner', ids, owner: owner === '-' ? '' : owner }) } },
+    el('option', { value: '', textContent: 'Assign to…' }), el('optgroup', { label: 'Assign' }, ...names.map(n => el('option', { value: n, textContent: '+ ' + n }))),
+    el('optgroup', { label: 'Unassign' }, el('option', { value: '-', textContent: '− no owner' })))
+  return pick
+}
+function logDays(p, entries, onPick) {
   if (!entries.length) return [el('p', { className: 'dim', textContent: 'No entry matches the filters.' })]
   const days = [...new Set(entries.map(d => d.date))].sort().reverse()
-  return days.map(day => el('div', { className: 'log-day' }, el('h3', { textContent: day }),
-    tableOf(['', 'Kind', 'Entry', 'Issue', 'Owner', 'Due', 'Status'], entries.filter(d => d.date === day).map(d => dimUnlessOpen(d.status || 'open',
-      [d.id, logKind(d), logText(d), d.issue === null ? '' : issueLink(p, d.issue), d.owner, d.isOverdue ? el('span', { className: 'err', textContent: d.due }) : d.due, d.status])))))
+  const pickCell = d => el('td', { className: 'sel-col' }, isOpenAction(d) ? el('input', { type: 'checkbox', title: 'select ' + d.id, checked: pickedActions.has(d.id),
+    onchange: () => { pickedActions.has(d.id) ? pickedActions.delete(d.id) : pickedActions.add(d.id); onPick() } }) : null)
+  const decorate = list => (tr, i) => { if (onPick) { tr.prepend(pickCell(list[i])); tr.classList.toggle('checked', pickedActions.has(list[i].id)) } return tr }
+  return days.map(day => {
+    const list = entries.filter(d => d.date === day)
+    const table = tableOf(['', 'Kind', 'Entry', 'Issue', 'Owner', 'Due', 'Status'], list.map(d => dimUnlessOpen(d.status || 'open',
+      [d.id, logKind(d), logText(d), d.issue === null ? '' : issueLink(p, d.issue), d.owner, dueCell(d), d.status])), decorate(list))
+    if (onPick && table.tHead) table.tHead.rows[0].prepend(el('th', { className: 'sel-col' }))
+    return el('div', { className: 'log-day' }, el('h3', { textContent: day }), table)
+  })
 }
 function dailyLog(p) {
-  if (logFor !== p.path) { logFilter.day = ''; logFilter.kinds.clear(); logFilter.text = ''; logFor = p.path }
+  if (logFor !== p.path) { logFilter.day = ''; logFilter.kinds.clear(); logFilter.text = ''; pickedActions.clear(); logFor = p.path }
   const list = el('div', {})
+  const bar = el('div', {})
+  const owning = canOwn(p)
+  function showBar() {
+    for (const id of [...pickedActions]) if (!logOf(p).some(d => d.id === id && isOpenAction(d))) pickedActions.delete(id)
+    const ids = logOf(p).filter(d => pickedActions.has(d.id)).map(d => d.id)
+    const clearPicks = el('a', { href: '#', textContent: 'clear', onclick: e => { e.preventDefault(); pickedActions.clear(); show() } })
+    fill(bar, ids.length
+      ? el('div', { className: 'activity-bar' }, el('strong', { textContent: ids.length + ' selected' }), el('span', { className: 'refs', textContent: ids.join(' ') }), ownerControl(p, ids), clearPicks)
+      : el('div', { className: 'activity-bar idle dim', textContent: 'Check open actions to assign them or remove their owner.' }))
+  }
   const count = el('span', { className: 'n' })
   const kinds = LOG_KINDS.filter(k => logOf(p).some(d => d.kind === k))
   const chips = kinds.map(k => el('button', { className: 'member-chip' + (logFilter.kinds.has(k) ? ' sel' : ''), textContent: k,
@@ -1123,11 +1176,12 @@ function dailyLog(p) {
     const entries = logOf(p).filter(logMatches)
     count.textContent = isLogFiltered() ? entries.length + ' of ' + logOf(p).length + ' entries' : logOf(p).length + ' entries'
     clear.hidden = !isLogFiltered()
-    fill(list, ...logDays(p, entries))
+    fill(list, ...logDays(p, entries, owning ? show : null))
+    if (owning) showBar()
     if (list.isConnected) tidyTables(list)
   }
   show()
-  return el('div', {}, el('div', { className: 'log-filters' }, day, ...chips, search, count, clear), list)
+  return el('div', {}, el('div', { className: 'log-filters' }, day, ...chips, search, count, clear), owning ? bar : null, list)
 }
 
 // Board: a swimlane per work package with a milestone (p.lanes, hooks/lanes.ts), its open items in To do / In progress / In review,
@@ -1230,5 +1284,5 @@ addEventListener('resize', () => { clearTimeout(tidyTimer); tidyTimer = setTimeo
 draw()
 // A reload would drop the picked issues and pull requests: it waits until nothing is picked.
 // An open dialog holds it too, and so does a drag in progress.
-setInterval(() => { if (dialogOpen || dragging) return; if (isLogFiltered()) return; if (!pickedItems.size) location.reload() }, data.reloadMs)
+setInterval(() => { if (dialogOpen || dragging) return; if (isLogFiltered()) return; if (!pickedItems.size && !pickedActions.size) location.reload() }, data.reloadMs)
 `
