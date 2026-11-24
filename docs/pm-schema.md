@@ -479,7 +479,7 @@ high open risk (score 6 or more) in Needs attention: red with `no response`, `re
 closure`. An adequate verdict never closes a risk: it stays `open`, and in Needs attention, until
 the user confirms the closure in chat and `/pm-risk` writes `status: closed`. The Risks section of
 the Registers tab shows the response and the verdict next to each risk, red on any open risk not
-covered.
+covered. The `high risks` count of the overview row counts only the high open risks not covered.
 
 ### `registers/issues.yaml`
 

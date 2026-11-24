@@ -195,6 +195,7 @@ export type Project = {
   progress: { done: number; total: number }
   // Hours over the work packages of the current stage, not cancelled, carrying both figures; null when there is none.
   effort: { stage: number; estimate: number; actual: number; deviation: number; counted: number } | null
+  // Open risks scoring 6 or more whose response is missing, not assessed or not adequate: a covered one is not counted.
   highRisks: number
   openIssues: number
   nextReport: { due: string; isOverdue: boolean }
