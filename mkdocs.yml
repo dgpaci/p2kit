@@ -3,8 +3,10 @@ site_description: Project management for Claude Code, aligned with PRINCE2®
 repo_url: https://github.com/dgpaci/p2kit
 edit_uri: edit/main/docs/
 theme:
-  name: material
+  name: readthedocs
 docs_dir: docs
+extra_css:
+  - css/extra.css
 exclude_docs: |
   demo/
 nav:

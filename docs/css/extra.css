@@ -1,0 +1,5 @@
+/* The readthedocs theme keeps table cells on one line and scrolls the table sideways: let long text wrap. */
+.wy-table-responsive table td,
+.wy-table-responsive table th {
+  white-space: normal;
+}
