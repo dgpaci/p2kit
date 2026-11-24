@@ -10,6 +10,7 @@ import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
 import { findPlanPath, getPhaseSummary, parseObjective, parsePhaseOutcomes, parsePhases } from './stage'
 import { getObjectives } from './objectives'
 import { readReadiness } from './readiness'
+import { isRiskCovered } from './risks'
 import { getClosedRefs, hasCommitRef, isPlainIssue, logins, readTeam, toTeamItems, withActions, withItems } from './team'
 import type { RestIssue, RestPull, TimelineEvent } from './team'
 import { isDoc, parseFrontmatter, parseYaml } from './yaml'
@@ -29,7 +30,7 @@ const ROLE_LABEL: Record<string, string> = {
 }
 
 const LEVEL: Record<string, number> = { low: 1, medium: 2, high: 3 }
-// An open risk scoring this or more counts as high: high × medium and up.
+// An open risk scoring this or more counts as high: high × medium and up. The overview counts only the high ones not covered.
 const HIGH_RISK = 6
 const DAY_MS = 24 * 60 * 60 * 1000
 // git and the forge are cut off past this; a hung call would stall every later refresh.
@@ -417,7 +418,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     light: getWorstLight(tolerances.map(one => one.light)),
     progress: { done: inStage.filter(isDone).length, total: inStage.length },
     effort,
-    highRisks: risks.filter(risk => risk.status === 'open' && risk.score >= HIGH_RISK).length,
+    highRisks: risks.filter(risk => risk.status === 'open' && risk.score >= HIGH_RISK && !isRiskCovered(risk)).length,
     openIssues: issues.filter(issue => issue.status === 'open').length,
     nextReport: { due, isOverdue: Boolean(due) && due < today },
     documents,

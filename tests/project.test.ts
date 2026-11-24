@@ -34,6 +34,8 @@ test('the overview figures come from the .pm files', async () => {
   - { id: R-1, probability: high, impact: medium, status: open }
   - { id: R-2, probability: low, impact: high, status: open }
   - { id: R-3, probability: high, impact: high, status: closed }
+  - { id: R-4, probability: high, impact: high, status: open, response_actions: fallback ready, verdict: adequate }
+  - { id: R-5, probability: high, impact: high, status: open, response_actions: fallback ready, verdict: not-adequate }
 `,
       issues: 'issues:\n  - { id: I-1, status: open }\n  - { id: I-2, status: closed }\n',
     },
@@ -42,7 +44,7 @@ test('the overview figures come from the .pm files', async () => {
 
   expect(project.light).toBe('amber')
   expect(project.progress).toEqual({ done: 1, total: 2 })
-  expect(project.highRisks).toBe(1)
+  expect(project.highRisks).toBe(2)
   expect(project.openIssues).toBe(1)
   expect(project.nextReport).toEqual({ due: '2026-10-29', isOverdue: true })
   expect(project.roles.map(role => `${role.label}: ${role.people.join(', ')}`)).toEqual(['Executive: Anna', 'Senior User: Marco'])
