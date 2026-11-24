@@ -183,7 +183,8 @@ tr.checked td { background: color-mix(in srgb, var(--on) 8%, transparent); }
 .group-head { padding: 6px 12px; background: var(--chip); font-size: 13px; border-top: 1px solid var(--line); }
 .group-head:first-child { border-top: 0; }
 button.primary, button.btn-primary { background: var(--on); border-color: var(--on); color: #fff; font-weight: 600; }
-.act { font-size: 12px; padding: 1px 8px; margin-left: 6px; }
+.act { font-size: 12px; padding: 1px 8px; margin-left: 6px; white-space: nowrap; }
+.row-actions { text-align: right; white-space: nowrap; }
 .board-head { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
 .board-head p { flex: 1; min-width: 0; margin: 0; }
 .new-issue { flex-shrink: 0; margin-left: auto; font-size: 14px; padding: 6px 16px; white-space: nowrap; }
@@ -646,9 +647,12 @@ function tidyTables(root) {
     if (tables.length < 2) continue
     // A fixed layout holds the shared widths; when they leave the longest column too little room, the other wrapping columns
     // give it back in proportion.
-    tables.forEach(t => { t.style.tableLayout = '' })
+    // Measured at their natural width: stretched to the box, each table spreads its spare room differently, and the widest of
+    // each column across the group would leave the longest one nothing.
+    tables.forEach(t => { t.style.tableLayout = ''; t.style.width = 'auto' })
     heads.forEach(h => h.forEach(c => { c.style.width = '' }))
     const widths = heads[0].map((_, i) => Math.max(...heads.map(h => h[i].getBoundingClientRect().width)))
+    tables.forEach(t => { t.style.width = '' })
     const free = tables[0].clientWidth - widths.reduce((a, w, i) => a + (i === flex ? 0 : w), 0)
     const give = widths.map((w, i) => i !== flex && !short[i] ? w : 0)
     const givable = give.reduce((a, w) => a + w, 0)
@@ -803,7 +807,8 @@ function themePanel(p, w) {
   ]
 }
 
-const wpLink = (p, w) => w.delivery ? link([w.delivery.issue === null ? '' : '#' + w.delivery.issue, w.delivery.milestone, w.delivery.branch].filter(Boolean).join(' · ') || 'theme', p.path + '/theme/' + w.id) : linkAction(p, w) || el('span', { className: 'dim', textContent: '—' })
+// A work package's status, coloured like the theme lanes: completed or archived green, in progress blue.
+const wpStatus = status => pill(status || 'no status', status === 'completed' || status === 'archived' ? 'ready' : status === 'in-progress' ? 'inprogress' : '')
 
 const STATUS_LABEL = { review: 'review asked', inprogress: 'in progress', todo: 'to do', waiting: 'waiting for review', stalled: 'stalled' }
 // The issues and pull requests checked on the Team and Activity tabs: one page-local selection shared by both, keyed 'i<n>' or
@@ -1006,10 +1011,12 @@ function workPackages(p) {
   const byId = ids => ids.map(id => p.workPackages.find(w => w.id === id)).filter(Boolean)
   const placed = new Set(HORIZONS.flatMap(([key]) => p.roadmap[key]))
   const hasEffort = p.workPackages.some(w => w.estimate !== null || w.actual !== null)
-  const head = ['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', ...(hasEffort ? ['Estimate', 'Actual', 'Deviation'] : []), 'Link']
-  // The id opens the work package's own page when it has one (a delivery to follow), else its file.
-  const row = w => [w.delivery ? link(w.id, p.path + '/theme/' + w.id) : fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), el('span', {}, w.status, statusAction(p, w)), w.teamManager, w.due,
-    ...(hasEffort ? [hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation)] : []), wpLink(p, w)]
+  const head = ['', 'Title', 'Stage', 'Status', 'Team manager', 'Due', ...(hasEffort ? ['Estimate', 'Actual', 'Deviation'] : []), '']
+  // The id opens the work package's own page when it has one (a delivery to follow), else its file; the last cell holds the actions,
+  // Link… only while nothing is linked.
+  const row = w => [w.delivery ? link(w.id, p.path + '/theme/' + w.id) : fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), wpStatus(w.status), w.teamManager, w.due,
+    ...(hasEffort ? [hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation)] : []),
+    el('div', { className: 'row-actions' }, statusAction(p, w), w.delivery ? null : linkAction(p, w))]
   const groups = [...HORIZONS.map(([key, label]) => [label, byId(p.roadmap[key])]), ['Not placed', p.workPackages.filter(w => !placed.has(w.id))]]
   const empty = groups.filter(g => !g[1].length).map(g => g[0])
   const canPlace = server && !p.pmRef && p.workPackages.some(isOpenWp)
@@ -1147,7 +1154,7 @@ function boardLane(p, l) {
   const lane = el('div', { className: 'lane' + (l.reopened ? ' reopened' : '') + (l.wp ? '' : ' unplanned') },
     el('div', { className: 'lane-head' },
       l.wp ? el('strong', {}, el('span', { className: 'mono', textContent: l.wp + ' ' }), l.title) : el('strong', { textContent: 'Unplanned' }),
-      l.wp ? pill(l.status || 'no status', l.status === 'completed' || l.status === 'archived' ? 'ready' : l.status === 'in-progress' ? 'inprogress' : '') : el('span', { className: 'dim', textContent: 'open items in no work package' }),
+      l.wp ? wpStatus(l.status) : el('span', { className: 'dim', textContent: 'open items in no work package' }),
       l.milestone ? el('span', { className: 'dim', textContent: 'milestone ' + l.milestone }) : null,
       l.progress ? el('span', { title: 'milestone items closed' }, bar(l.progress.closed, l.progress.total)) : null,
       l.reopened ? pill('reopened: ' + l.reopened + ' open', 'review') : null,
