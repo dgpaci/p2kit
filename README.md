@@ -1,5 +1,7 @@
 # p2kit
 
+[![Documentation Status](https://readthedocs.org/projects/p2kit/badge/?version=latest)](https://p2kit.readthedocs.io/en/latest/)
+
 Project management for Claude Code, **aligned with PRINCE2®** — not affiliated with or endorsed
 by PeopleCert or AXELOS. PRINCE2® is a registered trademark of PeopleCert. All templates here are
 written from scratch.
