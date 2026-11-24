@@ -149,8 +149,11 @@ export type WpDelivery = {
 export type TeamStatus = 'review' | 'inprogress' | 'todo' | 'waiting' | 'stalled'
 // `updatedAt` is an ISO day.
 export type TeamItem = { kind: 'issue' | 'pr'; number: number; title: string; status: TeamStatus; url: string; updatedAt: string }
-// One person of the roles; `login` is '' when team.people gives none. WIP counts every item but `review`.
-export type TeamMember = { person: string; login: string; roles: string[]; items: TeamItem[]; wip: number; wipLimit: number; isOverLimit: boolean }
+// One person of the roles; `name` the person with a trailing note in brackets dropped, as an action's owner names them; `login`
+// is '' when team.people gives none. WIP counts every item but `review`; `actions` (the open Daily Log actions they own) are not WIP.
+export type TeamMember = {
+  person: string; name: string; login: string; roles: string[]; items: TeamItem[]; actions: DailyEntry[]; wip: number; wipLimit: number; isOverLimit: boolean
+}
 
 // Median and nearest-rank p90 in days, one decimal; null when count is 0.
 export type FlowStat = { count: number; median: number | null; p90: number | null }
@@ -173,8 +176,10 @@ export type Project = {
   // A continuous stage has no end: the desk shows open and completed work packages instead of a percentage.
   stage: { current: number | null; name: string; start: string; plannedEnd: string; isContinuous: boolean }
   roles: RoleLine[]
-  // The people of the roles, once each; their items are read by loadProjects from the forge.
+  // The people of the roles, once each; their items are read by loadProjects from the forge, their actions from the Daily Log.
   team: TeamMember[]
+  // The open actions of the Daily Log owned by no person of the roles, or by nobody.
+  strayActions: DailyEntry[]
   // The repo's open milestones, issues and pull requests, read by loadProjects from the forge.
   milestones: MilestoneProgress[]
   forgeIssues: ForgeIssue[]

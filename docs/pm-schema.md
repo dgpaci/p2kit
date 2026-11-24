@@ -147,6 +147,12 @@ Items are listed in that order, most recently updated first within one status. T
 person counts every item but `review`; over `wip_limit` the desk flags them. A forge failure is
 the project error `team: <forge> issues|pulls: <reason>`; the team still shows, with no item.
 
+Every person of the roles, with a login or without, also gets the open actions of the Daily Log
+they own, listed under their items and not counted in the WIP. A person's **name**, the one an
+action's `owner` gives, is the text of `roles` with a trailing note in brackets dropped
+(`Finizio (Secretary)` is `Finizio`); the match ignores case. The open actions owned by nobody,
+or by a name no person of the roles has, close the Team tab under *No team member*.
+
 ### Activity
 
 The same read fills the Activity tab — its count the open issues and pull requests — in three
@@ -582,9 +588,10 @@ entries:
 
 - `kind` is `event`, `decision`, `action`, `problem` or `note`; `source` is `forge` (an event read
   from the desk's snapshot), `meeting` or `manual`, absent = unknown.
-- An `action` has `status` `open` or `done`, absent = `open`, an optional `owner` (a person of the
-  roles when it is one) and `due`; the other kinds have no status. An open action past its `due`
-  is **overdue**.
+- An `action` has `status` `open` or `done`, absent = `open`, an optional `owner` and `due`; the
+  other kinds have no status. An open action past its `due` is **overdue**. The `owner` is one
+  person: the name of a person of the roles (below, *Team and WIP*: a note in brackets dropped)
+  when it is one, else the name as said.
 - `ref` is the forge item a `forge` event is about (`'#41'`, quoted: a `#` would start a
   comment); `register` the Issue or Risk Register entry an entry was moved to, `issue` the forge
   issue opened for it — both written by `/pm-log` after the user's OK.
@@ -602,6 +609,12 @@ entries:
   free-text search on id, kind, source, text, ref, register, owner, due, status and `#issue`
   (every word must match). The filters are page-local and reset for another project; while one
   is set the page does not reload itself.
+- With the desk helper, each open action on the page has a checkbox; a bar over the list assigns
+  the checked ones to a person of the roles or `team.people`, by name, or removes their owner.
+  The helper previews the lines before and after and, on Confirm, writes only `owner:` of each
+  line — replaced in place, added before `due:` or `status:` (else last), or removed — and leaves
+  out, with the reason, an entry that is no open action or already has that owner. An entry not
+  written as one flow-map line is refused. While an action is checked the page does not reload.
 
 ## Next report due
 

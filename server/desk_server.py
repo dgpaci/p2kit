@@ -59,6 +59,11 @@ RANK = re.compile(r'^\d+(\.\d+)?$')
 MAX_RANK = 999
 NOTE_STATUS = ('open', 'closed')
 LINK_KEYS = ('issue', 'milestone', 'branch')
+ENTRY_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,49}$')
+FLOW_LINE = re.compile(r'^(\s*-\s*\{)(.*)(\}\s*)$')
+# A trailing note in brackets is no part of a person's name: `Finizio (Secretary)` is owner `Finizio`.
+NAME_NOTE = re.compile(r'\s*\([^()]*\)\s*$')
+MAX_LOG_OWNER = 50
 
 
 class ActionError(Exception):
@@ -79,6 +84,13 @@ def to_scalar(value):
     if '"' not in value:
         return '"' + value + '"'
     raise ActionError('a value cannot hold both kinds of quote')
+
+
+def to_flow_scalar(value):
+    """A text as a scalar inside a flow map or list: as to_scalar, and quoted when it holds a comma."""
+    rendered = to_scalar(value)
+    # A plain scalar never holds a quote (PLAIN), so a comma in it is quoted as it is.
+    return "'" + rendered + "'" if ',' in rendered and rendered[0] not in '\'"' else rendered
 
 
 def from_scalar(raw):
@@ -170,6 +182,91 @@ def set_note_status(text, sha, note_text, status):
     if fields[0] == status:
         raise ActionError(f'the note is already {status}')
     after = re.sub(r'\bstatus:\s*(open|closed)\b', 'status: ' + status, line, count=1)
+    lines[index] = after
+    return ''.join(lines), {'line': index + 1, 'before': line.rstrip('\n'), 'after': after.rstrip('\n')}
+
+
+def flow_items(body, keyed):
+    """The items of a flow map's or flow list's body, commas inside quotes kept: [{key, start, end, value}] where start and end
+    span the whole item and value is its scalar, quotes dropped. A quote opens a quoted scalar only where the scalar starts."""
+    items, index, size = [], 0, len(body)
+    while index < size:
+        while index < size and body[index] == ' ':
+            index += 1
+        start, key = index, None
+        if keyed:
+            colon = body.find(':', index)
+            if colon < 0:
+                raise ActionError('not a flow map')
+            key = body[index:colon].strip()
+            index = colon + 1
+            while index < size and body[index] == ' ':
+                index += 1
+        value_start = index
+        if index < size and body[index] in '\'"':
+            close = body.find(body[index], index + 1)
+            if close < 0:
+                raise ActionError('a quote is not closed')
+            index = close + 1
+        comma = body.find(',', index)
+        index = size if comma < 0 else comma
+        end = len(body[:index].rstrip())
+        items.append({'key': key, 'start': start, 'end': end, 'value': from_scalar(body[value_start:end])})
+        index += 1
+    return items
+
+
+def person_name(person):
+    """A person of the roles as an owner names them: a trailing note in brackets dropped."""
+    return NAME_NOTE.sub('', person).strip()
+
+
+def set_log_owner(text, entry_id, owner):
+    """Sets `owner:` of the one open action of the Daily Log (a flow-map line) whose id is entry_id, or removes it when owner
+    is ''; every other field of the line stays as it is. A new owner goes before `due:` or `status:`, else last."""
+    lines = text.splitlines(keepends=True)
+    found = []
+    for index, line in enumerate(lines):
+        match = FLOW_LINE.match(line.rstrip('\n'))
+        if match and re.search(r'\bid:\s*' + re.escape(entry_id) + r'\s*[,}]', line):
+            fields = flow_items(match.group(2), True)
+            if any(f['key'] == 'id' and f['value'] == entry_id for f in fields):
+                found.append((index, match, fields))
+    if not found:
+        if re.search(r'^\s*-?\s*id:\s*' + re.escape(entry_id) + r'\s*$', text, re.M):
+            raise ActionError(f'{entry_id} is not a one-line entry')
+        raise ActionError(f'{entry_id} not found')
+    if len(found) > 1:
+        raise ActionError(f'more than one entry is {entry_id}')
+    index, match, fields = found[0]
+    value = {f['key']: f['value'] for f in fields}
+    if value.get('kind') != 'action':
+        raise ActionError(f'{entry_id} is not an action: only an action has an owner')
+    status = value.get('status') or 'open'
+    if status != 'open':
+        raise ActionError(f'{entry_id} is {status}: only an open action is assigned')
+    current = next((f for f in fields if f['key'] == 'owner'), None)
+    held = current['value'] if current else ''
+    if not owner and not held:
+        raise ActionError(f'{entry_id} has no owner')
+    if owner and person_name(held).lower() == owner.lower():
+        raise ActionError(f'{entry_id} is already owned by {held}')
+    body = match.group(2)
+    if not owner:
+        position = fields.index(current)
+        cut_from = fields[position - 1]['end'] if position else current['start']
+        cut_to = current['end'] if position else fields[1]['start'] if len(fields) > 1 else current['end']
+        body = body[:cut_from] + body[cut_to:]
+    elif current:
+        body = body[:current['start']] + 'owner: ' + to_flow_scalar(owner) + body[current['end']:]
+    else:
+        before = next((f for f in fields if f['key'] in ('due', 'status')), None)
+        if before:
+            body = body[:before['start']] + 'owner: ' + to_flow_scalar(owner) + ', ' + body[before['start']:]
+        else:
+            body = body[:fields[-1]['end']] + ', owner: ' + to_flow_scalar(owner) + body[fields[-1]['end']:]
+    line = lines[index]
+    after = match.group(1) + body + match.group(3) + ('\n' if line.endswith('\n') else '')
     lines[index] = after
     return ''.join(lines), {'line': index + 1, 'before': line.rstrip('\n'), 'after': after.rstrip('\n')}
 
@@ -627,6 +724,80 @@ def team_logins(root):
     return found
 
 
+def project_people(root):
+    """The people of .pm/project.yaml as an owner names them: those of `roles` (a name, a flow list or a block list per role),
+    then the keys of `team.people`; each once, case aside, a trailing note in brackets dropped."""
+    path = os.path.join(root, '.pm', 'project.yaml')
+    lines = read_text(path).splitlines() if os.path.exists(path) else []
+    names, section, people_indent, person_indent = [], None, 0, None
+    for line in lines:
+        bare = line.split(' #', 1)[0].rstrip()
+        if not bare.strip() or bare.lstrip().startswith('#'):
+            continue
+        indent = len(bare) - len(bare.lstrip())
+        if indent == 0:
+            section = 'roles' if re.match(r'^roles:\s*$', bare) else 'team' if re.match(r'^team:\s*$', bare) else None
+        elif section == 'roles':
+            match = re.match(r'^\s+[A-Za-z_]+:\s*(.*)$', bare)
+            item = re.match(r'^\s+-\s+(.+)$', bare)
+            if match and match.group(1).startswith('['):
+                names += [one['value'] for one in flow_items(match.group(1).strip()[1:-1], False)]
+            elif match and match.group(1):
+                names.append(from_scalar(match.group(1)))
+            elif item:
+                names.append(from_scalar(item.group(1)))
+        elif section == 'team' and re.match(r'^\s+people:\s*$', bare):
+            section, people_indent, person_indent = 'people', indent, None
+        elif section == 'people':
+            if indent <= people_indent:
+                section = 'team'
+                continue
+            person_indent = person_indent or indent
+            match = re.match(r'^\s+(.+?):(\s|$)', bare)
+            if indent == person_indent and match:
+                names.append(from_scalar(match.group(1)))
+    people, seen = [], set()
+    for name in (person_name(one) for one in names):
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            people.append(name)
+    return people
+
+
+def plan_log_owner(root, request):
+    """The preview of assigning one person to open actions of the Daily Log, or of removing their owner (owner ''): the lines
+    before and after, and the actions left out with the reason."""
+    ids, owner = request.get('ids'), request.get('owner')
+    if not isinstance(ids, list) or not ids or len(ids) > MAX_LOG_OWNER or not all(isinstance(one, str) and ENTRY_ID.match(one) for one in ids):
+        raise ActionError(f'pick from 1 to {MAX_LOG_OWNER} actions')
+    if not isinstance(owner, str):
+        raise ActionError('an owner is a name')
+    if owner:
+        owner = next((one for one in project_people(root) if one.lower() == owner.strip().lower()), None)
+        if owner is None:
+            raise ActionError(f"{request.get('owner')} is no person of roles or team.people in .pm/project.yaml")
+    path = os.path.join(root, '.pm', 'registers', 'daily-log.yaml')
+    if not os.path.exists(path):
+        raise ActionError('no daily log')
+    text = read_text(path)
+    new_text, changes, done, skipped = text, [], [], []
+    for entry_id in dict.fromkeys(ids):
+        try:
+            new_text, change = set_log_owner(new_text, entry_id, owner)
+            changes.append(change)
+            done.append(entry_id)
+        except ActionError as error:
+            skipped.append({'ref': entry_id, 'reason': str(error)})
+    if not changes:
+        raise ActionError(f"nothing to {'assign' if owner else 'unassign'}: {'; '.join(s['reason'] for s in skipped)}")
+    done = ', '.join(done)
+    preview = {
+        'kind': 'log-owner', 'project': root, 'summary': f'Assign {owner} to {done}' if owner else f'Remove the owner of {done}',
+        'file': os.path.relpath(path, root), 'fileHash': file_hash(text), 'changes': changes, 'skipped': skipped,
+    }
+    return preview, lambda: write_text(path, new_text)
+
+
 def plan_assign(root, home, request, forge=None):
     """The change of the assignees of one issue or pull request: who, before and after, as the forge has it now."""
     number, login, op = request.get('number'), request.get('login'), request.get('op')
@@ -871,6 +1042,9 @@ def run_action(home, request, forge=None):
         apply = lambda: apply_package(root, preview, forge, existing, request.get('move') or [])
     elif request.get('kind') == 'wp-place':
         preview, write = plan_place(root, request)
+        apply = lambda: (write(), ['written'])[1]
+    elif request.get('kind') == 'log-owner':
+        preview, write = plan_log_owner(root, request)
         apply = lambda: (write(), ['written'])[1]
     else:
         preview, write = plan_file_action(root, request)

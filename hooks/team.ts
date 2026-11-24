@@ -1,4 +1,4 @@
-import type { IssueState, RoleLine, TeamItem, TeamMember, TeamStatus } from '../types'
+import type { DailyEntry, IssueState, RoleLine, TeamItem, TeamMember, TeamStatus } from '../types'
 import { isDoc } from './yaml'
 import type { Value } from './yaml'
 
@@ -56,6 +56,11 @@ export function getIssueState(issue: RestIssue, pulls: RestPull[]): IssueState {
 // An assigned issue as its assignee's work: its pull request in review is waiting on others.
 const ISSUE_STATUS: Record<IssueState, TeamStatus> = { todo: 'todo', inprogress: 'inprogress', review: 'waiting', done: 'todo' }
 const limitOf = (value: Value | undefined): number | null => (typeof value === 'number' ? value : null)
+// A trailing note in brackets is no part of a person's name: `Finizio (Secretary)` is owner `Finizio`.
+const NAME_NOTE = /\s*\([^()]*\)\s*$/
+
+/** A person of the roles as the owner of a Daily Log action names them: a trailing note in brackets dropped. The desk helper's `person_name`. */
+export const getPersonName = (person: string): string => person.replace(NAME_NOTE, '').trim()
 
 /** The people of the roles, once each in role order, with the login and WIP limit `team.people` gives them; items empty. */
 export function readTeam(roles: RoleLine[], team: Value | undefined, errors: string[]): TeamMember[] {
@@ -73,7 +78,7 @@ export function readTeam(roles: RoleLine[], team: Value | undefined, errors: str
       if (person in people && !isDoc(people[person])) errors.push(`team.people: ${person}: expected { login, wip_limit }`)
       const entry = isDoc(people[person]) ? people[person] : {}
       const login = typeof entry.login === 'string' || typeof entry.login === 'number' ? String(entry.login) : ''
-      members.push({ person, login, roles: [label], items: [], wip: 0, wipLimit: limitOf(entry.wip_limit) ?? wipLimit, isOverLimit: false })
+      members.push({ person, name: getPersonName(person), login, roles: [label], items: [], actions: [], wip: 0, wipLimit: limitOf(entry.wip_limit) ?? wipLimit, isOverLimit: false })
     }
   }
   for (const person of Object.keys(people)) {
@@ -108,4 +113,17 @@ export function toTeamItems(login: string, issues: RestIssue[], pulls: RestPull[
 export function withItems(member: TeamMember, items: TeamItem[]): TeamMember {
   const wip = items.filter(item => item.status !== 'review').length
   return { ...member, items, wip, isOverLimit: wip > member.wipLimit }
+}
+
+/**
+ * The members each with the open actions of the Daily Log they own, matched on the name with its note dropped, case aside;
+ * and the open actions no member owns, or nobody (`strayActions`), in file order.
+ */
+export function withActions(members: TeamMember[], log: DailyEntry[]): { team: TeamMember[]; strayActions: DailyEntry[] } {
+  const open = log.filter(entry => entry.kind === 'action' && entry.status === 'open')
+  const ownerOf = (entry: DailyEntry) => members.find(member => member.name.toLowerCase() === getPersonName(entry.owner).toLowerCase())
+  return {
+    team: members.map(member => ({ ...member, actions: open.filter(entry => entry.owner && ownerOf(entry) === member) })),
+    strayActions: open.filter(entry => !entry.owner || !ownerOf(entry)),
+  }
 }
