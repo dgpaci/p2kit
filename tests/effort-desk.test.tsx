@@ -56,7 +56,7 @@ test('the desk shows the stage effort in the row, the computed tolerance in the 
   expect(script).toContain("t.area === 'effort' && t.light === 'red'")
   expect(script).toContain("(n > 0 ? '+' : '') + n + 'h'")
   expect(script).toContain("(t.isComputed ? ' · from work packages' : '')")
-  expect(script).toContain("'Due', ...(hasEffort ? ['Estimate', 'Actual', 'Deviation'] : []), 'Link'")
+  expect(script).toContain("'Due', ...(hasEffort ? ['Estimate', 'Actual', 'Deviation'] : []), ''")
   expect(script).toContain("'Stage ' + e.stage + ' effort: ' + e.actual + 'h of ' + e.estimate + 'h, deviation ' + signed(e.deviation) + ' over ' + e.counted + ' work packages'")
   expect(script).not.toContain('${')
 
