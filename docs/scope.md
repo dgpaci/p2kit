@@ -42,6 +42,7 @@ the PM reads it before it is saved.
 | Group issues and pull requests into a package | a forge milestone, and a new `WP-<nn>.md` | button, preview of the plan, confirm |
 | Assign / unassign a team member | the assignees of the open issues and pull requests checked on the Team or Activity tab | checkboxes and one *Assign to…* select on top, or a drop on a member; preview before / after, confirm |
 | Give Daily Log actions an owner | `owner:` of the open actions checked in the Daily Log, set to a person of `roles` or `team.people`, or removed | browser page only: checkboxes and *Assign to…* in Registers, preview before / after, confirm |
+| Start, switch or stop the clock | the local time log `~/.claude/timelog/` and `~/.claude/p2kit/clock.json` — no project file | browser page only: *⏱ Start clock*, *Switch…*, *Stop*; no preview, the day is reviewed at `/pm-log` |
 | Create an issue | a new forge issue, optionally in a work package's milestone and assigned to a team member | dialog, preview, confirm |
 | Attach an issue or pull request to a work package | the milestone of an open item on the forge: the work package's `milestone:`, created after the work package's title when it has none | a drop on a work package (drag dock or Board lane), preview old / new milestone, confirm; a checked group goes through *Create package* |
 | Digest, Highlight Report, Presentation, Retrospective, issue draft | new text | opens a session with the skill |

@@ -23,6 +23,7 @@ committed with the code. The skills write it; the project desk reads it.
   registers/quality.yaml    Quality Register          (phase 2)
   registers/lessons.yaml    Lessons Log: retrospectives, lessons, actions (/pm-retro)
   registers/daily-log.yaml  Daily Log: the day's forge events, decisions, actions, problems, notes (/pm-log)
+  timesheets/<login>/<yyyy-mm>.yaml  time per issue, work package and kind, one file per person and month (/pm-log)
 ```
 
 Stage baselines are git tags `pm/stage-<n>-approved`, set when the Board approves stage `n`'s plan.
@@ -396,9 +397,11 @@ listed only in the Work packages tab. The desk never changes a status by itself.
 
 ### Effort
 
-`estimate` and `actual` are hours, both optional; `actual` is typed by hand — there is no time
-tracker. A value that is not a number (a word, a quoted `'3'`) is the error
-`WP-<nn>: estimate is not a number` (resp. `actual`) and reads as missing.
+`estimate` and `actual` are hours, both optional. `actual` is typed by hand until the timesheets
+(below, *Timesheets*) carry time on the work package: from then on `actual` is the sum of its
+timesheet lines, the typed value is ignored, and the desk marks the figure *from the timesheets*. A
+value that is not a number (a word, a quoted `'3'`) is the error `WP-<nn>: estimate is not a
+number` (resp. `actual`) and reads as missing.
 
 The **deviation** of a work package, in hours:
 
@@ -616,6 +619,71 @@ entries:
   out, with the reason, an entry that is no open action or already has that owner. An entry not
   written as one flow-map line is refused. While an action is checked the page does not reload.
 
+## Time log
+
+The raw time is **local**, never in `.pm/`: one file per local day, `~/.claude/timelog/<yyyy-mm-dd>.jsonl`,
+one interval per line, appended by any tool that records time. It is a contract shared between tools:
+p2kit's desk clock writes the PM's own time, forge-desk the developer's sessions, and `/pm-log` reads
+all of it.
+
+```json
+{"start": "2026-11-26T09:12:00+01:00", "end": "2026-11-26T10:40:00+01:00", "remote": "github.com/dgpaci/p2kit", "ref": "#85", "kind": "dev", "source": "forge-desk"}
+```
+
+- `start`, `end` — ISO 8601 with offset; an interval past midnight is cut, each piece in the file of
+  its own day.
+- `remote` — the repo's origin as `host/owner/repo`, host lower-cased (`git@github.com:dgpaci/p2kit.git`
+  → `github.com/dgpaci/p2kit`), so every clone and worktree of a repo counts together; `null` for a
+  repo with no origin, which the desk clock identifies by `project` (its folder) instead.
+- `ref` — the issue or pull request worked on (`#85`, `PR #12`), `null` for time on the project.
+- `kind` — `dev` (a development session), `desk` (the PM on the desk), `meeting`.
+- `source` — the tool that wrote it (`p2kit-desk`, `forge-desk`). Other fields are ignored.
+
+An interval belongs to a project when its `remote` is the project's origin, or with no `remote`
+when its `project` is the project's folder. A line that does not read (bad JSON, `end` before
+`start`, a `ref` that is not `#<n>`) is reported and skipped.
+
+**The desk clock.** On the browser desk (with the helper), *⏱ Start clock* records the PM's own time on
+a project, one of its open issues, or a meeting (`kind: desk` or `meeting`). One clock runs at a
+time: *Switch…* closes the running interval and starts the next, *Stop* closes it; an interval
+under a minute is dropped. The running clock is `~/.claude/p2kit/clock.json`
+(`{ start, project, remote, ref, kind }`); the desk shows it with its elapsed time on every page, and
+in the overview row of each project the minutes logged *today* and not yet in a timesheet. Starting,
+switching and stopping write no project file and need no preview: they are the PM's own record,
+corrected at `/pm-log`.
+
+## Timesheets
+
+`/pm-log` **crystallizes** a day of the time log into the project, after the user's OK:
+`.pm/timesheets/<login>/<yyyy-mm>.yaml`, one file per person (the forge login) and month, so the
+people of a project never write the same file.
+
+```yaml
+# Time crystallized by /pm-log from the local time log (docs/pm-schema.md → Timesheets).
+entries:
+  - { date: 2026-11-26, ref: '#85', wp: WP-07, kind: dev, minutes: 95, sent: true }
+  - { date: 2026-11-26, kind: desk, minutes: 40 }
+  - { date: 2026-11-26, kind: meeting, minutes: 60 }
+```
+
+- One line per issue and kind of the day; time on the project has no `ref`. `minutes` is a positive
+  whole number; a line without it is the error `timesheets/<login>/<file>: <date> <ref> minutes is not
+  a positive number` and is left out.
+- `wp` — the work package of the issue: the one whose `issue:` is it, else the one whose `milestone:`
+  is the issue's milestone on the forge; absent when none.
+- `sent: true` — the line was added to the issue's tracked times on Forgejo (`POST
+  issues/<n>/times`, its minutes in seconds). GitHub has no time tracking: there the time stays here.
+- The helper `server/timesheet.py` does the arithmetic, never the skill: `show` drafts a day with a
+  hash, `write` writes the draft only while the log still gives that hash, and replaces a day already
+  written only with `--replace` and never once sent; `push` sends to Forgejo the lines not yet sent.
+  The time log is read across every project: where intervals overlap, the time counts once, for the
+  interval on an issue before one on the project, then for the latest started, and the draft lists
+  the overlaps. A day is not written while the desk clock runs on the project.
+
+The desk reads every timesheet: per work package the sum of its lines is its `tracked` hours and its
+`actual` (*Effort*), and per project `time` (`{ hours, byKind, people }`), shown as `time <h>h` in
+the overview row (by kind and person on hover).
+
 ## Next report due
 
 `reporting.last_highlight + reporting.highlight_every_days`; with no highlight yet,
@@ -734,7 +802,7 @@ confirmation.
 ## Desk layout
 
 The overview row of a project: stage, objectives, work packages, iteration and effort when set,
-high risks, blockers, errors, `notready` and WIP badges; the next report shows only in Needs
+the timesheet hours and the time logged today when there are any, high risks, blockers, errors, `notready` and WIP badges; the next report shows only in Needs
 attention, once overdue. A project's form has eight tabs, in this order:
 
 - **Recap** — stage, objectives, tolerances, Needs attention, notes of no work theme.

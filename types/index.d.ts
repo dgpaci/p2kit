@@ -22,6 +22,9 @@ export type WorkPackage = {
   estimate: number | null
   actual: number | null
   deviation: number | null
+  // Hours of the timesheets on its issues; null when none. When set, `actual` is this figure, not the hand-typed one.
+  // A snapshot written by older code has none.
+  tracked?: number | null
   // Roadmap placement: `horizon` now | next | later, '' when absent or unknown; `rank` 1 = first, null when absent.
   horizon: string
   rank: number | null
@@ -73,6 +76,10 @@ export type Iteration = {
 export type Retrospective = { date: string; iteration: number | null; stage: number | null }
 export type Lesson = { id: string; date: string; iteration: number | null; kind: string; text: string }
 export type RetroAction = { id: string; date: string; text: string; issue: number | null; status: string }
+
+// One line of a timesheet, `.pm/timesheets/<login>/<yyyy-mm>.yaml` (/pm-log): time crystallized from the local time log.
+// `ref` the issue ('#85', '' for time on the project), `wp` its work package ('' when none), `kind` dev | desk | meeting.
+export type TimeEntry = { login: string; date: string; ref: string; wp: string; kind: string; minutes: number }
 
 // One line of the Daily Log, `.pm/registers/daily-log.yaml` (/pm-log). `kind` is event | decision | action | problem | note;
 // `source` forge | meeting | manual ('' when absent); `owner`, `due`, `ref`, `register` are '' when absent; `status` is 'open'
@@ -195,6 +202,8 @@ export type Project = {
   progress: { done: number; total: number }
   // Hours over the work packages of the current stage, not cancelled, carrying both figures; null when there is none.
   effort: { stage: number; estimate: number; actual: number; deviation: number; counted: number } | null
+  // Hours of the timesheets, in total and per kind (dev, desk, meeting); null when there is no timesheet. A snapshot of older code has none.
+  time?: { hours: number; byKind: Record<string, number>; people: string[] } | null
   // Open risks scoring 6 or more whose response is missing, not assessed or not adequate: a covered one is not counted.
   highRisks: number
   openIssues: number

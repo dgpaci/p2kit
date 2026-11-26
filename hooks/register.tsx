@@ -108,8 +108,8 @@ const getStageEffortLine = ({ stage, actual, estimate, deviation, counted }: Non
   `Stage ${stage} effort: ${actual}h of ${estimate}h, deviation ${getSignedHours(deviation)} over ${counted} work packages`
 
 /** "est <e>h · act <a>h · <signed>h" for the figures a work package has; '' with none. */
-const getWpEffortText = ({ estimate, actual, deviation }: WorkPackage): string =>
-  [estimate === null ? '' : `est ${estimate}h`, actual === null ? '' : `act ${actual}h`, deviation === null ? '' : getSignedHours(deviation)].filter(Boolean).join(' · ')
+const getWpEffortText = ({ estimate, actual, deviation, tracked }: WorkPackage): string =>
+  [estimate === null ? '' : `est ${estimate}h`, actual === null ? '' : `act ${actual}h${tracked != null ? ' (timesheets)' : ''}`, deviation === null ? '' : getSignedHours(deviation)].filter(Boolean).join(' · ')
 
 const HORIZON_LABEL = { now: 'Now', next: 'Next', later: 'Later' } as const
 // The open columns of a Board lane in the pane.
@@ -308,6 +308,8 @@ export const register: Register = on => {
         </Text>
       )
     }
+    /** The timesheet hours of the project, when it has a timesheet. */
+    const getTimeFact = ({ time }: Project) => time && <Text dimColor>{`time ${time.hours}h`}</Text>
     /** "notready <N>" in yellow when some open issue lacks a readiness heading. */
     const getNotReadyLine = (project: Project) => project.notReady > 0 && <Text color="yellow">{`notready ${project.notReady}`}</Text>
     /** One commit note: kind, status, text; red while an open blocker. */
@@ -366,6 +368,7 @@ export const register: Register = on => {
               <Text mono>{getProgressBar(project)}</Text>
               {getIterationFact(project)}
               {getEffortFact(project)}
+              {getTimeFact(project)}
               <Text dimColor wrap="truncate-end">
                 {`high risks ${project.highRisks}`}
               </Text>
