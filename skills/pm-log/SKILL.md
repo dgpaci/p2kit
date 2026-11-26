@@ -23,7 +23,8 @@ user's timesheet only after its own OK, and commits nothing.
    - `pull request opened` — `forgePulls` with `createdAt` equal to the day;
    - `pull request merged` — `flow.mergedPulls` with `closedAt` equal to the day.
 
-   Each is one entry `kind: event, source: forge, text: '<event>: <title>', ref: '#<n>'`. Leave
+   Each is one entry `kind: event, source: forge, text: '<event>: <title>', ref: '#<n>'`, the ref
+   `'<repo>#<n>'` when the item carries `repo` (a cross-repo project). Leave
    out a `ref` already logged as a forge event on the same day, so running the skill twice adds
    nothing twice. The snapshot's days are UTC days, and an item opened and closed on the same day
    is only in the closed lists: say so when it matters, never guess the missing event. `flow: null`

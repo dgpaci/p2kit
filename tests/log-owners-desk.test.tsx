@@ -66,7 +66,7 @@ test('the page assigns checked open actions to a person of the roles and lists t
   expect(script).toContain("act(p, { kind: 'log-owner', ids, owner: owner === '-' ? '' : owner })")
   expect(script).toContain("const canOwn = p => server && !p.pmRef && p.team.length > 0")
   expect(script).toContain("const isOpenAction = d => d.kind === 'action' && d.status === 'open'")
-  expect(script).toContain("actionRows(m.actions || [], false, assignable && m.login && m.items.length)")
+  expect(script).toContain("actionRows(m.actions || [], false, assignable && m.login && m.items.length, refStyle(p))")
   expect(script).toContain("el('strong', { textContent: 'No team member' })")
   expect(script).toContain("if (preview.kind === 'log-owner') return [...fileChanges(preview),")
   expect(script).toContain('if (!pickedItems.size && !pickedActions.size) location.reload()')

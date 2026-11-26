@@ -3,15 +3,17 @@ import type { EngineInterface } from 'claude-code'
 import type { Approval, CommitNote, DailyEntry, TimeEntry, Issue, Iteration, Lesson, Light, Product, Project, RetroAction, Retrospective, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
 import { FLOW_WINDOWS, getFirstReviewAt, toFlow } from './flow'
 import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from './forge'
-import type { ForgeTarget, RestMilestone } from './forge'
-import { toForgeIssues, toForgePulls, toMilestoneItems, toMilestoneProgress } from './milestones'
+import type { RestMilestone } from './forge'
+import { mergeMilestones, sortItems, toForgeIssues, toForgePulls, toMilestoneItems, toMilestoneProgress } from './milestones'
 import type { RestMilestoneItem } from './milestones'
 import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
 import { findPlanPath, getPhaseSummary, parseObjective, parsePhaseOutcomes, parsePhases } from './stage'
 import { getObjectives } from './objectives'
 import { readReadiness } from './readiness'
+import { getItemRef, parseItemRef, readItemRefs, readRepos, toRepoTarget } from './repos'
+import type { RepoTarget } from './repos'
 import { isRiskCovered } from './risks'
-import { getClosedRefs, hasCommitRef, isPlainIssue, logins, readTeam, toTeamItems, withActions, withItems } from './team'
+import { getClosedRefs, hasCommitRef, hasLabel, isPlainIssue, logins, readTeam, toTeamItems, withActions, withItems } from './team'
 import type { RestIssue, RestPull, TimelineEvent } from './team'
 import { isDoc, parseFrontmatter, parseYaml } from './yaml'
 import type { Doc, Value } from './yaml'
@@ -80,7 +82,7 @@ export type ProjectFiles = {
   docErrors?: string[]
 }
 
-type WpLink = Pick<WpDelivery, 'issue' | 'milestone' | 'branch' | 'base'>
+type WpLink = Pick<WpDelivery, 'issue' | 'milestone' | 'branch' | 'base'> & { items: string[] }
 // What the loader and buildProject both read from a work package's frontmatter.
 type WpFront = Omit<WorkPackage, 'delivery'> & { link: WpLink | null }
 
@@ -146,11 +148,11 @@ function getDeviation(status: string, estimate: number | null, actual: number | 
   return isDone({ status }) ? deviation : Math.max(0, deviation)
 }
 
-/** A work package file's frontmatter; `link` is null unless it names an issue, a milestone or a branch. Throws on bad YAML; a bad figure goes to `errors`. */
+/** A work package file's frontmatter; `link` is null unless it names an issue, a milestone, a branch or items. Throws on bad YAML; a bad figure goes to `errors`. */
 function readWpFront(file: { path: string; text: string }, errors: string[] = []): WpFront {
   const { data: front } = parseFrontmatter(file.text)
-  const link = { issue: num(front.issue), milestone: text(front.milestone), branch: text(front.branch), base: text(front.base) }
   const id = text(front.id) || basename(file.path).replace(/\.md$/, '')
+  const link = { issue: num(front.issue), milestone: text(front.milestone), branch: text(front.branch), base: text(front.base), items: readItemRefs(id, front.items, errors) }
   const status = text(front.status) || 'draft'
   const hours = (key: 'estimate' | 'actual'): number | null => {
     if (front[key] !== undefined && front[key] !== null && typeof front[key] !== 'number') errors.push(`${id}: ${key} is not a number`)
@@ -175,7 +177,7 @@ function readWpFront(file: { path: string; text: string }, errors: string[] = []
     horizon: HORIZONS.includes(horizon) ? horizon : '',
     rank: num(front.rank),
     objectives: list(front.objectives).map(text).filter(Boolean),
-    link: link.issue !== null || link.milestone || link.branch ? link : null,
+    link: link.issue !== null || link.milestone || link.branch || link.items.length ? link : null,
   }
 }
 
@@ -449,6 +451,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     roles,
     team,
     strayActions,
+    repos: readRepos(data.repos, errors),
     milestones: [],
     forgeIssues: [],
     forgePulls: [],
@@ -713,9 +716,12 @@ type PullList = Parameters<typeof toPulls>[0]
 // The Forgejo pull list of one project read, with the reason it stopped short, if it did.
 type SharedPulls = { list: PullList; failure?: string }
 
-/** Reads, GET only, the issue or milestone of a work package and the pull requests of its branch; failures go to `errors`. */
+/**
+ * Reads, GET only, the issue or milestone of a work package, each item of its `items:` in its own repo of `targets`, and the pull
+ * requests of its branch; failures go to `errors`. The issue, milestone and branch are read on `target`.
+ */
 async function readWpForge(
-  $: EngineInterface, target: ForgeTarget, id: string, link: WpDelivery, errors: string[], shared: { pulls?: Promise<SharedPulls> },
+  $: EngineInterface, target: RepoTarget, id: string, link: WpDelivery, errors: string[], shared: { pulls?: Promise<SharedPulls> }, targets: RepoTarget[] = [target],
 ): Promise<WpForge> {
   const page = target.forge === 'github' ? 'per_page=100' : `limit=${FORGEJO_PAGE}`
   const get = async <T>(what: string, path: string): Promise<T | undefined> => {
@@ -747,8 +753,26 @@ async function readWpForge(
         items.push(...batch)
         if (batch.length < size) break
       }
-      forge.milestoneItems = toMilestoneItems(items)
+      forge.milestoneItems = tagged(target, toMilestoneItems(items))
     }
+  }
+  if (link.items?.length) {
+    const read = await Promise.all(link.items.map(async ref => {
+      const { repo, number } = parseItemRef(ref)
+      const owner = targets.find(one => one.name === repo)
+      if (!owner) {
+        errors.push(`${id}: items: ${ref}: ${repo ? `${repo} is not a repo of repos:` : 'name its repo, as repo#12'}`)
+        return []
+      }
+      try {
+        return tagged(owner, toMilestoneItems([(await getForgeJson($, owner, `repos/${owner.repo}/issues/${number}`)) as RestMilestoneItem]))
+      } catch (error) {
+        errors.push(`${id}: ${ref}: ${owner.forge} item: ${reason(error)}`)
+        return []
+      }
+    }))
+    const known = new Set((forge.milestoneItems ?? []).map(item => getItemRef(item)))
+    forge.milestoneItems = sortItems([...(forge.milestoneItems ?? []), ...read.flat().filter(item => !known.has(getItemRef(item)))])
   }
   if (link.branch && target.forge === 'github') {
     const owner = target.repo.split('/')[0]
@@ -785,30 +809,52 @@ const forgeCache = new Map<string, { at: number; forge: WpForge; errors: string[
 export const getWorkThemes = (project: Project): WorkPackage[] =>
   project.workPackages.filter(pkg => pkg.delivery && pkg.stage !== null && pkg.stage === project.stage.current && isShown(pkg))
 
-// The forge of a project's origin, asked of git at most once per project read, and only when called.
-type OriginTarget = () => Promise<ForgeTarget | undefined>
+// The forges of a project, asked of git at most once per project read, and only when called: the repos of project.yaml `repos:`
+// when it lists any, else its origin (`label` and `name` ''); [] when the origin is not a forge.
+type Targets = () => Promise<RepoTarget[]>
 
-function getOriginTarget($: EngineInterface, path: string): OriginTarget {
-  let target: Promise<ForgeTarget | undefined> | undefined
-  return () => (target ??= git($, path, ['remote', 'get-url', 'origin']).then(origin => (origin.ok ? detectForge(origin.stdout.trim()) : undefined)))
+function getTargets($: EngineInterface, project: Project, path: string): Targets {
+  let targets: Promise<RepoTarget[]> | undefined
+  const repos = project.repos ?? []
+  return () => (targets ??= repos.length
+    ? Promise.resolve(repos.map(toRepoTarget))
+    : git($, path, ['remote', 'get-url', 'origin']).then(origin => {
+        const target = origin.ok ? detectForge(origin.stdout.trim()) : undefined
+        return target ? [{ ...target, label: '', name: '' }] : []
+      }))
+}
+
+// An error line of a read: on a cross-repo project, prefixed with the repo it is about.
+const scoped = (target: RepoTarget, line: string): string => (target.name ? `${target.name}: ${line}` : line)
+const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+// The items of a read, each carrying the repo it came from on a cross-repo project.
+const tagged = <T extends { repo?: string }>(target: RepoTarget, list: T[]): T[] => (target.name ? list.map(item => ({ ...item, repo: target.name })) : list)
+// The issues of the project's label as the forge filters them; '' on a project that reads its origin.
+const labelQuery = (target: RepoTarget): string => (target.label ? `&labels=${encodeURIComponent(target.label)}` : '')
+/** The pulls of the project in a repo of `repos:`: those carrying its label, and those closing one of its issues; all on its origin. */
+function getProjectPulls(target: RepoTarget, pulls: RestPull[], issues: RestIssue[]): RestPull[] {
+  if (!target.label) return pulls
+  const own = new Set(issues.filter(isPlainIssue).map(issue => issue.number))
+  return pulls.filter(pull => hasLabel(pull, target.label) || getClosedRefs(pull.body).some(number => own.has(number)))
 }
 
 /** The project with the forge state of its open linked work packages of the current stage attached; with none, nothing is read. */
-async function addForgeState($: EngineInterface, project: Project, isForced: boolean, originTarget: OriginTarget): Promise<Project> {
+async function addForgeState($: EngineInterface, project: Project, isForced: boolean, targets: Targets): Promise<Project> {
   const themes = getWorkThemes(project)
   if (themes.length === 0) return project
-  const target = await originTarget()
+  // A work package of a cross-repo project is read on the first repo of `repos:`.
+  const [target] = await targets()
   if (!target) return project
   const now = await $.clock.now()
   const allErrors: string[] = []
   const forges = new Map<string, WpForge>()
   const shared: { pulls?: Promise<SharedPulls> } = {}
   for (const { id, delivery } of themes) {
-    const key = [project.path, id, delivery.issue, delivery.milestone, delivery.branch].join('|')
+    const key = [project.path, id, delivery.issue, delivery.milestone, delivery.branch, (delivery.items ?? []).join(' '), target.host, target.repo].join('|')
     const cached = forgeCache.get(key)
     let { forge, errors } = cached && !isForced && now - cached.at < FORGE_TTL_MS ? cached : { forge: undefined, errors: [] as string[] }
     if (!forge) {
-      forge = await readWpForge($, target, id, delivery!, errors, shared)
+      forge = await readWpForge($, target, id, delivery!, errors, shared, await targets())
       forgeCache.set(key, { at: now, forge, errors })
     }
     forges.set(id, forge)
@@ -819,9 +865,9 @@ async function addForgeState($: EngineInterface, project: Project, isForced: boo
 }
 
 /** Reads, GET only, every page of an open list of the repo, up to TEAM_PAGES; failures go to `errors` and leave the list empty. */
-async function readOpenList<T>($: EngineInterface, target: ForgeTarget, what: 'issues' | 'pulls', errors: string[]): Promise<T[]> {
+async function readOpenList<T>($: EngineInterface, target: RepoTarget, what: 'issues' | 'pulls', errors: string[]): Promise<T[]> {
   const size = target.forge === 'github' ? GITHUB_PAGE : FORGEJO_PAGE
-  const query = target.forge === 'github' ? `per_page=${size}` : `${what === 'issues' ? 'type=issues&' : ''}limit=${size}`
+  const query = (target.forge === 'github' ? `per_page=${size}` : `${what === 'issues' ? 'type=issues&' : ''}limit=${size}`) + (what === 'issues' ? labelQuery(target) : '')
   const list: T[] = []
   try {
     for (let n = 1; n <= TEAM_PAGES; n++) {
@@ -831,21 +877,22 @@ async function readOpenList<T>($: EngineInterface, target: ForgeTarget, what: 'i
     }
     return list
   } catch (error) {
-    errors.push(`team: ${target.forge} ${what}: ${error instanceof Error ? error.message : String(error)}`)
+    errors.push(scoped(target, `team: ${target.forge} ${what}: ${reason(error)}`))
     return []
   }
 }
 
-// The last read of each project's repo: open issues, pull requests and milestones, shared by the team and the milestones.
-const repoCache = new Map<string, { at: number; issues: RestIssue[]; pulls: RestPull[]; milestones: RestMilestone[]; errors: string[] }>()
+// The last read of each repo of each project: open issues, pull requests and milestones, shared by the team and the milestones.
+const repoCache = new Map<string, RepoRead>()
+type RepoRead = { at: number; issues: RestIssue[]; pulls: RestPull[]; milestones: RestMilestone[]; errors: string[] }
 
 /** Reads, GET only, the open milestones of the repo, one page; a failure goes to `errors` and leaves the list empty. */
-async function readMilestones($: EngineInterface, target: ForgeTarget, errors: string[]): Promise<RestMilestone[]> {
+async function readMilestones($: EngineInterface, target: RepoTarget, errors: string[]): Promise<RestMilestone[]> {
   const query = target.forge === 'github' ? `per_page=${GITHUB_PAGE}` : `limit=${FORGEJO_PAGE}`
   try {
     return (await getForgeJson($, target, `repos/${target.repo}/milestones?state=open&${query}`)) as RestMilestone[]
   } catch (error) {
-    errors.push(`milestones: ${target.forge} milestones: ${error instanceof Error ? error.message : String(error)}`)
+    errors.push(scoped(target, `milestones: ${target.forge} milestones: ${reason(error)}`))
     return []
   }
 }
@@ -857,7 +904,7 @@ const startedIssues = new Set<string>()
  * The open issues, each assigned one with no pull request closing it marked `has_commits` once its timeline shows a commit
  * referencing it. A timeline is read until it shows one, at most TIMELINES_PER_READ per read; a failure goes to `errors`.
  */
-async function markStarted($: EngineInterface, target: ForgeTarget, issues: RestIssue[], pulls: RestPull[], errors: string[]): Promise<RestIssue[]> {
+async function markStarted($: EngineInterface, target: RepoTarget, issues: RestIssue[], pulls: RestPull[], errors: string[]): Promise<RestIssue[]> {
   const closed = new Set(pulls.flatMap(pull => getClosedRefs(pull.body)))
   const key = (issue: RestIssue) => `${target.repo}#${issue.number}`
   const unknown = issues
@@ -872,32 +919,47 @@ async function markStarted($: EngineInterface, target: ForgeTarget, issues: Rest
         const events = await getForgeJson($, target, `repos/${target.repo}/issues/${issue.number}/timeline?${page}`)
         if (hasCommitRef(events as TimelineEvent[] | null)) startedIssues.add(key(issue))
       } catch (error) {
-        failed ||= error instanceof Error ? error.message : String(error)
+        failed ||= reason(error)
       }
     }))
   }
-  if (failed) errors.push(`team: ${target.forge} timeline: ${failed}`)
+  if (failed) errors.push(scoped(target, `team: ${target.forge} timeline: ${failed}`))
   return issues.map(issue => (startedIssues.has(key(issue)) ? { ...issue, has_commits: true } : issue))
 }
 
-/** The project with its team items, milestones, open issues and open pull requests, from one read of its repo; a project whose origin is not a forge reads nothing. */
-async function addRepoState($: EngineInterface, project: Project, isForced: boolean, originTarget: OriginTarget): Promise<Project> {
-  const target = await originTarget()
-  if (!target) return project
+/**
+ * One repo's open issues, pull requests and milestones, read again past FORGE_TTL_MS or when forced. On a repo of `repos:` only
+ * the project's items are kept (getProjectPulls), and only the milestones holding one or named by a work package.
+ */
+async function readRepo($: EngineInterface, project: Project, target: RepoTarget, isForced: boolean, now: number): Promise<RepoRead> {
+  const key = [project.path, target.host, target.repo, target.label].join('|')
+  const cached = repoCache.get(key)
+  if (cached && !isForced && now - cached.at < FORGE_TTL_MS) return cached
+  const errors: string[] = []
+  const [listed, allPulls, allMilestones] = await Promise.all([
+    readOpenList<RestIssue>($, target, 'issues', errors),
+    readOpenList<RestPull>($, target, 'pulls', errors),
+    readMilestones($, target, errors),
+  ])
+  const pulls = getProjectPulls(target, allPulls, listed)
+  const issues = await markStarted($, target, listed, pulls, errors)
+  const held = new Set([...issues, ...pulls].map(item => item.milestone?.title ?? '').filter(Boolean))
+  const named = new Set(project.workPackages.map(wp => wp.delivery?.milestone ?? '').filter(Boolean))
+  const milestones = target.label ? allMilestones.filter(one => held.has(one.title) || named.has(one.title)) : allMilestones
+  const read = { at: now, issues: tagged(target, issues), pulls: tagged(target, pulls), milestones, errors }
+  repoCache.set(key, read)
+  return read
+}
+
+/** The project with its team items, milestones, open issues and open pull requests, from one read of each of its repos; a project whose origin is not a forge reads nothing. */
+async function addRepoState($: EngineInterface, project: Project, isForced: boolean, targets: Targets): Promise<Project> {
+  const list = await targets()
+  if (!list.length) return project
   const now = await $.clock.now()
-  let read = repoCache.get(project.path)
-  if (!read || isForced || now - read.at >= FORGE_TTL_MS) {
-    const errors: string[] = []
-    const [listed, pulls, milestones] = await Promise.all([
-      readOpenList<RestIssue>($, target, 'issues', errors),
-      readOpenList<RestPull>($, target, 'pulls', errors),
-      readMilestones($, target, errors),
-    ])
-    const issues = await markStarted($, target, listed, pulls, errors)
-    read = { at: now, issues, pulls, milestones, errors }
-    repoCache.set(project.path, read)
-  }
-  const { issues, pulls, milestones, errors } = read
+  const reads = await Promise.all(list.map(target => readRepo($, project, target, isForced, now)))
+  const issues = reads.flatMap(read => read.issues)
+  const pulls = reads.flatMap(read => read.pulls)
+  const milestones = mergeMilestones(reads.flatMap(read => read.milestones))
   const team = project.team.map(member => (member.login ? withItems(member, toTeamItems(member.login, issues, pulls, now)) : member))
   const forgeIssues = toForgeIssues(issues, project.readiness, pulls)
   return {
@@ -907,27 +969,27 @@ async function addRepoState($: EngineInterface, project: Project, isForced: bool
     forgeIssues,
     forgePulls: toForgePulls(pulls),
     notReady: forgeIssues.filter(issue => issue.missing.length > 0).length,
-    errors: [...project.errors, ...errors],
+    errors: [...project.errors, ...reads.flatMap(read => read.errors)],
   }
 }
 
-// The last read of each project's closed issues and pull requests; first reviews per `<repo>#<pull>`, kept for the module's life.
+// The last read of each repo's closed issues and pull requests; first reviews per `<repo>#<pull>`, kept for the module's life.
 const flowCache = new Map<string, { at: number; issues: RestIssue[]; pulls: RestPull[]; errors: string[] }>()
 const firstReviewCache = new Map<string, string | null>()
 
 /** Reads, GET only, the closed issues and pulls of the last 90 days and the first reviews of the merged pulls not yet known. */
-async function readFlow($: EngineInterface, target: ForgeTarget, now: number): Promise<{ issues: RestIssue[]; pulls: RestPull[]; errors: string[] }> {
+async function readFlow($: EngineInterface, target: RepoTarget, now: number): Promise<{ issues: RestIssue[]; pulls: RestPull[]; errors: string[] }> {
   const errors: string[] = []
   const fail = (what: string, error: unknown) => {
-    const line = `flow: ${target.forge} ${what}: ${error instanceof Error ? error.message : String(error)}`
+    const line = scoped(target, `flow: ${target.forge} ${what}: ${reason(error)}`)
     if (!errors.includes(line)) errors.push(line)
   }
   const from = now - FLOW_WINDOWS[FLOW_WINDOWS.length - 1] * DAY_MS
   const size = target.forge === 'github' ? GITHUB_PAGE : FORGEJO_PAGE
   const since = new Date(from).toISOString()
   const query = target.forge === 'github'
-    ? { issues: `issues?state=closed&since=${since}&per_page=${size}`, pulls: `pulls?state=closed&sort=updated&direction=desc&per_page=${size}` }
-    : { issues: `issues?state=closed&type=issues&since=${since}&limit=${size}`, pulls: `pulls?state=closed&sort=recentupdate&limit=${size}` }
+    ? { issues: `issues?state=closed&since=${since}&per_page=${size}${labelQuery(target)}`, pulls: `pulls?state=closed&sort=updated&direction=desc&per_page=${size}` }
+    : { issues: `issues?state=closed&type=issues&since=${since}&limit=${size}${labelQuery(target)}`, pulls: `pulls?state=closed&sort=recentupdate&limit=${size}` }
   const readPages = async <T extends { updated_at: string }>(what: 'issues' | 'pulls'): Promise<T[]> => {
     const list: T[] = []
     try {
@@ -942,7 +1004,8 @@ async function readFlow($: EngineInterface, target: ForgeTarget, now: number): P
     }
     return list
   }
-  const [issues, pulls] = await Promise.all([readPages<RestIssue>('issues'), readPages<RestPull>('pulls')])
+  const [issues, allPulls] = await Promise.all([readPages<RestIssue>('issues'), readPages<RestPull>('pulls')])
+  const pulls = getProjectPulls(target, allPulls, issues)
   const unknown = pulls
     .filter(pull => pull.merged_at && Date.parse(pull.merged_at) > from && !firstReviewCache.has(`${target.repo}#${pull.number}`))
     .sort((a, b) => b.merged_at!.localeCompare(a.merged_at!))
@@ -957,25 +1020,32 @@ async function readFlow($: EngineInterface, target: ForgeTarget, now: number): P
       }
     }))
   }
-  return { issues, pulls, errors }
+  return { issues: tagged(target, issues), pulls: tagged(target, pulls), errors }
 }
 
-/** The project with the flow of its last 90 days; a project whose origin is not a forge reads nothing and keeps flow null. */
-async function addFlow($: EngineInterface, project: Project, isForced: boolean, originTarget: OriginTarget): Promise<Project> {
-  const target = await originTarget()
-  if (!target) return project
+/** The project with the flow of its last 90 days over its repos; a project whose origin is not a forge reads nothing and keeps flow null. */
+async function addFlow($: EngineInterface, project: Project, isForced: boolean, targets: Targets): Promise<Project> {
+  const list = await targets()
+  if (!list.length) return project
   const now = await $.clock.now()
-  let read = flowCache.get(project.path)
-  if (!read || isForced || now - read.at >= FLOW_TTL_MS) {
-    read = { at: now, ...(await readFlow($, target, now)) }
-    flowCache.set(project.path, read)
-  }
-  const firstReviews: Record<number, string> = {}
-  for (const pull of read.pulls) {
-    const at = firstReviewCache.get(`${target.repo}#${pull.number}`)
-    if (at) firstReviews[pull.number] = at
-  }
-  return { ...project, flow: toFlow(read.issues, read.pulls, firstReviews, now), errors: [...project.errors, ...read.errors] }
+  const reads = await Promise.all(list.map(async target => {
+    const key = [project.path, target.host, target.repo, target.label].join('|')
+    let read = flowCache.get(key)
+    if (!read || isForced || now - read.at >= FLOW_TTL_MS) {
+      read = { at: now, ...(await readFlow($, target, now)) }
+      flowCache.set(key, read)
+    }
+    // Numbers repeat across the repos of a cross-repo project: there a first review is keyed by the pull's url.
+    const firstReviews: Record<string, string> = {}
+    for (const pull of read.pulls) {
+      const at = firstReviewCache.get(`${target.repo}#${pull.number}`)
+      if (at) firstReviews[target.name ? pull.html_url : pull.number] = at
+    }
+    return { ...read, firstReviews }
+  }))
+  const firstReviews = Object.assign({}, ...reads.map(read => read.firstReviews))
+  const flow = toFlow(reads.flatMap(read => read.issues), reads.flatMap(read => read.pulls), firstReviews, now)
+  return { ...project, flow, errors: [...project.errors, ...reads.flatMap(read => read.errors)] }
 }
 
 /** Every registered project, read afresh; registry problems come back as errors. */
@@ -993,10 +1063,11 @@ export async function loadProjects($: EngineInterface, isForced = false): Promis
   const projects = await Promise.all(
     entries.map(async ({ path, pmBranch }) => {
       try {
-        const originTarget = getOriginTarget($, path)
-        const project = await addForgeState($, buildProject(await readProjectFiles($, path, pmBranch), today), isForced, originTarget)
+        const built = buildProject(await readProjectFiles($, path, pmBranch), today)
+        const targets = getTargets($, built, path)
+        const project = await addForgeState($, built, isForced, targets)
         // The open and the closed items are read side by side; the flow's own errors follow the repo's.
-        const [repo, flowed] = await Promise.all([addRepoState($, project, isForced, originTarget), addFlow($, project, isForced, originTarget)])
+        const [repo, flowed] = await Promise.all([addRepoState($, project, isForced, targets), addFlow($, project, isForced, targets)])
         return { ...repo, flow: flowed.flow, errors: [...repo.errors, ...flowed.errors.slice(project.errors.length)] }
       } catch (error) {
         const empty = buildProject({ path, products: [], workPackages: [] }, today)

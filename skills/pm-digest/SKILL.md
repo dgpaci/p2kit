@@ -21,6 +21,9 @@ nothing.
    1. **Closed this week** — `flow.closedIssues` and `flow.mergedPulls` with `closedAt` inside
       the period: `#<n> <title>` with the milestone, if any. `flow: null` → `no forge data`.
    2. **Pull requests in review** — `forgePulls` with `inReview`: `#<n> <title>`, last updated.
+
+   An item carrying `repo` (a cross-repo project, `docs/pm-schema.md` → Cross-repo projects) is
+   written `<repo>#<n>` wherever these sections write `#<n>`.
    3. **Stalled** — per person of `team`, their items with status `stalled`.
    4. **Waiting** — per person of `team`, items `waiting` (the author waits on someone) and
       `review` (a review is asked of that person), each tagged with its status. Forge mentions

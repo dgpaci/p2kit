@@ -115,14 +115,16 @@ export type MilestoneProgress = Milestone & { stalled: number; inReview: number 
 export type IssueState = 'todo' | 'inprogress' | 'review' | 'done'
 // An open issue of the repo; `createdAt` and `updatedAt` ISO days ('' when the forge gave no creation time), `milestone` its title or '', `missing` the readiness headings its body lacks,
 // `assignees` their logins, `state` as IssueState reads it.
-export type ForgeIssue = { number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; missing: string[]; assignees: string[]; state: IssueState }
+// `repo` names the repo of a cross-repo project the item belongs to (project.yaml `repos:`); absent when the project reads its origin.
+export type ForgeIssue = { repo?: string; number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; missing: string[]; assignees: string[]; state: IssueState }
 // An open pull request of the repo; `inReview` when it is not a draft and waits on a requested reviewer; `assignees` their logins, `closes` the issues its body closes (`closes #n`, `fixes #n`, `resolves #n`).
-export type ForgePull = { number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; draft: boolean; inReview: boolean; assignees: string[]; closes: number[] }
+export type ForgePull = { repo?: string; number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; draft: boolean; inReview: boolean; assignees: string[]; closes: number[] }
 
-// An issue or a pull request of a work package's milestone, any state.
-export type MilestoneItem = { kind: 'issue' | 'pr'; number: number; title: string; url: string; state: 'open' | 'closed' | 'merged' }
+// An issue or a pull request of a work package's milestone or of its `items:`, any state; `repo` as on ForgeIssue.
+export type MilestoneItem = { kind: 'issue' | 'pr'; repo?: string; number: number; title: string; url: string; state: 'open' | 'closed' | 'merged' }
 
-// What the forge says about a work package: its issue or milestone with every item in it, the pull requests of its branch.
+// What the forge says about a work package: its issue or milestone with every item in it, then the items its `items:` names
+// (in `milestoneItems` too), the pull requests of its branch.
 export type WpForge = {
   issue?: { number: number; title: string; state: string }
   milestone?: Milestone
@@ -131,10 +133,13 @@ export type WpForge = {
   isReadyToClose: boolean
 }
 
-// A work package linked to an issue, a milestone or a branch; `ref` and `planPath` are '' when not found.
+// A work package linked to an issue, a milestone, a branch or items; `ref` and `planPath` are '' when not found.
 export type WpDelivery = {
   issue: number | null
   milestone: string
+  // The issues and pull requests it names one by one (frontmatter `items:`), as `repo#n` on a cross-repo project, else `#n`; [] when absent.
+  // A snapshot written by older code has none.
+  items?: string[]
   branch: string
   base: string
   ref: string
@@ -155,7 +160,7 @@ export type WpDelivery = {
 // The status of an open issue or pull request from one team member's point of view.
 export type TeamStatus = 'review' | 'inprogress' | 'todo' | 'waiting' | 'stalled'
 // `updatedAt` is an ISO day.
-export type TeamItem = { kind: 'issue' | 'pr'; number: number; title: string; status: TeamStatus; url: string; updatedAt: string }
+export type TeamItem = { kind: 'issue' | 'pr'; repo?: string; number: number; title: string; status: TeamStatus; url: string; updatedAt: string }
 // One person of the roles; `name` the person with a trailing note in brackets dropped, as an action's owner names them; `login`
 // is '' when team.people gives none. WIP counts every item but `review`; `actions` (the open Daily Log actions they own) are not WIP.
 export type TeamMember = {
@@ -168,9 +173,13 @@ export type FlowStat = { count: number; median: number | null; p90: number | nul
 // -> merged), and the issues closed and pulls merged per UTC ISO week, `week` its Monday, oldest first.
 export type FlowWindow = { days: number; leadTime: FlowStat; firstReview: FlowStat; merge: FlowStat; throughput: { week: string; issues: number; pulls: number }[] }
 // An issue closed or a pull merged; `closedAt` an ISO day, `milestone` its title or ''.
-export type ClosedItem = { number: number; title: string; url: string; closedAt: string; milestone: string }
+export type ClosedItem = { repo?: string; number: number; title: string; url: string; closedAt: string; milestone: string }
 // The 30- then 90-day windows, and the issues closed and pulls merged in the 90 days, most recently closed first.
 export type Flow = { windows: FlowWindow[]; closedIssues: ClosedItem[]; mergedPulls: ClosedItem[] }
+
+// A repo of a cross-repo project (project.yaml `repos:`): `remote` host/owner/repo, `label` the forge label its items carry,
+// `name` how the desk names it (the repo's name, or owner/repo when two repos share it).
+export type ProjectRepo = { remote: string; label: string; name: string }
 
 export type Project = {
   path: string
@@ -187,7 +196,10 @@ export type Project = {
   team: TeamMember[]
   // The open actions of the Daily Log owned by no person of the roles, or by nobody.
   strayActions: DailyEntry[]
-  // The repo's open milestones, issues and pull requests, read by loadProjects from the forge.
+  // The repos the forge is read from instead of the origin, [] when project.yaml has no `repos:`. A project built by older code has none.
+  repos?: ProjectRepo[]
+  // The repo's open milestones, issues and pull requests, read by loadProjects from the forge; with `repos:`, those of every repo
+  // carrying its label, milestones merged by title.
   milestones: MilestoneProgress[]
   forgeIssues: ForgeIssue[]
   forgePulls: ForgePull[]

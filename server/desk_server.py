@@ -54,6 +54,9 @@ SHA = re.compile(r'^[0-9a-fA-F]{7,40}$')
 PLAIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.,()/&+-]*$")
 SPECIAL = re.compile(r'^([-+.\d]+|true|false|null|yes|no)$', re.I)
 REF = re.compile(r'^(PR )?#(\d+)$')
+# An item of a cross-repo project: `genropy#12`, `PR genropy#12`; `#12` on a project reading its origin.
+ITEM = re.compile(r'^(PR )?([\w./-]+)?#(\d+)$')
+REPO_ENTRY = re.compile(r'^\s*-\s*\{(.*)\}\s*(#.*)?$')
 # A status moves only along these edges: completing is the PM stating the Board's decision.
 STATUS_FROM = {'completed': ('authorized', 'in-progress'), 'archived': ('completed',)}
 HORIZON_LABEL = {'now': 'Now', 'next': 'Next', 'later': 'Later'}
@@ -562,14 +565,61 @@ def detect_forge(url):
     return {'forge': 'github' if host == 'github.com' else 'forgejo', 'host': host, 'repo': f'{match.group(2)}/{match.group(3)}'}
 
 
+def project_repos(root):
+    """The repos of .pm/project.yaml `repos:`, each {remote, label, name} named as the desk names it (hooks/repos.ts); None
+    when the project lists none and reads its origin. Only the flow-map form the schema documents is read."""
+    path = os.path.join(root, '.pm', 'project.yaml')
+    lines = read_text(path).splitlines() if os.path.exists(path) else []
+    start = next((n for n, line in enumerate(lines) if re.match(r'^repos:[ \t]*(#.*)?$', line)), None)
+    if start is None:
+        return None
+    found = []
+    for line in lines[start + 1:]:
+        if line.strip() and not line.startswith((' ', '\t', '-')):
+            break
+        match = REPO_ENTRY.match(line)
+        if not match:
+            continue
+        fields = dict((k.strip(), from_scalar(v)) for k, _, v in (part.partition(':') for part in match.group(1).split(',')))
+        remote, label = fields.get('remote', '').strip().rstrip('/'), fields.get('label', '').strip()
+        if re.match(r'^[\w.-]+/[\w.-]+/[\w.-]+$', remote) and label and all(r['remote'].lower() != remote.lower() for r in found):
+            found.append({'remote': remote, 'label': label})
+    short = lambda remote: remote.split('/')[2].lower()
+    for repo in found:
+        shared = sum(short(r['remote']) == short(repo['remote']) for r in found) > 1
+        repo['name'] = '/'.join(repo['remote'].split('/')[1:]) if shared else repo['remote'].split('/')[2]
+    return found
+
+
+def forge_for(root, home, repo, injected=None):
+    """The forge of an item's repo: `injected` when given (a forge, or {repo: forge} for a cross-repo project), else Forge."""
+    if isinstance(injected, dict):
+        if repo not in injected:
+            raise ActionError(f'{repo} is not a repo of repos: in .pm/project.yaml')
+        return injected[repo]
+    return injected or Forge(root, home, repo)
+
+
 class Forge:
     """GitHub through `gh api`, Forgejo through its REST API with the token `fj auth` saved."""
 
-    def __init__(self, root, home):
-        result = subprocess.run(['git', '-C', root, 'remote', 'get-url', 'origin'], capture_output=True, text=True, timeout=FORGE_TIMEOUT)
-        target = detect_forge(result.stdout.strip()) if result.returncode == 0 else None
-        if not target:
-            raise ActionError('the project has no forge origin')
+    def __init__(self, root, home, repo=''):
+        repos = project_repos(root)
+        if repos is not None:
+            # A cross-repo project: the item's own repo, never the origin.
+            found = next((r for r in repos if r['name'] == repo), None)
+            if not repo:
+                raise ActionError('name the repo of the item: the project lists repos: in .pm/project.yaml')
+            if not found:
+                raise ActionError(f'{repo} is not a repo of repos: in .pm/project.yaml')
+            target = detect_forge('https://' + found['remote'])
+        else:
+            if repo:
+                raise ActionError(f'{repo}#…: the project lists no repos: in .pm/project.yaml')
+            result = subprocess.run(['git', '-C', root, 'remote', 'get-url', 'origin'], capture_output=True, text=True, timeout=FORGE_TIMEOUT)
+            target = detect_forge(result.stdout.strip()) if result.returncode == 0 else None
+            if not target:
+                raise ActionError('the project has no forge origin')
         self.forge, self.host, self.repo, self.home = target['forge'], target['host'], target['repo'], home
 
     def call(self, method, path, body=None):
@@ -616,8 +666,31 @@ class Forge:
         return self.call('GET', f'repos/{self.repo}/issues?{query}') or []
 
 
-def item_ref(item):
-    return ('PR #' if item.get('pull_request') is not None else '#') + str(item['number'])
+def item_ref(item, repo=''):
+    return ('PR ' if item.get('pull_request') is not None else '') + repo + '#' + str(item['number'])
+
+
+def parse_items(raw):
+    """The references of a work package's `items:` flow list as read_key returns it; [] when absent."""
+    inner = (raw or '').strip()
+    if inner.startswith('[') and inner.endswith(']'):
+        inner = inner[1:-1]
+    return [from_scalar(part) for part in inner.split(',') if part.strip()]
+
+
+def render_items(refs):
+    """A flow list of references; one starting with `#` is quoted, or the subset reads a comment."""
+    return '[' + ', '.join(f"'{ref}'" if ref.startswith('#') else ref for ref in refs) + ']'
+
+
+def to_item(entry, cross):
+    """(repo, number) of an item given as a number (a project reading its origin) or a reference; refused otherwise."""
+    if isinstance(entry, int) and not isinstance(entry, bool) and entry > 0 and not cross:
+        return '', entry
+    match = ITEM.match(entry) if isinstance(entry, str) else None
+    if not match or bool(match.group(2)) != cross:
+        raise ActionError('an item is repo#<n> on a cross-repo project, else a number' if cross else 'an issue or pull request is a number')
+    return match.group(2) or '', int(match.group(3))
 
 
 def next_wp_id(root):
@@ -803,17 +876,19 @@ def plan_log_owner(root, request):
 
 def plan_assign(root, home, request, forge=None):
     """The change of the assignees of one issue or pull request: who, before and after, as the forge has it now."""
-    number, login, op = request.get('number'), request.get('login'), request.get('op')
+    number, login, op, repo = request.get('number'), request.get('login'), request.get('op'), request.get('repo') or ''
     if not (isinstance(number, int) and not isinstance(number, bool) and number > 0):
         raise ActionError('an issue or pull request is a number')
+    if not isinstance(repo, str):
+        raise ActionError('a repo is a name of repos:')
     if op not in ('add', 'remove'):
         raise ActionError('op is add or remove')
     people = team_logins(root)
     if not isinstance(login, str) or login not in people:
         raise ActionError(f'{login} is not a login of team.people in .pm/project.yaml')
-    forge = forge or Forge(root, home)
+    forge = forge_for(root, home, repo, forge)
     item = forge.call('GET', f'repos/{forge.repo}/issues/{number}')
-    ref = item_ref(item)
+    ref = item_ref(item, repo)
     if item.get('state') != 'open':
         raise ActionError(f'{ref} is closed')
     before = [a['login'] for a in item.get('assignees') or [] if a.get('login')]
@@ -845,16 +920,18 @@ def plan_assign_many(root, home, request, forge=None):
         raise ActionError('op is add or remove')
     if not isinstance(numbers, list) or not numbers or len(numbers) > MAX_ASSIGN_MANY:
         raise ActionError(f'pick from 1 to {MAX_ASSIGN_MANY} issues or pull requests')
-    if not all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in numbers):
-        raise ActionError('an issue or pull request is a number')
+    # On a cross-repo project each item is a reference, repo#<n>, read on its own repo's forge.
+    cross = project_repos(root) is not None
+    wanted = [to_item(entry, cross) for entry in numbers]
     people = team_logins(root)
     if not isinstance(login, str) or login not in people:
         raise ActionError(f'{login} is not a login of team.people in .pm/project.yaml')
-    forge = forge or Forge(root, home)
-    items, skipped = [], []
-    for number in dict.fromkeys(numbers):
-        item = forge.call('GET', f'repos/{forge.repo}/issues/{number}')
-        ref = item_ref(item)
+    forges, items, skipped = {}, [], []
+    for repo, number in dict.fromkeys(wanted):
+        if repo not in forges:
+            forges[repo] = forge_for(root, home, repo, forge)
+        item = forges[repo].call('GET', f'repos/{forges[repo].repo}/issues/{number}')
+        ref = item_ref(item, repo)
         before = [a['login'] for a in item.get('assignees') or [] if a.get('login')]
         if item.get('state') != 'open':
             skipped.append({'ref': ref, 'reason': 'closed'})
@@ -864,22 +941,23 @@ def plan_assign_many(root, home, request, forge=None):
             skipped.append({'ref': ref, 'reason': f'{login} not assigned'})
         else:
             after = before + [login] if op == 'add' else [a for a in before if a.lower() != login.lower()]
-            items.append({'ref': ref, 'number': number, 'title': item.get('title', ''), 'before': before, 'after': after})
+            items.append({'ref': ref, 'number': number, 'title': item.get('title', ''), 'before': before, 'after': after, **({'repo': repo} if repo else {})})
     if not items:
         raise ActionError(f'nothing to {"assign" if op == "add" else "unassign"}: {", ".join(s["ref"] + " " + s["reason"] for s in skipped)}')
     count = f'{len(items)} item' + ('s' if len(items) > 1 else '')
     return {
-        'kind': 'assign-many', 'project': root, 'forge': f'{forge.host}/{forge.repo}',
+        'kind': 'assign-many', 'project': root, 'forge': ', '.join(dict.fromkeys(f'{f.host}/{f.repo}' for f in forges.values())),
         'summary': f'Assign {people[login]} to {count}' if op == 'add' else f'Unassign {people[login]} from {count}',
         'items': items, 'skipped': skipped,
-    }, forge
+    }, forges
 
 
-def apply_assign_many(preview, forge):
-    """Patches the items in order, stopping at the first failure; says what was done."""
+def apply_assign_many(preview, forges):
+    """Patches the items in order, each on its own repo's forge, stopping at the first failure; says what was done."""
     done = []
     try:
         for item in preview['items']:
+            forge = forges[item.get('repo', '')]
             forge.call('PATCH', f"repos/{forge.repo}/issues/{item['number']}", {'assignees': item['after']})
             done.append(f"{item['ref']} assignees: {', '.join(item['after']) or 'none'}")
     except ActionError as error:
@@ -955,6 +1033,9 @@ def apply_issue_milestone(root, preview, forge):
 def plan_issue_create(root, home, request, forge=None):
     """A new issue: its title and body, the milestone of a work package and a team member to assign, all optional but the title."""
     title, body, wp, login = request.get('title'), request.get('body', ''), request.get('wp') or '', request.get('login') or ''
+    repo = request.get('repo') or ''
+    if not isinstance(repo, str):
+        raise ActionError('a repo is a name of repos:')
     if not isinstance(title, str) or not title.strip() or len(title.strip()) > MAX_TITLE or '\n' in title:
         raise ActionError(f'the issue needs a title of one line, at most {MAX_TITLE} characters')
     if not isinstance(body, str) or len(body) > MAX_ISSUE_BODY:
@@ -962,10 +1043,15 @@ def plan_issue_create(root, home, request, forge=None):
     people = team_logins(root)
     if login and (not isinstance(login, str) or login not in people):
         raise ActionError(f'{login} is not a login of team.people in .pm/project.yaml')
-    milestone_title = read_key(read_text(wp_path(root, wp)), 'milestone') if wp else None
-    if wp and not milestone_title:
+    # On a cross-repo project the new issue joins the work package's `items:`; else its milestone.
+    cross, items = project_repos(root) is not None, None
+    wp_text_now = read_text(wp_path(root, wp)) if wp else None
+    milestone_title = read_key(wp_text_now, 'milestone') if wp and not cross else None
+    if wp and cross:
+        items = {'wp': wp, 'file': os.path.relpath(wp_path(root, wp), root), 'fileHash': file_hash(wp_text_now)}
+    elif wp and not milestone_title:
         raise ActionError(f'{wp} has no milestone: link one with /pm-link, or create the issue without a work package')
-    forge = forge or Forge(root, home)
+    forge = forge_for(root, home, repo, forge)
     milestone = None
     if milestone_title:
         found = next((m for m in forge.milestones() if m.get('title') == milestone_title), None)
@@ -977,18 +1063,102 @@ def plan_issue_create(root, home, request, forge=None):
         'summary': f'Create issue {title.strip()}',
         'issue': {'title': title.strip(), 'body': body.strip()}, 'milestone': milestone,
         'assignee': {'login': login, 'person': people[login]} if login else None,
+        **({'repo': repo} if repo else {}), **({'items': items} if items else {}),
     }, forge
 
 
-def apply_issue_create(preview, forge):
+def apply_issue_create(root, preview, forge):
     payload = dict(preview['issue'])
     if preview['milestone']:
         payload['milestone'] = preview['milestone']['key']
     if preview['assignee']:
         payload['assignees'] = [preview['assignee']['login']]
     created = forge.call('POST', f'repos/{forge.repo}/issues', payload) or {}
-    return [f"#{created.get('number', '?')} created" + (f" in {preview['milestone']['title']}" if preview['milestone'] else '')
+    ref = f"{preview.get('repo', '')}#{created.get('number', '?')}"
+    done = [f"{ref} created" + (f" in {preview['milestone']['title']}" if preview['milestone'] else '')
             + (f", assigned to {preview['assignee']['person']}" if preview['assignee'] else '')]
+    if preview.get('items') and created.get('number'):
+        path = os.path.join(root, preview['items']['file'])
+        text = read_text(path)
+        if file_hash(text) != preview['items']['fileHash']:
+            raise ActionError(f"{preview['items']['file']} changed since the preview — {done[0]}, not added to {preview['items']['wp']}")
+        write_text(path, set_key(text, 'items', render_items(parse_items(read_key(text, 'items')) + [ref]))[0])
+        done.append(f"{ref} in the items of {preview['items']['wp']}")
+    return done
+
+
+def plan_wp_items(root, home, request, forge=None):
+    """Attaching one issue or pull request to a work package's `items:`: the item as its forge has it, the line before and after.
+    Only the file is written: the forge is read, never changed."""
+    wp, entry = request.get('wp'), request.get('ref')
+    repo, number = to_item(entry.replace('PR ', '', 1) if isinstance(entry, str) else entry, project_repos(root) is not None)
+    path = wp_path(root, wp)
+    text = read_text(path)
+    if read_key(text, 'status') in ('archived', 'cancelled'):
+        raise ActionError(f'{wp} is {read_key(text, "status")}')
+    refs, key = parse_items(read_key(text, 'items')), f'{repo}#{number}'
+    if key in refs:
+        raise ActionError(f'{key} is already an item of {wp}')
+    forge = forge_for(root, home, repo, forge)
+    item = forge.call('GET', f'repos/{forge.repo}/issues/{number}')
+    new_text, change = set_key(text, 'items', render_items(refs + [key]))
+    ref = item_ref(item, repo)
+    preview = {
+        'kind': 'wp-items', 'project': root, 'forge': f'{forge.host}/{forge.repo}', 'wp': wp, 'summary': f'Attach {ref} to {wp}',
+        'item': {'ref': ref, 'title': item.get('title', ''), 'state': item.get('state', '')},
+        'file': os.path.relpath(path, root), 'fileHash': file_hash(text), 'changes': [change],
+    }
+    return preview, lambda: write_text(path, new_text)
+
+
+def plan_package_items(root, home, request, forge=None):
+    """The package of a cross-repo project: a new work package naming the open items in its `items:`; nothing on the forge."""
+    title = request.get('title')
+    if not isinstance(title, str) or not title.strip() or len(title) > 80:
+        raise ActionError('the package needs a short title')
+    title = title.strip()
+    to_scalar(title)
+    if request.get('fromMilestone'):
+        raise ActionError('a cross-repo project packages items, not a milestone')
+    refs = request.get('refs') or []
+    if not isinstance(refs, list) or not refs or not all(isinstance(ref, str) and ITEM.match(ref) for ref in refs):
+        raise ActionError('references are repo#<n> or PR repo#<n>')
+    forges, listed, skipped = {}, [], []
+    for ref in refs:
+        repo, number = to_item(ref, True)
+        try:
+            if repo not in forges:
+                forges[repo] = forge_for(root, home, repo, forge)
+            item = forges[repo].call('GET', f'repos/{forges[repo].repo}/issues/{number}')
+        except ActionError as error:
+            skipped.append({'ref': ref, 'reason': str(error)})
+            continue
+        if item.get('state') != 'open':
+            skipped.append({'ref': ref, 'reason': 'closed'})
+            continue
+        listed.append({'ref': item_ref(item, repo), 'key': f'{repo}#{number}', 'title': item.get('title', '')})
+    if not listed:
+        raise ActionError('no open item to package')
+    wp_id = next_wp_id(root)
+    lines = ['---', f'id: {wp_id}', f'title: {to_scalar(title)}', 'product: work-package']
+    stage = current_stage(root)
+    if stage is not None:
+        lines.append(f'stage: {stage}')
+    lines += ['status: draft', f"items: {render_items([i['key'] for i in listed])}", '---', '', f'# {title}', '', 'Packaged items:', '']
+    lines += [f"- {i['ref']} {i['title']}" for i in listed]
+    wp = {'id': wp_id, 'file': os.path.join('.pm', 'work-packages', wp_id + '.md'), 'text': '\n'.join(lines) + '\n'}
+    preview = {
+        'kind': 'package-items', 'project': root, 'forge': ', '.join(dict.fromkeys(f'{f.host}/{f.repo}' for f in forges.values())),
+        'summary': f'Package {title}', 'items': listed, 'skipped': skipped, 'wp': wp,
+    }
+
+    def write():
+        path = os.path.join(root, wp['file'])
+        if os.path.exists(path):
+            raise ActionError(f"{wp['file']} exists already")
+        write_text(path, wp['text'])
+        return [f'{wp_id} written']
+    return preview, write
 
 
 def apply_package(root, preview, forge, existing, move):
@@ -1032,14 +1202,22 @@ def run_action(home, request, forge=None):
         preview, forge = plan_assign(root, home, request, forge)
         apply = lambda: apply_assign(preview, forge)
     elif request.get('kind') == 'assign-many':
-        preview, forge = plan_assign_many(root, home, request, forge)
-        apply = lambda: apply_assign_many(preview, forge)
+        preview, forges = plan_assign_many(root, home, request, forge)
+        apply = lambda: apply_assign_many(preview, forges)
+    elif request.get('kind') == 'issue-milestone' and project_repos(root) is not None:
+        raise ActionError("on a cross-repo project an item joins a work package's items: drop it on the work package")
     elif request.get('kind') == 'issue-milestone':
         preview, forge = plan_issue_milestone(root, home, request, forge)
         apply = lambda: apply_issue_milestone(root, preview, forge)
     elif request.get('kind') == 'issue-create':
         preview, forge = plan_issue_create(root, home, request, forge)
-        apply = lambda: apply_issue_create(preview, forge)
+        apply = lambda: apply_issue_create(root, preview, forge)
+    elif request.get('kind') == 'wp-items':
+        preview, write = plan_wp_items(root, home, request, forge)
+        apply = lambda: (write(), ['written'])[1]
+    elif request.get('kind') == 'package' and project_repos(root) is not None:
+        preview, write = plan_package_items(root, home, request, forge)
+        apply = write
     elif request.get('kind') == 'package':
         preview, forge, existing = plan_package(root, home, request, forge)
         apply = lambda: apply_package(root, preview, forge, existing, request.get('move') or [])

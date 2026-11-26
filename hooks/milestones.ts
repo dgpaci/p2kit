@@ -2,13 +2,30 @@ import type { ForgeIssue, ForgePull, MilestoneItem, MilestoneProgress, WorkPacka
 import { toMilestone } from './forge'
 import { DEFAULT_HEADINGS, getMissingHeadings } from './readiness'
 import type { RestMilestone } from './forge'
-import { getClosedRefs, getIssueState, isPlainIssue, logins, STALLED_MS } from './team'
+import { getClosedRefs, getIssueState, isPlainIssue, logins, repoOf, STALLED_MS } from './team'
 import type { RestIssue, RestPull } from './team'
 
 export { getClosedRefs, getIssueState } from './team'
 
 /** A pull request waiting on review: not a draft, with at least one requested reviewer. */
 const isInReview = (pull: RestPull): boolean => !pull.draft && (pull.requested_reviewers ?? []).length > 0
+
+/**
+ * The milestones of a cross-repo project, one per title: the counts of the repos sharing it summed, the earliest due day kept.
+ * A single repo's list comes back as it is.
+ */
+export function mergeMilestones(milestones: RestMilestone[]): RestMilestone[] {
+  const merged = new Map<string, RestMilestone>()
+  for (const one of milestones) {
+    const known = merged.get(one.title)
+    if (!known) merged.set(one.title, one)
+    else {
+      const dues = [known.due_on, one.due_on].filter((due): due is string => Boolean(due)).sort()
+      merged.set(one.title, { ...known, open_issues: known.open_issues + one.open_issues, closed_issues: known.closed_issues + one.closed_issues, due_on: dues[0] ?? null })
+    }
+  }
+  return [...merged.values()]
+}
 
 /** Each milestone with its stalled open items and its open pulls in review, by due day (none last), then title. */
 export function toMilestoneProgress(milestones: RestMilestone[], issues: RestIssue[], pulls: RestPull[], now: number): MilestoneProgress[] {
@@ -30,7 +47,7 @@ export function toForgeIssues(issues: RestIssue[], headings: string[] = DEFAULT_
     .filter(isPlainIssue)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .map(issue => ({
-      number: issue.number, title: issue.title, url: issue.html_url, createdAt: (issue.created_at ?? '').slice(0, 10), updatedAt: issue.updated_at.slice(0, 10),
+      ...repoOf(issue), number: issue.number, title: issue.title, url: issue.html_url, createdAt: (issue.created_at ?? '').slice(0, 10), updatedAt: issue.updated_at.slice(0, 10),
       milestone: issue.milestone?.title ?? '', missing: getMissingHeadings(issue.body, headings), assignees: logins(issue.assignees), state: getIssueState(issue, pulls),
     }))
 }
@@ -40,7 +57,7 @@ export function toForgePulls(pulls: RestPull[]): ForgePull[] {
   return [...pulls]
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .map(pull => ({
-      number: pull.number, title: pull.title, url: pull.html_url, createdAt: (pull.created_at ?? '').slice(0, 10), updatedAt: pull.updated_at.slice(0, 10),
+      ...repoOf(pull), number: pull.number, title: pull.title, url: pull.html_url, createdAt: (pull.created_at ?? '').slice(0, 10), updatedAt: pull.updated_at.slice(0, 10),
       milestone: pull.milestone?.title ?? '', draft: Boolean(pull.draft), inReview: isInReview(pull), assignees: logins(pull.assignees), closes: getClosedRefs(pull.body),
     }))
 }
@@ -55,15 +72,18 @@ export function getMilestonePackage(workPackages: WorkPackage[], title: string):
 // An issue of a milestone as both forges list it: a pull request carries `pull_request`, with `merged_at` once merged.
 export type RestMilestoneItem = { number: number; title: string; html_url: string; state: string; pull_request?: { merged_at?: string | null } | null }
 
+/** Items open first, then by number, newest first. */
+export const sortItems = (items: MilestoneItem[]): MilestoneItem[] =>
+  [...items].sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open') || b.number - a.number)
+
 /** The issues and pull requests of a milestone, open ones first, then by number, newest first; a merged pull is `merged`. */
 export function toMilestoneItems(list: RestMilestoneItem[]): MilestoneItem[] {
-  return list
+  return sortItems(list
     .map(item => ({
       kind: item.pull_request ? 'pr' as const : 'issue' as const,
       number: item.number, title: item.title, url: item.html_url,
       state: item.pull_request?.merged_at ? 'merged' as const : item.state === 'open' ? 'open' as const : 'closed' as const,
-    }))
-    .sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open') || b.number - a.number)
+    })))
 }
 
 /** The milestone's items closed over all of them, from its item list when read, else from its counts; null without a milestone. */

@@ -1,5 +1,5 @@
 import type { ClosedItem, Flow, FlowStat, FlowWindow } from '../types'
-import { isPlainIssue } from './team'
+import { isPlainIssue, repoOf } from './team'
 import type { RestIssue, RestPull } from './team'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -51,8 +51,11 @@ function getClosedIn(issues: RestIssue[], pulls: RestPull[], now: number, days: 
   }
 }
 
+// The first review of a pull: keyed by its url on a cross-repo project, where numbers repeat across repos, else by its number.
+const firstReviewOf = (firstReviews: Record<string, string>, pull: RestPull): string | undefined => firstReviews[pull.html_url] ?? firstReviews[pull.number]
+
 /** Lead, first-review and merge time and the weekly throughput of the items closed or merged in the last `days` days. */
-export function toFlowWindow(issues: RestIssue[], pulls: RestPull[], firstReviews: Record<number, string>, now: number, days: number): FlowWindow {
+export function toFlowWindow(issues: RestIssue[], pulls: RestPull[], firstReviews: Record<string, string>, now: number, days: number): FlowWindow {
   const { closed, merged } = getClosedIn(issues, pulls, now, days)
   const throughput: FlowWindow['throughput'] = []
   for (let week = getWeekStart(now - days * DAY_MS); week <= now; week += WEEK_MS) {
@@ -66,17 +69,20 @@ export function toFlowWindow(issues: RestIssue[], pulls: RestPull[], firstReview
   return {
     days,
     leadTime: toFlowStat(closed.flatMap(issue => span(issue.created_at, issue.closed_at!))),
-    firstReview: toFlowStat(merged.flatMap(pull => (firstReviews[pull.number] ? span(pull.created_at, firstReviews[pull.number]) : []))),
+    firstReview: toFlowStat(merged.flatMap(pull => {
+      const reviewed = firstReviewOf(firstReviews, pull)
+      return reviewed ? span(pull.created_at, reviewed) : []
+    })),
     merge: toFlowStat(merged.flatMap(pull => span(pull.created_at, pull.merged_at!))),
     throughput,
   }
 }
 
 const toClosedItem = (item: RestIssue | RestPull, at: string): ClosedItem =>
-  ({ number: item.number, title: item.title, url: item.html_url, closedAt: at.slice(0, 10), milestone: item.milestone?.title ?? '' })
+  ({ ...repoOf(item), number: item.number, title: item.title, url: item.html_url, closedAt: at.slice(0, 10), milestone: item.milestone?.title ?? '' })
 
 /** The 30- and 90-day windows and the issues closed and pulls merged in the 90 days, most recently closed first. */
-export function toFlow(issues: RestIssue[], pulls: RestPull[], firstReviews: Record<number, string>, now: number): Flow {
+export function toFlow(issues: RestIssue[], pulls: RestPull[], firstReviews: Record<string, string>, now: number): Flow {
   const { closed, merged } = getClosedIn(issues, pulls, now, FLOW_WINDOWS[FLOW_WINDOWS.length - 1])
   const newest = <T>(list: T[], at: (item: T) => string) => [...list].sort((a, b) => at(b).localeCompare(at(a)))
   return {
