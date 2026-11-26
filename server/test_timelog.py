@@ -1,5 +1,7 @@
 """Tests of the time log, the desk clock and the timesheets: python3 -m unittest discover -s server"""
 
+import contextlib
+import io
 import json
 import os
 import tempfile
@@ -116,6 +118,84 @@ class TimelogTest(unittest.TestCase):
         with self.assertRaises(ds.ActionError):
             ds.run_clock(self.h.home, {'op': 'stop'})
 
+    def test_the_helper_keeps_the_clock_in_its_timelog_home(self):
+        logs = os.path.join(self.h.home, 'real')
+        state = ds.run_clock(self.h.home, {'op': 'start', 'project': self.h.root}, logs)
+        self.assertEqual(state['clock']['project'], self.h.root)
+        self.assertIsNone(timelog.read_clock(self.h.home))
+        self.assertEqual(timelog.read_clock(logs)['project'], self.h.root)
+        self.assertEqual(ds.clock_state(self.h.home, logs=logs)['clock']['project'], self.h.root)
+        # A new helper on the same homes, as after a restart, finds the clock still running and stops it.
+        server = ds.make_server(self.h.home, 0, logs)
+        server.server_close()
+        self.assertEqual(ds.clock_state(server.home, logs=server.logs)['clock']['project'], self.h.root)
+        with unittest.mock.patch.object(timelog, 'now', return_value=timelog.parse_time(state['clock']['start']) + timedelta(minutes=5)):
+            ds.run_clock(server.home, {'op': 'stop'}, server.logs)
+        self.assertEqual(len(timelog.read_day(logs, timelog.parse_time(state['clock']['start']).date().isoformat())[0]), 1)
+
+
+class ManualTest(unittest.TestCase):
+    def setUp(self):
+        self.h = Home()
+
+    def tearDown(self):
+        self.h.close()
+
+    def add(self, start, end=None, minutes=None, ref=None, kind='desk', root=None):
+        with unittest.mock.patch.object(timelog, 'now', return_value=at(20)):
+            return timesheet.add(root or self.h.root, self.h.home, DAY, start, end, minutes, ref, kind)
+
+    def test_a_past_interval_goes_to_the_time_log_as_a_manual_entry(self):
+        result = self.add('14:00', '17:00')
+        self.assertEqual(result['minutes'], 180)
+        intervals, errors = timelog.read_day(self.h.home, DAY)
+        self.assertEqual(errors, [])
+        self.assertEqual([(i['start'], i['end'], i['ref'], i['kind'], i['source'], i['project']) for i in intervals],
+                         [(at(14), at(17), None, 'desk', 'p2kit-manual', self.h.root)])
+        self.add('09:00', minutes=45, ref='#85', kind='meeting')
+        lines = timesheet.draft(self.h.root, self.h.home, DAY, None, FakeForge())['lines']
+        self.assertEqual([(l['ref'], l['kind'], l['minutes']) for l in lines], [('#85', 'meeting', 45), (None, 'desk', 180)])
+
+    def test_bad_entries_are_refused(self):
+        for start, end, minutes, ref, kind in (('14:00', None, None, None, 'desk'), ('14:00', '15:00', 60, None, 'desk'),
+                                               ('15:00', '14:00', None, None, 'desk'), ('14:00', '14:00', None, None, 'desk'),
+                                               ('19:00', '21:00', None, None, 'desk'), ('14:00', '15:00', None, '85', 'desk'),
+                                               ('14:00', '15:00', None, None, 'nap'), ('2pm', '15:00', None, None, 'desk'),
+                                               ('14:00', None, 0, None, 'desk')):
+            with self.subTest(start=start, end=end, minutes=minutes, ref=ref, kind=kind), self.assertRaises(timesheet.TimesheetError):
+                self.add(start, end, minutes, ref, kind)
+        with self.assertRaises(timesheet.TimesheetError):
+            self.add('14:00', '15:00', root=self.h.home)
+        self.assertEqual(timelog.read_day(self.h.home, DAY), ([], []))
+
+    def test_the_same_interval_is_not_recorded_twice(self):
+        self.add('14:00', '15:00')
+        with self.assertRaises(timesheet.TimesheetError):
+            self.add('14:00', '15:00')
+        self.add('15:00', '15:30')
+        self.assertEqual(len(timelog.read_day(self.h.home, DAY)[0]), 2)
+
+    def test_an_interval_over_midnight_is_cut_into_each_day(self):
+        with unittest.mock.patch.object(timelog, 'now', return_value=at(8, 0, '2026-11-27')):
+            timesheet.add(self.h.root, self.h.home, DAY, '23:00', '2026-11-27T01:30', None, None, 'dev')
+        self.assertEqual(timelog.minutes_by_project(self.h.home, DAY, {self.h.root: None}), {self.h.root: 60})
+        self.assertEqual(timelog.minutes_by_project(self.h.home, '2026-11-27', {self.h.root: None}), {self.h.root: 90})
+
+    def test_a_clone_of_a_registered_project_takes_entries(self):
+        with unittest.mock.patch.object(timelog, 'project_remote', return_value=REMOTE):
+            self.add('14:00', '15:00', root='/a/worktree')
+            self.assertEqual(timelog.read_day(self.h.home, DAY)[0][0]['remote'], REMOTE)
+
+    def test_the_cli_adds_and_answers_json(self):
+        out = io.StringIO()
+        with unittest.mock.patch.object(timelog, 'now', return_value=at(20)), contextlib.redirect_stdout(out):
+            code = timesheet.main(['add', '--project', self.h.root, '--date', DAY, '--from', '14:00', '--to', '17:00', '--home', self.h.home])
+        self.assertEqual((code, json.loads(out.getvalue())['minutes']), (0, 180))
+        out = io.StringIO()
+        with unittest.mock.patch.object(timelog, 'now', return_value=at(20)), contextlib.redirect_stdout(out):
+            code = timesheet.main(['add', '--project', self.h.root, '--date', DAY, '--to', '17:00', '--home', self.h.home])
+        self.assertEqual((code, json.loads(out.getvalue())), (1, {'error': 'add needs --from'}))
+
 
 class TimesheetTest(unittest.TestCase):
     def setUp(self):
@@ -142,8 +222,24 @@ class TimesheetTest(unittest.TestCase):
         ])
         self.assertEqual((result['login'], result['file']), ('pm', os.path.join('.pm', 'timesheets', 'pm', '2026-11.yaml')))
 
+    def test_declared_time_wins_an_overlap_a_manual_entry_before_the_clock(self):
+        self.h.log(at(14), at(17), None, 'desk', source='p2kit-manual')
+        self.h.log(at(14, 30), at(15, 30), None, 'desk', source='p2kit-desk', project='/elsewhere')
+        self.h.log(at(15), at(16), '#7', project='/elsewhere')
+        self.h.log(at(16, 30), at(17, 30), '#85')
+        result = self.draft()
+        self.assertEqual([(l['ref'], l['minutes']) for l in result['lines']], [('#85', 30), (None, 180)])
+        intervals, _ = timelog.read_day(self.h.home, DAY)
+        seconds, _ = timesheet.resolve_day(intervals, DAY)
+        self.assertEqual(seconds.get(1), None)
+        self.h.log(at(18), at(19), None, 'desk', source='p2kit-desk', project='/elsewhere')
+        self.h.log(at(18, 30), at(19, 30), '#7', project='/elsewhere')
+        intervals, _ = timelog.read_day(self.h.home, DAY)
+        seconds, _ = timesheet.resolve_day(intervals, DAY)
+        self.assertEqual((seconds[4], seconds[5]), (3600, 1800))
+
     def test_overlapping_time_counts_once_an_issue_first_across_projects(self):
-        self.h.log(at(9), at(10), None, 'desk', source='p2kit-desk')
+        self.h.log(at(9), at(10), None, 'dev')
         self.h.log(at(9, 30), at(10, 30), '#85')
         self.h.log(at(10, 15), at(10, 45), '#7', project='/elsewhere')
         result = self.draft()

@@ -8,7 +8,8 @@ It edits files of the projects listed in ~/.config/p2kit/projects.yaml, never co
 and writes to a forge only through the CLI or token the user has already set up.
 GET /doc?path=<file> renders a project's Markdown document as an HTML page (server/doc_page.py).
 GET /clock answers the desk clock and today's logged minutes per project; POST /clock starts, switches or stops it
-(server/timelog.py): the PM's own time, written to the local time log, never to a project.
+(server/timelog.py): the PM's own time, written to the local time log, never to a project. --timelog-home keeps the
+clock and the time log in the real home when --home is a desk of its own (the dev desk).
 
 stdout, read by the mod: `listening <port>` once, then `changed <project path>` per write.
 Each write also stamps ~/.claude/p2kit/desk-changed.json, so every session reads the forge again.
@@ -1246,27 +1247,33 @@ def project_remotes(home):
     return {root: timelog.project_remote(root) for root in registered_projects(home)}
 
 
-def clock_state(home, remotes=None):
-    """The running clock (None when stopped) and today's logged minutes per project path."""
+def clock_state(home, remotes=None, logs=None):
+    """The running clock (None when stopped) and today's logged minutes per project path.
+
+    `logs` is the home holding the clock and the time log, `home` by default: a helper serving a desk of its own (the dev
+    desk) still records the PM's time where every session and /pm-log read it.
+    """
     remotes = project_remotes(home) if remotes is None else remotes
-    return {'clock': timelog.read_clock(home), 'today': timelog.minutes_by_project(home, timelog.now().date().isoformat(), remotes)}
+    logs = logs or home
+    return {'clock': timelog.read_clock(logs), 'today': timelog.minutes_by_project(logs, timelog.now().date().isoformat(), remotes)}
 
 
-def run_clock(home, request):
+def run_clock(home, request, logs=None):
     """`{op: 'start', project, ref?, kind?}` starts the clock, stopping a running one first; `{op: 'stop'}` stops it."""
     if not isinstance(request, dict):
         raise ActionError('not a clock request')
+    logs = logs or home
     try:
         if request.get('op') == 'start':
             root = project_root(home, request.get('project'))
-            timelog.start_clock(home, root, request.get('ref') or None, request.get('kind') or 'desk')
+            timelog.start_clock(logs, root, request.get('ref') or None, request.get('kind') or 'desk')
         elif request.get('op') == 'stop':
-            timelog.stop_clock(home)
+            timelog.stop_clock(logs)
         else:
             raise ActionError('op must be start or stop')
     except timelog.TimelogError as error:
         raise ActionError(str(error)) from None
-    return clock_state(home)
+    return clock_state(home, logs=logs)
 
 
 # ---------------------------------------------------------------- server
@@ -1316,7 +1323,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/health':
             return self.answer(200, {'ok': True, 'pid': os.getpid()})
         if self.path == '/clock':
-            return self.answer(200, clock_state(self.server.home))
+            return self.answer(200, clock_state(self.server.home, logs=self.server.logs))
         # A document of a project, rendered from Markdown: a read, like the page, so it needs our Host and no token.
         url = urllib.parse.urlsplit(self.path)
         if url.path == '/doc':
@@ -1352,7 +1359,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.answer(200, open_path(self.server.home, request.get('path') if isinstance(request, dict) else None))
             if self.path == '/clock':
                 with self.server.lock:
-                    return self.answer(200, run_clock(self.server.home, request))
+                    return self.answer(200, run_clock(self.server.home, request, self.server.logs))
             with self.server.lock:
                 result, changed = run_action(self.server.home, request)
         except ActionError as error:
@@ -1365,9 +1372,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.answer(200, result)
 
 
-def make_server(home, port=0):
+def make_server(home, port=0, logs=None):
     server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
     server.home = home
+    server.logs = logs or home
     server.token = secrets.token_urlsafe(32)
     server.lock = threading.Lock()
     return server
@@ -1397,8 +1405,9 @@ def main():
     parser = argparse.ArgumentParser(description='p2kit desk helper')
     parser.add_argument('--home', default=os.path.expanduser('~'))
     parser.add_argument('--port', type=int, default=0)
+    parser.add_argument('--timelog-home', default=None, help='the home of the desk clock and the time log, --home by default')
     args = parser.parse_args()
-    server = make_server(args.home, args.port)
+    server = make_server(args.home, args.port, args.timelog_home)
     write_info(args.home, server)
     print(f'listening {server.server_address[1]}', flush=True)
     try:

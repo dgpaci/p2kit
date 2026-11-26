@@ -45,6 +45,9 @@ allowed.
   `http://127.0.0.1:8765/` (`http://127.0.0.1:8764/refresh` re-reads the forge). It renders the board
   outside any session and serves it through the tree's own `server/desk_server.py`, so drag & drop and
   the actions work, on the real projects and forge; it restarts on a change under `hooks/` or `server/`.
+  Its helper runs with `--home ~/.claude/p2kit/dev-desk/home`, so it passes `--timelog-home ~` (when the tree's
+  `server/desk_server.py` takes it): without it a clock started on the dev desk runs and stops in that other home,
+  invisible to every session and to `/pm-log` (the "lost" clock of 2026-11-26).
 - `claude plugin test` runs every `*.test.ts(x)` under the folder but skips dot folders, so tests
   under `.phased/` and worktrees under `.claude/` never run by accident.
 - `$.http.fetch` takes no timeout. A hung call stalls every later refresh behind the `isLoading`

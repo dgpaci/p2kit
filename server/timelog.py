@@ -15,6 +15,10 @@ from datetime import datetime, timedelta
 TIMELOG_DIR = '.claude/timelog'
 CLOCK_FILE = '.claude/p2kit/clock.json'
 SOURCE = 'p2kit-desk'
+# An interval the PM records after the fact, with /pm-log: their own statement of what they worked on.
+MANUAL_SOURCE = 'p2kit-manual'
+# Where intervals overlap, declared time beats time a tool inferred: a manual entry, then the desk clock, then the rest.
+SOURCE_RANK = {MANUAL_SOURCE: 2, SOURCE: 1}
 KINDS = ('dev', 'desk', 'meeting')
 # The desk clock records the PM's own time: development sessions are recorded by the tool that runs them.
 CLOCK_KINDS = ('desk', 'meeting')
@@ -22,6 +26,8 @@ ISSUE_REF = re.compile(r'^#(\d+)$')
 GIT_TIMEOUT = 10
 # Shorter than this, a start and stop is a slip: nothing is written.
 MIN_SECONDS = 60
+# A manual entry is one stretch of a working day.
+MAX_MANUAL_SECONDS = 24 * 3600
 
 
 class TimelogError(Exception):
@@ -169,6 +175,36 @@ def start_clock(home, root, ref=None, kind='desk', at=None):
     clock = {'start': iso(moment), 'project': root, 'remote': project_remote(root), 'ref': ref, 'kind': kind}
     write_clock(home, clock)
     return clock, stopped
+
+
+def add_interval(home, root, start, end, ref=None, kind='desk', at=None):
+    """Records a past interval on a project or an issue of it (`#<n>`), cut at midnight; returns the intervals written.
+
+    The PM's correction of the time log (time the clock missed): it ends no later than now, and the same interval of the
+    same project is never recorded twice.
+    """
+    if kind not in KINDS:
+        raise TimelogError(f'kind must be one of {", ".join(KINDS)}')
+    if ref is not None and not (isinstance(ref, str) and ISSUE_REF.match(ref)):
+        raise TimelogError('ref must be #<number>')
+    seconds = (end - start).total_seconds()
+    if seconds < MIN_SECONDS:
+        raise TimelogError('the interval must end at least a minute after it starts')
+    if seconds > MAX_MANUAL_SECONDS:
+        raise TimelogError('an interval is at most 24 hours: record a longer stretch day by day')
+    if end > (at or now()):
+        raise TimelogError('the interval ends in the future: record past time only')
+    remote = project_remote(root)
+    pieces = [{'start': iso(piece_start), 'end': iso(piece_end), 'remote': remote, 'ref': ref, 'kind': kind,
+               'source': MANUAL_SOURCE, 'project': root} for _, piece_start, piece_end in split_days(start, end)]
+    for piece in pieces:
+        intervals, _ = read_day(home, parse_time(piece['start']).date().isoformat())
+        if any(one.get('source') == MANUAL_SOURCE and belongs(one, root, remote) and iso(one['start']) == piece['start']
+               and iso(one['end']) == piece['end'] for one in intervals):
+            raise TimelogError(f'{piece["start"]} – {piece["end"]} is already recorded on this project')
+    for piece in pieces:
+        append_interval(home, piece)
+    return pieces
 
 
 def minutes_by_project(home, day, remotes):
