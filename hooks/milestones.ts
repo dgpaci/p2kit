@@ -72,15 +72,18 @@ export function getMilestonePackage(workPackages: WorkPackage[], title: string):
 // An issue of a milestone as both forges list it: a pull request carries `pull_request`, with `merged_at` once merged.
 export type RestMilestoneItem = { number: number; title: string; html_url: string; state: string; pull_request?: { merged_at?: string | null } | null }
 
+/** Items open first, then by number, newest first. */
+export const sortItems = (items: MilestoneItem[]): MilestoneItem[] =>
+  [...items].sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open') || b.number - a.number)
+
 /** The issues and pull requests of a milestone, open ones first, then by number, newest first; a merged pull is `merged`. */
 export function toMilestoneItems(list: RestMilestoneItem[]): MilestoneItem[] {
-  return list
+  return sortItems(list
     .map(item => ({
       kind: item.pull_request ? 'pr' as const : 'issue' as const,
       number: item.number, title: item.title, url: item.html_url,
       state: item.pull_request?.merged_at ? 'merged' as const : item.state === 'open' ? 'open' as const : 'closed' as const,
-    }))
-    .sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open') || b.number - a.number)
+    })))
 }
 
 /** The milestone's items closed over all of them, from its item list when read, else from its counts; null without a milestone. */

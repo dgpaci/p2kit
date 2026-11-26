@@ -3,14 +3,14 @@ import type { EngineInterface } from 'claude-code'
 import type { Approval, CommitNote, DailyEntry, TimeEntry, Issue, Iteration, Lesson, Light, Product, Project, RetroAction, Retrospective, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
 import { FLOW_WINDOWS, getFirstReviewAt, toFlow } from './flow'
 import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from './forge'
-import type { ForgeTarget, RestMilestone } from './forge'
-import { mergeMilestones, toForgeIssues, toForgePulls, toMilestoneItems, toMilestoneProgress } from './milestones'
+import type { RestMilestone } from './forge'
+import { mergeMilestones, sortItems, toForgeIssues, toForgePulls, toMilestoneItems, toMilestoneProgress } from './milestones'
 import type { RestMilestoneItem } from './milestones'
 import { isNoteOf, LOG_FORMAT, parseCommits } from './notes'
 import { findPlanPath, getPhaseSummary, parseObjective, parsePhaseOutcomes, parsePhases } from './stage'
 import { getObjectives } from './objectives'
 import { readReadiness } from './readiness'
-import { readRepos, toRepoTarget } from './repos'
+import { getItemRef, parseItemRef, readItemRefs, readRepos, toRepoTarget } from './repos'
 import type { RepoTarget } from './repos'
 import { isRiskCovered } from './risks'
 import { getClosedRefs, hasCommitRef, hasLabel, isPlainIssue, logins, readTeam, toTeamItems, withActions, withItems } from './team'
@@ -82,7 +82,7 @@ export type ProjectFiles = {
   docErrors?: string[]
 }
 
-type WpLink = Pick<WpDelivery, 'issue' | 'milestone' | 'branch' | 'base'>
+type WpLink = Pick<WpDelivery, 'issue' | 'milestone' | 'branch' | 'base'> & { items: string[] }
 // What the loader and buildProject both read from a work package's frontmatter.
 type WpFront = Omit<WorkPackage, 'delivery'> & { link: WpLink | null }
 
@@ -148,11 +148,11 @@ function getDeviation(status: string, estimate: number | null, actual: number | 
   return isDone({ status }) ? deviation : Math.max(0, deviation)
 }
 
-/** A work package file's frontmatter; `link` is null unless it names an issue, a milestone or a branch. Throws on bad YAML; a bad figure goes to `errors`. */
+/** A work package file's frontmatter; `link` is null unless it names an issue, a milestone, a branch or items. Throws on bad YAML; a bad figure goes to `errors`. */
 function readWpFront(file: { path: string; text: string }, errors: string[] = []): WpFront {
   const { data: front } = parseFrontmatter(file.text)
-  const link = { issue: num(front.issue), milestone: text(front.milestone), branch: text(front.branch), base: text(front.base) }
   const id = text(front.id) || basename(file.path).replace(/\.md$/, '')
+  const link = { issue: num(front.issue), milestone: text(front.milestone), branch: text(front.branch), base: text(front.base), items: readItemRefs(id, front.items, errors) }
   const status = text(front.status) || 'draft'
   const hours = (key: 'estimate' | 'actual'): number | null => {
     if (front[key] !== undefined && front[key] !== null && typeof front[key] !== 'number') errors.push(`${id}: ${key} is not a number`)
@@ -177,7 +177,7 @@ function readWpFront(file: { path: string; text: string }, errors: string[] = []
     horizon: HORIZONS.includes(horizon) ? horizon : '',
     rank: num(front.rank),
     objectives: list(front.objectives).map(text).filter(Boolean),
-    link: link.issue !== null || link.milestone || link.branch ? link : null,
+    link: link.issue !== null || link.milestone || link.branch || link.items.length ? link : null,
   }
 }
 
@@ -716,9 +716,12 @@ type PullList = Parameters<typeof toPulls>[0]
 // The Forgejo pull list of one project read, with the reason it stopped short, if it did.
 type SharedPulls = { list: PullList; failure?: string }
 
-/** Reads, GET only, the issue or milestone of a work package and the pull requests of its branch; failures go to `errors`. */
+/**
+ * Reads, GET only, the issue or milestone of a work package, each item of its `items:` in its own repo of `targets`, and the pull
+ * requests of its branch; failures go to `errors`. The issue, milestone and branch are read on `target`.
+ */
 async function readWpForge(
-  $: EngineInterface, target: ForgeTarget, id: string, link: WpDelivery, errors: string[], shared: { pulls?: Promise<SharedPulls> },
+  $: EngineInterface, target: RepoTarget, id: string, link: WpDelivery, errors: string[], shared: { pulls?: Promise<SharedPulls> }, targets: RepoTarget[] = [target],
 ): Promise<WpForge> {
   const page = target.forge === 'github' ? 'per_page=100' : `limit=${FORGEJO_PAGE}`
   const get = async <T>(what: string, path: string): Promise<T | undefined> => {
@@ -750,8 +753,26 @@ async function readWpForge(
         items.push(...batch)
         if (batch.length < size) break
       }
-      forge.milestoneItems = toMilestoneItems(items)
+      forge.milestoneItems = tagged(target, toMilestoneItems(items))
     }
+  }
+  if (link.items?.length) {
+    const read = await Promise.all(link.items.map(async ref => {
+      const { repo, number } = parseItemRef(ref)
+      const owner = targets.find(one => one.name === repo)
+      if (!owner) {
+        errors.push(`${id}: items: ${ref}: ${repo ? `${repo} is not a repo of repos:` : 'name its repo, as repo#12'}`)
+        return []
+      }
+      try {
+        return tagged(owner, toMilestoneItems([(await getForgeJson($, owner, `repos/${owner.repo}/issues/${number}`)) as RestMilestoneItem]))
+      } catch (error) {
+        errors.push(`${id}: ${ref}: ${owner.forge} item: ${reason(error)}`)
+        return []
+      }
+    }))
+    const known = new Set((forge.milestoneItems ?? []).map(item => getItemRef(item)))
+    forge.milestoneItems = sortItems([...(forge.milestoneItems ?? []), ...read.flat().filter(item => !known.has(getItemRef(item)))])
   }
   if (link.branch && target.forge === 'github') {
     const owner = target.repo.split('/')[0]
@@ -829,11 +850,11 @@ async function addForgeState($: EngineInterface, project: Project, isForced: boo
   const forges = new Map<string, WpForge>()
   const shared: { pulls?: Promise<SharedPulls> } = {}
   for (const { id, delivery } of themes) {
-    const key = [project.path, id, delivery.issue, delivery.milestone, delivery.branch, target.host, target.repo].join('|')
+    const key = [project.path, id, delivery.issue, delivery.milestone, delivery.branch, (delivery.items ?? []).join(' '), target.host, target.repo].join('|')
     const cached = forgeCache.get(key)
     let { forge, errors } = cached && !isForced && now - cached.at < FORGE_TTL_MS ? cached : { forge: undefined, errors: [] as string[] }
     if (!forge) {
-      forge = await readWpForge($, target, id, delivery!, errors, shared)
+      forge = await readWpForge($, target, id, delivery!, errors, shared, await targets())
       forgeCache.set(key, { at: now, forge, errors })
     }
     forges.set(id, forge)

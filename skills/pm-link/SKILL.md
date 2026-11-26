@@ -1,18 +1,21 @@
 ---
 name: pm-link
-description: Link a work package of the current stage to a forge issue, a milestone or a branch, so the project desk shows it as a work theme with its phases, commits and pull requests. Writes the link keys in .pm/work-packages/WP-<nn>.md. Use when the user asks to link an issue, a milestone or a branch to a work package, to start tracking a work theme, or asks for /pm-link.
+description: Link a work package of the current stage to a forge issue, a milestone, a branch or issues and pull requests named one by one (items, also across repos), so the project desk shows it as a work theme with its phases, commits and pull requests. Writes the link keys in .pm/work-packages/WP-<nn>.md. Use when the user asks to link an issue, a milestone, a branch or some issues and pull requests (genropy#1974) to a work package, to start tracking a work theme, or asks for /pm-link.
 ---
 
 # Link a work package to an issue, a milestone or a branch
 
 A work theme is a work package carrying link keys in its frontmatter: `issue`, `milestone`,
-`branch`, `base` (docs/pm-schema.md → *Work themes*). This skill writes only
+`branch`, `base`, `items` (docs/pm-schema.md → *Work themes*, *Cross-repo projects*). This skill writes only
 `.pm/work-packages/`; it never writes to GitHub or Forgejo and commits nothing.
 
-1. The argument is an issue number (`498`, `#498`), a milestone title or a branch name. None
-   given → ask which.
+1. The argument is an issue number (`498`, `#498`), a milestone title, a branch name, or one or more
+   item references (`genropy#1974 anaci#628`). None given → ask which. On a project whose
+   `project.yaml` lists `repos:` (a cross-repo project) an issue or pull request is always an item,
+   written `<repo>#<n>` with the repo's name as the desk shows it (its last path segment, or
+   `owner/repo` when two repos share it); a number with no repo → ask which repo.
 2. Read `.pm/project.yaml` for `stage.current`, and the frontmatter of every
-   `.pm/work-packages/WP-*.md`. If one already carries that `issue`, `milestone` or `branch`,
+   `.pm/work-packages/WP-*.md`. If one already carries that `issue`, `milestone`, `branch` or item,
    that is the work package: update its link keys (step 4) and go to step 5.
 3. Otherwise list the work packages of the current stage (id, title, status) and ask which one to
    link, or offer a new one: `WP-<nn>` with the next free number, `stage` = the current stage,
@@ -30,6 +33,13 @@ A work theme is a work package carrying link keys in its frontmatter: `issue`, `
      match, without the `remotes/origin/` prefix; confirm it with the user. No match → ask, or
      leave it absent.
    - `base`: ask, `''` (the repo's default branch) by default.
+   - `items`: the references given, added to the list the work package already carries, once
+     each, as a flow list `items: [genropy#1974, anaci#628]`; on a project reading its origin
+     `items: ['#12']`. To unlink an item, take it out of the list; an empty list is dropped.
+     Read each one first (`gh issue view <n> -R <owner>/<repo>` on GitHub,
+     `fj -H <host> issue view <owner>/<repo>#<n>` on Forgejo, host and repo from its `repos:`
+     remote; both answer for a pull request too) and say its title, so a typo in a number is
+     caught before it is written.
    - `objectives`: when `.pm/brief.md` has an `## Objectives` checklist and the work package
      carries no `objectives:` yet, list the open objectives (id and title) and offer the ones the
      work package serves, `objectives: [O-2, O-4]`; only ids of the brief, none if the user says so.

@@ -171,8 +171,19 @@ items or named by a work package. The closed issues and pull requests of the flo
 Each item carries `repo`, the repo's name (`owner/repo` when two repos share it), and the desk names it `genropy#498`,
 `PR genropy#12`. A `#n` in a pull request's body names an issue of its own repo. Team, WIP, Activity, Board and Metrics
 add up the repos. Milestones sharing a title are one milestone: their counts are summed and the earliest due day is kept.
-An error of a repo is prefixed with its name (`genropy: team: github issues: <reason>`). A work theme is read on the first
-repo of the list.
+An error of a repo is prefixed with its name (`genropy: team: github issues: <reason>`). A work package's `issue`,
+`milestone` and `branch` are read on the first repo of the list; its plan and commits come from local git, as on any
+project.
+
+A work package names the issues and pull requests it delivers, in any repo, with `items:`: a list of `repo#n`, the repo
+named as the desk names it. On a project reading its origin an item is `'#n'` or a bare number. The desk reads each
+one, GET only, with `repos/<repo>/issues/<n>` on its own repo's forge (both forges answer for a pull request too), and
+adds it to the work package's items, after those of its milestone, open ones first. A merged pull request is `merged`.
+The work package's progress with no plan is its items closed over all of them. On the Board it has its own lane, which
+holds the open items it names, before any milestone. An item named by two work packages goes to the lowest id. Errors:
+`WP-<nn>: items: <entry> is not a reference like repo#12`, `WP-<nn>: items: <ref>: <repo> is not a repo of repos:`,
+`WP-<nn>: items: <ref>: name its repo, as repo#12` (a `#n` on a cross-repo project), and
+`WP-<nn>: <ref>: <forge> item: <reason>`.
 
 A malformed entry is an error and is left out: `repos: expected a list of { remote, label }`,
 `repos: <entry>: expected { remote, label }`, `repos: <remote>: expected host/owner/repo`, `repos: <remote> listed twice`.
@@ -401,6 +412,7 @@ due: 2026-11-20
 issue: 498                # link keys, optional (/pm-link or /pm-issue): forge issue number, or absent
 milestone: ''             # forge milestone title, or absent / '' (/pm-link or /pm-package)
 branch: feature/498-pay   # the branch the work package is worked on
+items: [genropy#1974, anaci#628]  # optional: issues and pull requests named one by one (### Cross-repo projects)
 base: develop             # '' = the repo's default branch
 estimate: 24              # optional: estimated effort, hours
 actual: 18                # optional: effort spent so far, hours, entered by hand

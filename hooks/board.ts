@@ -835,7 +835,7 @@ function recap(p) {
 const ITEM_STATE = { open: '', closed: 'dim', merged: 'ok' }
 function milestoneItems(items) {
   const open = items.filter(i => i.state === 'open')
-  const name = i => (i.kind === 'pr' ? 'PR ' : '') + '#' + i.number
+  const name = i => refOf(i, i.kind)
   return [
     el('p', {}, el('strong', { textContent: (items.length - open.length) + ' of ' + items.length + ' closed' }), open.length
       ? el('span', {}, ' · still open: ', ...open.flatMap((i, n) => [n ? ', ' : '', el('a', { href: i.url, textContent: name(i) }), ' ' + i.title]))
@@ -862,7 +862,7 @@ function themePanel(p, w) {
   const served = (p.objectives || []).filter(o => (w.objectives || []).includes(o.id))
   return [
     el('p', {}, el('strong', { textContent: w.id + ' ' + w.title }), ' ',
-      el('span', { className: 'dim', textContent: [w.status, d.issue === null ? '' : '#' + d.issue, d.milestone && 'milestone ' + d.milestone, d.ref || d.branch, d.base && 'over ' + d.base].filter(Boolean).join(' · ') }), statusAction(p, w)),
+      el('span', { className: 'dim', textContent: [w.status, d.issue === null ? '' : '#' + d.issue, d.milestone && 'milestone ' + d.milestone, (d.items || []).length ? 'items ' + d.items.join(' ') : '', d.ref || d.branch, d.base && 'over ' + d.base].filter(Boolean).join(' · ') }), statusAction(p, w)),
     el('div', { className: 'forge' }, ...forgePills(d)),
     // The brief objectives the work package serves, above its phases.
     ...(served.length ? [el('h3', { textContent: 'Objectives' }), objectivesTable(p, served)] : []),

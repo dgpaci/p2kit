@@ -120,10 +120,11 @@ export type ForgeIssue = { repo?: string; number: number; title: string; url: st
 // An open pull request of the repo; `inReview` when it is not a draft and waits on a requested reviewer; `assignees` their logins, `closes` the issues its body closes (`closes #n`, `fixes #n`, `resolves #n`).
 export type ForgePull = { repo?: string; number: number; title: string; url: string; createdAt: string; updatedAt: string; milestone: string; draft: boolean; inReview: boolean; assignees: string[]; closes: number[] }
 
-// An issue or a pull request of a work package's milestone, any state.
-export type MilestoneItem = { kind: 'issue' | 'pr'; number: number; title: string; url: string; state: 'open' | 'closed' | 'merged' }
+// An issue or a pull request of a work package's milestone or of its `items:`, any state; `repo` as on ForgeIssue.
+export type MilestoneItem = { kind: 'issue' | 'pr'; repo?: string; number: number; title: string; url: string; state: 'open' | 'closed' | 'merged' }
 
-// What the forge says about a work package: its issue or milestone with every item in it, the pull requests of its branch.
+// What the forge says about a work package: its issue or milestone with every item in it, then the items its `items:` names
+// (in `milestoneItems` too), the pull requests of its branch.
 export type WpForge = {
   issue?: { number: number; title: string; state: string }
   milestone?: Milestone
@@ -132,10 +133,13 @@ export type WpForge = {
   isReadyToClose: boolean
 }
 
-// A work package linked to an issue, a milestone or a branch; `ref` and `planPath` are '' when not found.
+// A work package linked to an issue, a milestone, a branch or items; `ref` and `planPath` are '' when not found.
 export type WpDelivery = {
   issue: number | null
   milestone: string
+  // The issues and pull requests it names one by one (frontmatter `items:`), as `repo#n` on a cross-repo project, else `#n`; [] when absent.
+  // A snapshot written by older code has none.
+  items?: string[]
   branch: string
   base: string
   ref: string

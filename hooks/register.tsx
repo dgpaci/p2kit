@@ -704,7 +704,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           <Text bold wrap="truncate-end">
-            {[`${id} ${title}`.trim(), one.issue === null ? '' : `#${one.issue}`, one.milestone && `milestone ${one.milestone}`, one.ref || one.branch, one.base && `over ${one.base}`]
+            {[`${id} ${title}`.trim(), one.issue === null ? '' : `#${one.issue}`, one.milestone && `milestone ${one.milestone}`, one.items?.length ? `items ${one.items.join(' ')}` : '', one.ref || one.branch, one.base && `over ${one.base}`]
               .filter(Boolean).join(' · ')}
           </Text>
           <Box flexDirection="row" columnGap={1}>
@@ -730,7 +730,7 @@ export const register: Register = on => {
           {one.forge?.milestoneItems && (() => {
             const items = one.forge.milestoneItems
             const open = items.filter(item => item.state === 'open')
-            const name = (item: (typeof items)[number]) => `${item.kind === 'pr' ? 'PR ' : ''}#${item.number}`
+            const name = (item: (typeof items)[number]) => getItemRef(item, item.kind)
             return [
               <Text bold wrap="truncate-end">{`${items.length - open.length} of ${items.length} closed${open.length ? ` · still open: ${open.map(name).join(', ')}` : ' · nothing left open'}`}</Text>,
               ...items.map(item => (

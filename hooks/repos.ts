@@ -44,3 +44,26 @@ export function toRepoTarget(repo: ProjectRepo): RepoTarget {
 /** How the desk names an issue or a pull request: `#n`, `PR #n`, with its repo in front on a cross-repo project (`genropy#498`). */
 export const getItemRef = (item: { repo?: string; number: number }, kind: 'issue' | 'pr' = 'issue'): string =>
   `${kind === 'pr' ? 'PR ' : ''}${item.repo ?? ''}#${item.number}`
+
+const ITEM_REF = /^(?:([\w./-]+))?#(\d+)$/
+
+/**
+ * The references of a work package's `items:`, each `repo#n` or `#n` (a bare number is `#n`), once each, in order; a malformed one
+ * goes to `errors` and is left out.
+ */
+export function readItemRefs(id: string, value: Value | undefined, errors: string[]): string[] {
+  const entries = value === undefined || value === null ? [] : Array.isArray(value) ? value : [value]
+  const refs: string[] = []
+  for (const entry of entries) {
+    const ref = typeof entry === 'number' ? `#${entry}` : typeof entry === 'string' ? entry.trim() : ''
+    if (!ITEM_REF.test(ref)) errors.push(`${id}: items: ${JSON.stringify(entry)} is not a reference like repo#12`)
+    else if (!refs.includes(ref)) refs.push(ref)
+  }
+  return refs
+}
+
+/** The repo name and number of a reference read by readItemRefs. */
+export function parseItemRef(ref: string): { repo: string; number: number } {
+  const match = ITEM_REF.exec(ref)!
+  return { repo: match[1] ?? '', number: Number(match[2]) }
+}

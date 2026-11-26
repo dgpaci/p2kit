@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { buildProject } from '../hooks/project'
-import { getItemRef, readRepos, toRepoTarget } from '../hooks/repos'
+import { getItemRef, parseItemRef, readItemRefs, readRepos, toRepoTarget } from '../hooks/repos'
 import { parseYaml } from '../hooks/yaml'
 import type { Value } from '../hooks/yaml'
 
@@ -51,4 +51,22 @@ test('an item is named with its repo in front on a cross-repo project', () => {
   expect(getItemRef({ number: 5 }, 'pr')).toBe('PR #5')
   expect(getItemRef({ repo: 'genropy', number: 498 })).toBe('genropy#498')
   expect(getItemRef({ repo: 'genropy', number: 12 }, 'pr')).toBe('PR genropy#12')
+})
+
+test('the items of a work package are references, repo#n or #n, once each', () => {
+  // wf:contract: work package `items:` is a list of `repo#n` (a cross-repo project) or `#n` / a bare number; a malformed one is the
+  // wf:contract: error `WP-<nn>: items: <entry> is not a reference like repo#12` and is left out.
+  const errors: string[] = []
+  const items = (parseYaml("items: [genropy#1974, softwell/docs#3, '#12', 13, genropy#1974, 'PR #4', x#]\n") as Record<string, Value>).items
+  expect(readItemRefs('WP-01', items, errors)).toEqual(['genropy#1974', 'softwell/docs#3', '#12', '#13'])
+  expect(errors).toEqual(['WP-01: items: "PR #4" is not a reference like repo#12', 'WP-01: items: "x#" is not a reference like repo#12'])
+  expect(readItemRefs('WP-01', undefined, errors)).toEqual([])
+  expect(parseItemRef('genropy#1974')).toEqual({ repo: 'genropy', number: 1974 })
+  expect(parseItemRef('#12')).toEqual({ repo: '', number: 12 })
+})
+
+test('a work package with only items: is a work theme', () => {
+  const wp = '---\nid: WP-01\ntitle: T\nstage: 1\nstatus: in-progress\nitems: [genropy#1974]\n---\n'
+  const project = buildProject({ path: '/p', project: 'name: P\nstage: { current: 1 }\n', products: [], workPackages: [{ path: '/p/.pm/work-packages/WP-01.md', text: wp }] }, '2026-11-26')
+  expect(project.workPackages[0]!.delivery?.items).toEqual(['genropy#1974'])
 })
