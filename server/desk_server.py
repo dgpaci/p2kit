@@ -7,6 +7,8 @@ when the request carries that hash and the preview, computed again, still matche
 It edits files of the projects listed in ~/.config/p2kit/projects.yaml, never commits,
 and writes to a forge only through the CLI or token the user has already set up.
 GET /doc?path=<file> renders a project's Markdown document as an HTML page (server/doc_page.py).
+GET /clock answers the desk clock and today's logged minutes per project; POST /clock starts, switches or stops it
+(server/timelog.py): the PM's own time, written to the local time log, never to a project.
 
 stdout, read by the mod: `listening <port>` once, then `changed <project path>` per write.
 Each write also stamps ~/.claude/p2kit/desk-changed.json, so every session reads the forge again.
@@ -29,6 +31,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from doc_page import document_page
+import timelog
 
 DESK_DIR = '.claude/p2kit'
 INFO_FILE = 'desk-server.json'
@@ -1058,6 +1061,36 @@ def run_action(home, request, forge=None):
     return {'applied': True, 'done': apply(), 'summary': preview['summary']}, True
 
 
+# ---------------------------------------------------------------- clock
+
+def project_remotes(home):
+    """Each registered project's normalized origin, None when it has none."""
+    return {root: timelog.project_remote(root) for root in registered_projects(home)}
+
+
+def clock_state(home, remotes=None):
+    """The running clock (None when stopped) and today's logged minutes per project path."""
+    remotes = project_remotes(home) if remotes is None else remotes
+    return {'clock': timelog.read_clock(home), 'today': timelog.minutes_by_project(home, timelog.now().date().isoformat(), remotes)}
+
+
+def run_clock(home, request):
+    """`{op: 'start', project, ref?, kind?}` starts the clock, stopping a running one first; `{op: 'stop'}` stops it."""
+    if not isinstance(request, dict):
+        raise ActionError('not a clock request')
+    try:
+        if request.get('op') == 'start':
+            root = project_root(home, request.get('project'))
+            timelog.start_clock(home, root, request.get('ref') or None, request.get('kind') or 'desk')
+        elif request.get('op') == 'stop':
+            timelog.stop_clock(home)
+        else:
+            raise ActionError('op must be start or stop')
+    except timelog.TimelogError as error:
+        raise ActionError(str(error)) from None
+    return clock_state(home)
+
+
 # ---------------------------------------------------------------- server
 
 class Handler(BaseHTTPRequestHandler):
@@ -1104,6 +1137,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.answer(200, read_text(path).encode('utf-8')) if os.path.exists(path) else self.refuse(404, 'no snapshot')
         if self.path == '/health':
             return self.answer(200, {'ok': True, 'pid': os.getpid()})
+        if self.path == '/clock':
+            return self.answer(200, clock_state(self.server.home))
         # A document of a project, rendered from Markdown: a read, like the page, so it needs our Host and no token.
         url = urllib.parse.urlsplit(self.path)
         if url.path == '/doc':
@@ -1128,7 +1163,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.refuse(403, 'token')
         if (self.headers.get('Content-Type') or '').split(';')[0].strip() != 'application/json':
             return self.refuse(415, 'json only')
-        if self.path not in ('/action', '/open'):
+        if self.path not in ('/action', '/open', '/clock'):
             return self.refuse(404, 'not found')
         length = int(self.headers.get('Content-Length') or 0)
         if length <= 0 or length > MAX_BODY:
@@ -1137,6 +1172,9 @@ class Handler(BaseHTTPRequestHandler):
             request = json.loads(self.rfile.read(length))
             if self.path == '/open':
                 return self.answer(200, open_path(self.server.home, request.get('path') if isinstance(request, dict) else None))
+            if self.path == '/clock':
+                with self.server.lock:
+                    return self.answer(200, run_clock(self.server.home, request))
             with self.server.lock:
                 result, changed = run_action(self.server.home, request)
         except ActionError as error:

@@ -1,6 +1,6 @@
 ---
 name: pm-log
-description: Update the Daily Log of a p2kit project — the day's forge events (issues opened and closed, pull requests opened and merged) from the project desk's snapshot, plus the decisions, actions, problems and notes of a meeting transcript or of the user's own notes — kept in .pm/registers/daily-log.yaml after the user's explicit OK; a problem or a risk goes to its register or a forge issue only after its own OK. Use when the user asks to update the daily log, log a meeting, record what was said or decided today, summarise the day, close a logged action, or asks for /pm-log.
+description: Update the Daily Log of a p2kit project — the day's forge events (issues opened and closed, pull requests opened and merged) from the project desk's snapshot, plus the decisions, actions, problems and notes of a meeting transcript or of the user's own notes — kept in .pm/registers/daily-log.yaml after the user's explicit OK; a problem or a risk goes to its register or a forge issue only after its own OK; the day's time from the local time log goes to the user's timesheet .pm/timesheets/<login>/<yyyy-mm>.yaml, and on Forgejo to the issues' tracked times, after its own OK. Use when the user asks to update the daily log, log a meeting, record what was said or decided today, summarise the day, close a logged action, record or close the day's time, fill the timesheet, or asks for /pm-log.
 ---
 
 # Daily Log
@@ -9,7 +9,8 @@ The Daily Log is the project manager's diary: what happened in a day, what was d
 what by when, the problems not yet formal (docs/pm-schema.md → *`registers/daily-log.yaml`*). The
 forge part is read from the desk's snapshot, never from `gh` or `fj`; the rest comes from the
 user. This skill writes only `.pm/registers/daily-log.yaml` after the user's OK, touches a
-register or the forge only after a second OK for that one entry, and commits nothing.
+register or the forge only after a second OK for that one entry, writes the day's time to the
+user's timesheet only after its own OK, and commits nothing.
 
 1. Read `.pm/project.yaml` (`code`, the people of `roles`) and `.pm/registers/daily-log.yaml` if it
    exists. The **day** is today, unless the user names another.
@@ -80,7 +81,38 @@ register or the forge only after a second OK for that one entry, and commits not
    Then write the entry's `register: <I-id | R-id>` or `issue: <n>` in `daily-log.yaml`, nothing
    else changed. No OK → the entry stays in the log only. A failed creation → report it and write
    nothing for that entry.
-8. Tell the user in a few lines what was written (entries by id, actions closed, what went to a
-   register or the forge) and that the desk shows them in the Daily log section of its Registers tab at the next refresh,
+8. **The day's time** (docs/pm-schema.md → *Time log* and *Timesheets*), after the entries — or
+   alone, when the user asks only for the time. Run, from the repo, the helper at the plugin root
+   (two levels up from this skill's folder):
+
+   ```bash
+   python3 <plugin root>/server/timesheet.py show --project "$(git rev-parse --show-toplevel)" --date <day>
+   ```
+
+   It prints JSON: `lines` (per issue and kind, with `wp` and `minutes`), `overlaps` it resolved
+   (an interval on an issue keeps the time over one on the project, then the latest started),
+   `errors` (unreadable lines of the log), `clockRunning`, `existing` (lines of that day already in
+   the timesheet), `file`, `login`, `forge` and `hash`. `error` instead → report it and skip the time.
+   - No `lines` → say there is no time logged for the project on that day, and stop here.
+   - `clockRunning` → the desk clock is still running on this project: ask the user to stop it on
+     the desk (or switch it), then run `show` again.
+   - Show the lines as hours and minutes with their issue and work package, a line on the
+     overlaps when there are any, the total, and the file they go to. A line without `wp` stays
+     on the project. `existing` not empty → say the day is already in the timesheet and that
+     writing replaces it. Say, when `forge` is `forgejo`, that the issue lines will also be added
+     to the issues' tracked times on Forgejo; on GitHub the time stays in the timesheet.
+
+   Ask for an explicit OK, apart from the entries' one. On the OK:
+
+   ```bash
+   python3 <plugin root>/server/timesheet.py write --project "$(git rev-parse --show-toplevel)" --date <day> --hash <hash> [--replace]
+   ```
+
+   with `--replace` only when `existing` was not empty. Then, on Forgejo only, `push` with the same
+   `--project` and `--date`: it adds each issue line not yet sent and marks it `sent: true`. A
+   refusal (the log changed since the draft, a day already sent) → report it as it is and write
+   nothing more. Never edit the time log yourself, and never write the timesheet by hand.
+9. Tell the user in a few lines what was written (entries by id, actions closed, what went to a
+   register or the forge, the time written to the timesheet and to Forgejo) and that the desk shows them in the Daily log section of its Registers tab at the next refresh,
    with an open action past its due in Needs attention. Nothing is committed: `.pm/` is committed
    with the code, when the user decides.

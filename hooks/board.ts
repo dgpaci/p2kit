@@ -186,6 +186,12 @@ button.primary, button.btn-primary { background: var(--on); border-color: var(--
 .act { font-size: 12px; padding: 1px 8px; margin-left: 6px; white-space: nowrap; }
 .row-actions { text-align: right; white-space: nowrap; }
 .board-head { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.desk-head { display: flex; justify-content: space-between; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.head-side { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.clock { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.clock-form { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; align-items: center; margin: 10px 0; }
+.clock-form select { width: 100%; min-width: 0; }
+.clock.on .clock-time { color: var(--red); font-weight: 600; font-variant-numeric: tabular-nums; }
 .board-head p { flex: 1; min-width: 0; margin: 0; }
 .new-issue { flex-shrink: 0; margin-left: auto; font-size: 14px; padding: 6px 16px; white-space: nowrap; }
 .dialog { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 60px 16px; }
@@ -311,6 +317,62 @@ async function post(body) {
   if (!res.ok) throw new Error(answer.error || 'HTTP ' + res.status)
   return answer
 }
+// The desk clock (server/timelog.py): the PM's own time on a project, an issue of it or a meeting, appended to the local time
+// log on Stop or Switch and written to the project's timesheet only by /pm-log. Only with the helper: the page asks it once per
+// load and ticks on its own; the time log stays on this machine.
+let clock = null
+let today = {}
+const projectName = path => (data.projects.find(x => x.path === path) || { name: path }).name
+const clockLabel = c => projectName(c.project) + (c.ref ? ' ' + c.ref : '') + (c.kind === 'meeting' ? ' · meeting' : '')
+const elapsed = start => { const m = Math.max(0, Math.floor((Date.now() - new Date(start).getTime()) / 60000)); return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0') }
+const minutesText = m => (m >= 60 ? Math.floor(m / 60) + 'h ' : '') + (m % 60) + 'm'
+const setClock = state => { clock = state.clock || null; today = state.today || {} }
+async function clockPost(body) {
+  const res = await fetch('/clock', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-P2kit-Token': server.token }, body: JSON.stringify(body) })
+  const answer = await res.json().catch(() => ({ error: 'HTTP ' + res.status }))
+  if (!res.ok) throw new Error(answer.error || 'HTTP ' + res.status)
+  setClock(answer)
+}
+async function readClock() {
+  if (!server) return
+  try { setClock(await fetch('/clock', { cache: 'no-store' }).then(r => r.json())) } catch (error) { return }
+  if (!dialogOpen) draw()
+}
+const stopClock = () => clockPost({ op: 'stop' }).then(() => draw(), error => failed(openDialog('Clock'), 'Not stopped', error))
+// Start, or Switch while it runs: on a project, an issue of it (its open issues) or a meeting.
+function clockDialog() {
+  const first = (clock && clock.project) || (current && current.path) || (data.projects[0] || {}).path
+  const project = el('select', {}, ...data.projects.map(x => el('option', { value: x.path, textContent: x.name, selected: x.path === first })))
+  const target = el('select', {})
+  const kind = el('select', {}, el('option', { value: 'desk', textContent: 'desk work' }), el('option', { value: 'meeting', textContent: 'meeting' }))
+  const targets = () => {
+    const p = data.projects.find(x => x.path === project.value)
+    target.replaceChildren(el('option', { value: '', textContent: 'the project' }),
+      ...(p ? p.forgeIssues : []).map(i => el('option', { value: '#' + i.number, textContent: '#' + i.number + ' ' + i.title })))
+  }
+  project.onchange = targets
+  targets()
+  const start = async () => {
+    try { await clockPost({ op: 'start', project: project.value, ref: target.value || null, kind: kind.value }) } catch (error) { return failed(box, 'Not started', error) }
+    closeDialog()
+  }
+  const box = openDialog(clock ? 'Switch the clock' : 'Start the clock',
+    el('p', { className: 'dim', textContent: clock ? 'The time so far on ' + clockLabel(clock) + ' goes to the time log; the clock starts again on:' : 'Your own time, kept on this machine until /pm-log writes the day to the timesheet.' }),
+    el('div', { className: 'clock-form' }, el('span', { className: 'dim', textContent: 'Project' }), project,
+      el('span', { className: 'dim', textContent: 'On' }), target, el('span', { className: 'dim', textContent: 'As' }), kind),
+    buttons(closeButton('Cancel'), el('button', { className: 'primary', textContent: clock ? 'Switch' : 'Start', onclick: start })))
+}
+function clockBar() {
+  if (!server) return null
+  if (!clock) return el('div', { className: 'clock' }, el('button', { textContent: '⏱ Start clock', title: 'record your own time on a project, an issue or a meeting', onclick: clockDialog }))
+  const time = el('span', { className: 'clock-time', textContent: '⏱ ' + elapsed(clock.start) })
+  time.dataset.start = clock.start
+  return el('div', { className: 'clock on' }, time, el('span', { textContent: clockLabel(clock) }), el('button', { textContent: 'Switch…', onclick: clockDialog }), el('button', { textContent: 'Stop', onclick: stopClock }))
+}
+// The running time ticks in place: a redraw would drop what the user is doing on the page.
+setInterval(() => document.querySelectorAll('.clock-time').forEach(n => { n.textContent = '⏱ ' + elapsed(n.dataset.start) }), 15 * 1000)
+const timeFact = p => p.time ? el('span', { title: Object.entries(p.time.byKind).map(([k, h]) => k + ' ' + h + 'h').join(' · ') + ' — ' + p.time.people.join(', '), textContent: 'time ' + p.time.hours + 'h' }) : null
+const todayFact = p => today[p.path] ? el('span', { title: 'logged today, not yet in the timesheet', textContent: 'today ' + minutesText(today[p.path]) }) : null
 const snapshotTime = () => fetch('/desk.json', { cache: 'no-store' }).then(r => r.json()).then(s => s.refreshedAt).catch(() => '')
 function closeDialog() {
   const open = document.getElementById('dialog')
@@ -672,7 +734,7 @@ const shaNote = n => el('div', {}, el('span', { className: 'mono', textContent: 
 
 function overview() {
   return [
-    el('h1', { textContent: 'Project desk' }),
+    el('div', { className: 'desk-head' }, el('h1', { textContent: 'Project desk' }), clockBar()),
     el('p', { className: 'dim', textContent: data.projects.length + ' projects · updated ' + new Date(data.refreshedAt).toLocaleString() }),
     ...data.errors.map(e => el('p', { className: 'err', textContent: e })),
     ...data.projects.map(p => el('div', { className: 'project' },
@@ -685,6 +747,8 @@ function overview() {
             el('span', {}, 'WPs ', progressOf(p)),
             p.iteration ? iterationFact(p.iteration) : null,
             p.effort ? effortFact(p) : null,
+            timeFact(p),
+            todayFact(p),
             el('span', { className: p.highRisks ? 'err' : '', textContent: 'high risks ' + p.highRisks }),
             el('span', { className: p.openBlockers ? 'err' : '', textContent: 'blockers ' + p.openBlockers }),
             p.errors.length ? el('span', { className: 'err', textContent: '⚠ ' + p.errors.length + ' errors' }) : null,
@@ -1034,7 +1098,7 @@ function workPackages(p) {
   // The id opens the work package's own page when it has one (a delivery to follow), else its file; the last cell holds the actions,
   // Link… only while nothing is linked.
   const row = w => [w.delivery ? link(w.id, p.path + '/theme/' + w.id) : fileLink(w.path, w.id), w.title, w.stage === null ? '' : String(w.stage), wpStatus(w.status), w.teamManager, w.due,
-    ...(hasEffort ? [hours(w.estimate), hours(w.actual), w.deviation === null ? '' : signed(w.deviation)] : []),
+    ...(hasEffort ? [hours(w.estimate), w.tracked != null ? el('span', { title: 'from the timesheets', textContent: hours(w.actual) + ' ⏱' }) : hours(w.actual), w.deviation === null ? '' : signed(w.deviation)] : []),
     el('div', { className: 'row-actions' }, statusAction(p, w), w.delivery ? null : linkAction(p, w))]
   const groups = [...HORIZONS.map(([key, label]) => [label, byId(p.roadmap[key])]), ['Not placed', p.workPackages.filter(w => !placed.has(w.id))]]
   const empty = groups.filter(g => !g[1].length).map(g => g[0])
@@ -1256,7 +1320,7 @@ function form(p, sub) {
       el('div', {}, el('h2', {}, dot(p.light), ' ', p.name, ' ', el('span', { className: 'dim', textContent: p.code })),
         el('div', { className: 'dim' }, stageOf(p) + ' · ' + (p.status || 'no status') + ' · profile ' + p.profile + ' · ', fileLink(p.path, p.path))),
       p.pmRef ? el('p', { className: 'warn', textContent: '.pm/ read from ' + p.pmRef + ' — the checkout has no .pm/, so the desk is read-only until it does' }) : null,
-      el('div', {}, sessionLink(p))),
+      el('div', { className: 'head-side' }, clockBar(), sessionLink(p))),
     ...p.errors.map(e => el('p', { className: 'err', textContent: e })),
     el('div', { className: 'themebar' }, el('span', { className: 'label', textContent: 'Work themes' }),
       ...(p.themes.length ? p.themes.map(w => el('button', { className: 'theme-chip' + (theme && theme.id === w.id ? ' sel' : ''), onclick: () => go(p.path + '/theme/' + w.id) },
@@ -1282,6 +1346,7 @@ let tidyTimer = 0
 addEventListener('resize', () => { clearTimeout(tidyTimer); tidyTimer = setTimeout(() => tidyTables(document.getElementById('app')), 150) })
 
 draw()
+readClock()
 // A reload would drop the picked issues and pull requests: it waits until nothing is picked.
 // An open dialog holds it too, and so does a drag in progress.
 setInterval(() => { if (dialogOpen || dragging) return; if (isLogFiltered()) return; if (!pickedItems.size && !pickedActions.size) location.reload() }, data.reloadMs)

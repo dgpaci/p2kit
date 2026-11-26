@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import type { Approval, CommitNote, DailyEntry, Issue, Iteration, Lesson, Light, Product, Project, RetroAction, Retrospective, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
+import type { Approval, CommitNote, DailyEntry, TimeEntry, Issue, Iteration, Lesson, Light, Product, Project, RetroAction, Retrospective, Risk, RoleLine, Tolerance, WorkPackage, WpDelivery, WpForge } from '../types'
 import { FLOW_WINDOWS, getFirstReviewAt, toFlow } from './flow'
 import { detectForge, getForgeJson, isReadyToClose, toMilestone, toPulls } from './forge'
 import type { ForgeTarget, RestMilestone } from './forge'
@@ -72,6 +72,8 @@ export type ProjectFiles = {
   iterations?: string
   lessons?: string
   dailyLog?: string
+  // The timesheets, `.pm/timesheets/<login>/<yyyy-mm>.yaml`, one per person and month.
+  timesheets?: { login: string; path: string; text: string }[]
   gitErrors?: string[]
   // The files of the project.yaml `documents:` folders, with their title; `folder` is relative to the project.
   sharedDocs?: { folder: string; path: string; title: string }[]
@@ -271,6 +273,34 @@ function readDailyLog(raw: string | undefined, today: string, errors: string[]):
   return { dailyLog, lastLog: dailyLog.map(one => one.date).reduce((last, date) => (date > last ? date : last), '') }
 }
 
+/** The lines of every timesheet; a line whose `minutes` is not a positive number goes to `errors` and is left out. */
+function readTimesheets(files: ProjectFiles['timesheets'], errors: string[]): TimeEntry[] {
+  return (files ?? []).flatMap(file => {
+    const name = `timesheets/${file.login}/${basename(file.path)}`
+    return readRegister(name, file.text, 'entries', errors).flatMap(one => {
+      const minutes = num(one.minutes)
+      if (minutes === null || minutes <= 0) {
+        errors.push(`${name}: ${text(one.date)} ${text(one.ref)} minutes is not a positive number`)
+        return []
+      }
+      return [{ login: file.login, date: text(one.date), ref: text(one.ref), wp: text(one.wp), kind: text(one.kind) || 'dev', minutes }]
+    })
+  })
+}
+
+/** The timesheets' hours in total, per kind and the people who filed them; null when there is none. */
+function getTime(entries: TimeEntry[]): Project['time'] {
+  if (!entries.length) return null
+  const byKind: Record<string, number> = {}
+  for (const one of entries) byKind[one.kind] = (byKind[one.kind] ?? 0) + one.minutes
+  const hours = (minutes: number) => getRoundedHours(minutes / 60)
+  return {
+    hours: hours(entries.reduce((total, one) => total + one.minutes, 0)),
+    byKind: Object.fromEntries(Object.entries(byKind).map(([kind, minutes]) => [kind, hours(minutes)])),
+    people: [...new Set(entries.map(one => one.login))].sort(),
+  }
+}
+
 /** The open iteration with the highest number, with its progress; null when none is open. */
 function getCurrentIteration(iterations: Iteration[], workPackages: WorkPackage[], today: string): Project['iteration'] {
   const current = iterations.filter(one => one.status === 'open').pop()
@@ -338,6 +368,17 @@ export function buildProject(files: ProjectFiles, today: string): Project {
       fronts.push(front)
     } catch (error) {
       errors.push(`${basename(file.path)}: ${String(error)}`)
+    }
+  }
+
+  // A work package's timesheet hours replace its hand-typed actual, and its deviation follows.
+  const timeEntries = readTimesheets(files.timesheets, errors)
+  for (const front of fronts) {
+    const minutes = timeEntries.filter(one => one.wp === front.id).reduce((total, one) => total + one.minutes, 0)
+    front.tracked = minutes ? getRoundedHours(minutes / 60) : null
+    if (front.tracked !== null) {
+      front.actual = front.tracked
+      front.deviation = getDeviation(front.status, front.estimate, front.actual)
     }
   }
 
@@ -418,6 +459,7 @@ export function buildProject(files: ProjectFiles, today: string): Project {
     light: getWorstLight(tolerances.map(one => one.light)),
     progress: { done: inStage.filter(isDone).length, total: inStage.length },
     effort,
+    time: getTime(timeEntries),
     highRisks: risks.filter(risk => risk.status === 'open' && risk.score >= HIGH_RISK && !isRiskCovered(risk)).length,
     openIssues: issues.filter(issue => issue.status === 'open').length,
     nextReport: { due, isOverdue: Boolean(due) && due < today },
@@ -650,7 +692,21 @@ export async function readProjectFiles($: EngineInterface, path: string, pmBranc
     iterations: await readIfExists($, source, `${pm}/registers/iterations.yaml`),
     lessons: await readIfExists($, source, `${pm}/registers/lessons.yaml`),
     dailyLog: await readIfExists($, source, `${pm}/registers/daily-log.yaml`),
+    timesheets: await readTimesheetFiles($, source, `${pm}/timesheets`),
   }
+}
+
+/** Every `<login>/<yyyy-mm>.yaml` under the timesheets folder, by login then month; none when it is missing. */
+async function readTimesheetFiles($: EngineInterface, source: PmSource, folder: string): Promise<NonNullable<ProjectFiles['timesheets']>> {
+  if (!(await sourceExists($, source, folder))) return []
+  const people = (await sourceList($, source, folder)).filter(entry => entry.kind === 'dir').map(entry => entry.name).sort()
+  const files: NonNullable<ProjectFiles['timesheets']> = []
+  for (const login of people) {
+    const months = (await sourceList($, source, `${folder}/${login}`)).filter(entry => entry.kind === 'file' && entry.name.endsWith('.yaml'))
+    months.sort((a, b) => a.name.localeCompare(b.name))
+    for (const month of months) files.push({ login, path: `${folder}/${login}/${month.name}`, text: await sourceRead($, source, `${folder}/${login}/${month.name}`) })
+  }
+  return files
 }
 
 type PullList = Parameters<typeof toPulls>[0]
