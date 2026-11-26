@@ -1,6 +1,6 @@
 ---
 name: pm-log
-description: Update the Daily Log of a p2kit project — the day's forge events (issues opened and closed, pull requests opened and merged) from the project desk's snapshot, plus the decisions, actions, problems and notes of a meeting transcript or of the user's own notes — kept in .pm/registers/daily-log.yaml after the user's explicit OK; a problem or a risk goes to its register or a forge issue only after its own OK; the day's time from the local time log goes to the user's timesheet .pm/timesheets/<login>/<yyyy-mm>.yaml, and on Forgejo to the issues' tracked times, after its own OK. Use when the user asks to update the daily log, log a meeting, record what was said or decided today, summarise the day, close a logged action, record or close the day's time, fill the timesheet, or asks for /pm-log.
+description: Update the Daily Log of a p2kit project — the day's forge events (issues opened and closed, pull requests opened and merged) from the project desk's snapshot, plus the decisions, actions, problems and notes of a meeting transcript or of the user's own notes — kept in .pm/registers/daily-log.yaml after the user's explicit OK; a problem or a risk goes to its register or a forge issue only after its own OK; the day's time from the local time log goes to the user's timesheet .pm/timesheets/<login>/<yyyy-mm>.yaml, and on Forgejo to the issues' tracked times, after its own OK. Use when the user asks to update the daily log, log a meeting, record what was said or decided today, summarise the day, close a logged action, record or close the day's time, record past time the desk clock missed, fill the timesheet, or asks for /pm-log.
 ---
 
 # Daily Log
@@ -84,14 +84,29 @@ user's timesheet only after its own OK, and commits nothing.
    nothing for that entry.
 8. **The day's time** (docs/pm-schema.md → *Time log* and *Timesheets*), after the entries — or
    alone, when the user asks only for the time. Run, from the repo, the helper at the plugin root
-   (two levels up from this skill's folder):
+   (two levels up from this skill's folder).
+
+   **Time the clock missed.** When the user says they worked on the project (or on one of its
+   issues, or in a meeting) for a stretch the log does not hold, record it first. Get the day, the
+   start and either the end or the minutes, the issue if any and the kind (`desk` by default,
+   `meeting`, `dev`); ask for the start when the user gives only a duration. Show the interval as
+   one line — day, from–to, project or issue, kind — and ask for an explicit OK. On the OK:
+
+   ```bash
+   python3 <plugin root>/server/timesheet.py add --project "$(git rev-parse --show-toplevel)" --date <day> --from <hh:mm> --to <hh:mm> [--ref '#<n>'] [--kind meeting]
+   ```
+
+   (`--minutes <n>` in place of `--to`). It appends the interval to the time log with
+   `source: p2kit-manual`, where it keeps the time over any interval it overlaps. `error` → report
+   it as it is. Then go on with `show` for that day, which now holds it.
 
    ```bash
    python3 <plugin root>/server/timesheet.py show --project "$(git rev-parse --show-toplevel)" --date <day>
    ```
 
    It prints JSON: `lines` (per issue and kind, with `wp` and `minutes`), `overlaps` it resolved
-   (an interval on an issue keeps the time over one on the project, then the latest started),
+   (declared time keeps it first — an entry recorded after the fact, then the desk clock — then an
+   interval on an issue over one on the project, then the latest started),
    `errors` (unreadable lines of the log), `clockRunning`, `existing` (lines of that day already in
    the timesheet), `file`, `login`, `forge` and `hash`. `error` instead → report it and skip the time.
    - No `lines` → say there is no time logged for the project on that day, and stop here.
@@ -112,7 +127,7 @@ user's timesheet only after its own OK, and commits nothing.
    with `--replace` only when `existing` was not empty. Then, on Forgejo only, `push` with the same
    `--project` and `--date`: it adds each issue line not yet sent and marks it `sent: true`. A
    refusal (the log changed since the draft, a day already sent) → report it as it is and write
-   nothing more. Never edit the time log yourself, and never write the timesheet by hand.
+   nothing more. Never edit the time log yourself (past time goes through `add`), and never write the timesheet by hand.
 9. Tell the user in a few lines what was written (entries by id, actions closed, what went to a
    register or the forge, the time written to the timesheet and to Forgejo) and that the desk shows them in the Daily log section of its Registers tab at the next refresh,
    with an open action past its due in Needs attention. Nothing is committed: `.pm/` is committed

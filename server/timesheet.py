@@ -6,10 +6,13 @@ Run by /pm-log, from the project's repo:
   python3 timesheet.py show  --project <root> [--date <yyyy-mm-dd>] [--login <login>]
   python3 timesheet.py write --project <root> --hash <hash> [--date …] [--login …] [--replace]
   python3 timesheet.py push  --project <root> [--date …] [--login …]
+  python3 timesheet.py add   --project <root> [--date …] --from <hh:mm> (--to <hh:mm> | --minutes <n>) [--ref '#<n>'] [--kind desk|meeting|dev]
 
 `show` prints, as JSON, the day's lines per issue and kind with their work package, the overlaps it resolved and the
 hash of that draft; `write` writes the same lines to `.pm/timesheets/<login>/<yyyy-mm>.yaml` only while the draft
-still has that hash; `push` adds the day's issue lines to the issues' tracked times on Forgejo and marks them sent.
+still has that hash; `push` adds the day's issue lines to the issues' tracked times on Forgejo and marks them sent;
+`add` records a past interval (time the desk clock missed) in the time log, with source `p2kit-manual`, for `show` to
+pick up like any other.
 The time log is read across every project, so time counted on one project is never counted again on another.
 Standard library only; nothing is committed.
 """
@@ -20,6 +23,7 @@ import json
 import os
 import re
 import sys
+from datetime import timedelta
 
 import desk_server as ds
 import timelog
@@ -35,8 +39,13 @@ class TimesheetError(Exception):
 
 
 def winner(intervals, active):
-    """Of the intervals running at once (indexes), the one the time goes to: one on an issue before one on the project, then the latest started."""
-    return max(active, key=lambda index: (intervals[index].get('ref') is not None, intervals[index]['start'], index))
+    """Of the intervals running at once (indexes), the one the time goes to.
+
+    Declared time first (a manual entry, then the desk clock: timelog.SOURCE_RANK), then one on an issue before one on the
+    project, then the latest started.
+    """
+    return max(active, key=lambda index: (timelog.SOURCE_RANK.get(intervals[index].get('source'), 0),
+                                          intervals[index].get('ref') is not None, intervals[index]['start'], index))
 
 
 def resolve_day(intervals, day):
@@ -227,14 +236,49 @@ def push(root, home, day, login=None, forge=None):
     return {'file': os.path.relpath(path, root), 'sent': sent}
 
 
+def clock_time(day, text):
+    """`hh:mm` on `day`, local, or a full ISO 8601 time; raises TimesheetError."""
+    try:
+        return timelog.parse_time(f'{day}T{text}' if re.match(r'^\d{1,2}:\d{2}$', text or '') else text)
+    except ValueError:
+        raise TimesheetError(f'not a time: {text} (hh:mm, or ISO 8601)') from None
+
+
+def add(root, home, day, start, end=None, minutes=None, ref=None, kind='desk'):
+    """Records a past interval on a registered project (or a clone of one) in the time log; returns what was written."""
+    remote = timelog.project_remote(root)
+    registered = ds.registered_projects(home)
+    if root not in registered and not (remote and any(timelog.project_remote(one) == remote for one in registered)):
+        raise TimesheetError('the project is not in projects.yaml')
+    if (end is None) == (minutes is None):
+        raise TimesheetError('give --to or --minutes, not both')
+    begin = clock_time(day, start)
+    if end is not None:
+        finish = clock_time(day, end)
+    elif minutes > 0:
+        finish = begin + timedelta(minutes=minutes)
+    else:
+        raise TimesheetError('--minutes must be a positive number')
+    try:
+        written = timelog.add_interval(home, root, begin, finish, ref, kind)
+    except timelog.TimelogError as error:
+        raise TimesheetError(str(error)) from None
+    return {'added': written, 'minutes': round((finish - begin).total_seconds() / 60)}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='p2kit timesheet: crystallize a day of the local time log')
-    parser.add_argument('command', choices=('show', 'write', 'push'))
+    parser.add_argument('command', choices=('show', 'write', 'push', 'add'))
     parser.add_argument('--project', required=True)
     parser.add_argument('--date', default=None)
     parser.add_argument('--login', default=None)
     parser.add_argument('--hash', default=None)
     parser.add_argument('--replace', action='store_true')
+    parser.add_argument('--from', dest='start', default=None)
+    parser.add_argument('--to', dest='end', default=None)
+    parser.add_argument('--minutes', type=int, default=None)
+    parser.add_argument('--ref', default=None)
+    parser.add_argument('--kind', default='desk')
     parser.add_argument('--home', default=os.path.expanduser('~'))
     args = parser.parse_args(argv)
     root = os.path.realpath(args.project)
@@ -243,6 +287,10 @@ def main(argv=None):
         if args.command == 'show':
             result = draft(root, args.home, day, args.login)
             result['hash'] = draft_hash(result)
+        elif args.command == 'add':
+            if not args.start:
+                raise TimesheetError('add needs --from')
+            result = add(root, args.home, day, args.start, args.end, args.minutes, args.ref, args.kind)
         elif args.command == 'write':
             if not args.hash:
                 raise TimesheetError('write needs --hash, from show')

@@ -659,8 +659,8 @@ entries:
 
 The raw time is **local**, never in `.pm/`: one file per local day, `~/.claude/timelog/<yyyy-mm-dd>.jsonl`,
 one interval per line, appended by any tool that records time. It is a contract shared between tools:
-p2kit's desk clock writes the PM's own time, forge-desk the developer's sessions, and `/pm-log` reads
-all of it.
+p2kit's desk clock writes the PM's own time, `/pm-log` the time the PM records after the fact,
+forge-desk the developer's sessions, and `/pm-log` reads all of it.
 
 ```json
 {"start": "2026-11-26T09:12:00+01:00", "end": "2026-11-26T10:40:00+01:00", "remote": "github.com/dgpaci/p2kit", "ref": "#85", "kind": "dev", "source": "forge-desk"}
@@ -673,7 +673,8 @@ all of it.
   repo with no origin, which the desk clock identifies by `project` (its folder) instead.
 - `ref` — the issue or pull request worked on (`#85`, `PR #12`), `null` for time on the project.
 - `kind` — `dev` (a development session), `desk` (the PM on the desk), `meeting`.
-- `source` — the tool that wrote it (`p2kit-desk`, `forge-desk`). Other fields are ignored.
+- `source` — the tool that wrote it (`p2kit-desk` the desk clock, `p2kit-manual` an entry recorded after
+  the fact, `forge-desk`). Other fields are ignored.
 
 An interval belongs to a project when its `remote` is the project's origin, or with no `remote`
 when its `project` is the project's folder. A line that does not read (bad JSON, `end` before
@@ -686,7 +687,17 @@ under a minute is dropped. The running clock is `~/.claude/p2kit/clock.json`
 (`{ start, project, remote, ref, kind }`); the desk shows it with its elapsed time on every page, and
 in the overview row of each project the minutes logged *today* and not yet in a timesheet. Starting,
 switching and stopping write no project file and need no preview: they are the PM's own record,
-corrected at `/pm-log`.
+corrected at `/pm-log`. The clock is a file, so it keeps running across a restart of the desk or of
+the helper; a helper started with `--home` on a desk of its own (the dev desk) takes
+`--timelog-home <real home>`, or its clock and time log stay in that other home, out of sight of
+every session and of `/pm-log`.
+
+**Time recorded after the fact.** Time the clock missed is recorded through `/pm-log`, after the
+user's OK, by `server/timesheet.py add --project <root> --date <day> --from <hh:mm> (--to <hh:mm> |
+--minutes <n>) [--ref '#<n>'] [--kind desk|meeting|dev]`: one interval with `source: p2kit-manual`,
+on a registered project (or a clone of one, by its origin), ending no later than now, at most 24
+hours, cut at midnight; the same interval of the same project is refused a second time. It writes no
+project file: the day is crystallized afterwards like any other.
 
 ## Timesheets
 
@@ -712,9 +723,10 @@ entries:
 - The helper `server/timesheet.py` does the arithmetic, never the skill: `show` drafts a day with a
   hash, `write` writes the draft only while the log still gives that hash, and replaces a day already
   written only with `--replace` and never once sent; `push` sends to Forgejo the lines not yet sent.
-  The time log is read across every project: where intervals overlap, the time counts once, for the
-  interval on an issue before one on the project, then for the latest started, and the draft lists
-  the overlaps. A day is not written while the desk clock runs on the project.
+  The time log is read across every project: where intervals overlap, the time counts once, for
+  declared time first (a `p2kit-manual` entry, then the desk clock `p2kit-desk`, then any other
+  source), then for the interval on an issue before one on the project, then for the latest started,
+  and the draft lists the overlaps. A day is not written while the desk clock runs on the project.
 
 The desk reads every timesheet: per work package the sum of its lines is its `tracked` hours and its
 `actual` (*Effort*), and per project `time` (`{ hours, byKind, people }`), shown as `time <h>h` in
