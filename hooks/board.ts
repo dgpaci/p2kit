@@ -968,7 +968,7 @@ function activity(p) {
   const sel = itemPicks(p)
   const pick = isCrossRepo(p) ? () => null : sel.cell, rowClass = sel.rowClass, refs = sel.refs
   const selectionBar = isCrossRepo(p)
-    ? el('div', { className: 'activity-bar idle dim', textContent: 'The issues and pull requests carrying the label of each repo in project.yaml repos:. Packaging and assigning are not available on a cross-repo project yet.' })
+    ? el('div', { className: 'activity-bar idle dim', textContent: 'The issues and pull requests carrying the label of each repo listed under repos: in project.yaml. Packaging and assigning are not available on a cross-repo project yet.' })
     : refs.length
     ? el('div', { className: 'activity-bar' }, el('strong', { textContent: refs.length + ' selected' }), el('span', { className: 'refs', textContent: refs.join(' ') }),
         server ? el('button', { className: 'btn-primary', textContent: 'Create package', onclick: () => packageDialog(p, refs) })
