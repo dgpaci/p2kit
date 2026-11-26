@@ -187,8 +187,7 @@ holds the open items it names, before any milestone. An item named by two work p
 
 A malformed entry is an error and is left out: `repos: expected a list of { remote, label }`,
 `repos: <entry>: expected { remote, label }`, `repos: <remote>: expected host/owner/repo`, `repos: <remote> listed twice`.
-The forge actions of the desk (assign, new issue, attach, package) are not offered on a cross-repo project yet, and the
-desk helper refuses them. The file actions (place, status, notes, Daily Log owner) work as on any project.
+The desk actions work on each item's own repo (### Desk actions → *Cross-repo actions*).
 
 ### Activity
 
@@ -750,6 +749,21 @@ committed.
 | Assign to many | one `PATCH issues/<n>` per picked item, the login added to or removed from its `assignees` | open items that login does not hold (add) or holds (remove), 1–50; a login of `team.people` |
 | New issue | `POST issues` with `title`, `body`, and optionally `milestone` (the work package's, `number` on GitHub, `id` on Forgejo) and `assignees` (one login) | a title; a work package whose `milestone:` exists on the forge; a login of `team.people` |
 | Attach to a work package | `PATCH issues/<n>` with `milestone:` the key of the work package's milestone (`number` on GitHub, `id` on Forgejo); for a work package without `milestone:`, first the milestone named after its title (created, or reused when one carries that title), and after the patch its `milestone:` key | an open item; a work package whose `milestone:` exists on the forge, or one with a title and no `milestone:` |
+
+**Cross-repo actions.** On a project listing `repos:` every forge action goes to the item's own repo, resolved by the desk
+helper from `repos:` (never the origin). An item travels as its reference, `repo#<n>`:
+
+| Action | Change | Allowed |
+|---|---|---|
+| Assign / unassign | `{ kind: 'assign', repo, number, login, op }`: the `PATCH` on that repo | as above |
+| Assign to many | `numbers` holds references (`genropy#12`), each patched on its repo; the preview names every forge | as above |
+| Attach to a work package | `{ kind: 'wp-items', wp, ref }`: the reference added to the work package's `items:`; the forge is only read | an item not in its `items:`; a work package neither completed, archived nor cancelled |
+| Create package | a new `WP-<nn>.md` (`status: draft`) naming the open picked items in `items:`; nothing on the forge | open items; closed or unreadable ones are *Left out* |
+| New issue | `{ kind: 'issue-create', repo, … }`: the issue created on the picked repo; with a work package, `repo#<n>` added to its `items:` after it is created | a title; any open work package |
+
+An item dropped on a work package or a Board lane is attached through `items:`. A milestone is neither dropped nor turned
+into a work package, since the same title may stand in several repos. `issue-milestone` is refused, and so are a number
+with no repo, a repo not in `repos:`, and on a project without `repos:` a reference naming one.
 
 A missing key is added before the closing `---`; a key written twice, a value already set, or a note
 matching no line or more than one is refused, and so is a change to a file that changed since its

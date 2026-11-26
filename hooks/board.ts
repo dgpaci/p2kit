@@ -198,7 +198,7 @@ button.primary, button.btn-primary { background: var(--on); border-color: var(--
 .dialog-box { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; width: min(640px, 100%); max-height: calc(100vh - 120px); overflow: auto; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
 .dialog-box h3 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--fg); margin: 0 0 10px; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-.dialog-row { display: flex; gap: 8px; } .dialog-row input { flex: 1; }
+.dialog-row { display: flex; flex-wrap: wrap; gap: 8px; } .dialog-row input { flex: 1; } .dialog-row select { min-width: 0; max-width: 100%; }
 .dialog textarea { flex: 1; }
 .dialog-row + .dialog-row { margin-top: 8px; }
 .diff { font-family: ui-monospace, monospace; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -302,7 +302,8 @@ const iterationFact = it => el('span', { className: it.isOverdue ? 'err' : '', t
 // How an issue or a pull request is named: its repo in front on a cross-repo project (project.yaml repos:), as genropy#498.
 const refOf = (x, kind) => (kind === 'pr' ? 'PR ' : '') + (x.repo || '') + '#' + x.number
 const sameItem = (a, b) => a.number === b.number && (a.repo || '') === (b.repo || '')
-// A cross-repo project has no forge action yet (issue #89): its issues and pull requests are shown, not changed.
+// A cross-repo project (project.yaml repos:): each action works on the item's own repo, and an item joins a work package's
+// items: instead of a milestone (issue #89).
 const isCrossRepo = p => (p.repos || []).length > 0
 // The reference column: 80px, on a cross-repo project as wide as its longest reference, which carries the repo (PR genropy#12).
 const refStyle = p => 'width:' + (isCrossRepo(p) ? Math.max(8, ...p.forgeIssues.map(i => refOf(i).length), ...p.forgePulls.map(x => refOf(x, 'pr').length)) + 2 + 'ch' : '80px') + '; white-space:nowrap'
@@ -425,7 +426,7 @@ function previewOf(preview, extra) {
   if (preview.kind === 'issue-create') return [
     el('p', { className: 'dim', textContent: 'On ' + preview.forge }),
     el('div', { className: 'diff add', textContent: '+ ' + preview.issue.title + (preview.issue.body ? '\\n\\n' + preview.issue.body : '') }),
-    el('p', { textContent: 'Milestone: ' + (preview.milestone ? preview.milestone.title + ' (' + preview.wp + ')' : 'none') + ' · assignee: ' + (preview.assignee ? preview.assignee.person : 'none') }),
+    el('p', { textContent: (preview.items ? 'Joins the items of ' + preview.items.wp + ' (' + preview.items.file + ')' : 'Milestone: ' + (preview.milestone ? preview.milestone.title + ' (' + preview.wp + ')' : 'none')) + ' · assignee: ' + (preview.assignee ? preview.assignee.person : 'none') }),
     preview.milestone && preview.milestone.closed ? el('p', { className: 'warn', textContent: 'The milestone ' + preview.milestone.title + ' is closed.' }) : null,
     el('p', { className: 'warn', textContent: 'An issue cannot be deleted once created: if it is not wanted, close it.' })]
   if (preview.kind === 'assign') return [
@@ -438,6 +439,15 @@ function previewOf(preview, extra) {
     el('div', { className: 'diff' }, ...preview.items.map(i => el('div', {}, el('strong', { textContent: i.ref + ' ' }), i.title,
       el('div', { className: 'del', textContent: '- assignees: ' + (i.before.join(', ') || 'none') }), el('div', { className: 'add', textContent: '+ assignees: ' + (i.after.join(', ') || 'none') })))),
     preview.skipped.length ? el('div', {}, el('h3', { textContent: 'Left out' }), ...preview.skipped.map(i => el('div', { className: 'dim', textContent: i.ref + ' · ' + i.reason }))) : null]
+  if (preview.kind === 'wp-items') return [
+    el('p', { className: 'dim', textContent: 'Read on ' + preview.forge + ': nothing is written there' }),
+    el('p', {}, el('strong', { textContent: preview.item.ref + ' ' }), preview.item.title, preview.item.state === 'open' ? null : el('span', { className: 'warn', textContent: ' (' + preview.item.state + ')' })),
+    ...fileChanges(preview)]
+  if (preview.kind === 'package-items') return [
+    el('p', { className: 'dim', textContent: 'Read on ' + preview.forge + ': nothing is written there' }),
+    el('div', {}, el('h3', { textContent: 'Items' }), ...preview.items.map(i => el('div', { textContent: i.ref + ' ' + i.title }))),
+    preview.skipped.length ? el('div', {}, el('h3', { textContent: 'Left out' }), ...preview.skipped.map(i => el('div', { className: 'dim', textContent: i.ref + ' · ' + i.reason }))) : null,
+    el('h3', { textContent: 'Work package' }), el('p', { className: 'dim mono', textContent: preview.wp.file }), el('div', { className: 'diff add', textContent: preview.wp.text })]
   // A drop in the Work packages tab writes one file or, renumbering the horizon, several.
   if (preview.kind === 'wp-place') return preview.files.flatMap(fileChanges)
   if (preview.kind === 'log-owner') return [...fileChanges(preview),
@@ -508,7 +518,8 @@ function noteAction(n) {
 // A new issue on the project's forge, optionally in a work package's milestone and assigned to a team member: the helper previews
 // it and creates it on Confirm. Without the helper, or for the readiness headings, the pm-issue skill drafts it in a session.
 // Starting the work is the developer's move, from their forge desk's Solve.
-const issueTargets = p => p.workPackages.filter(w => w.delivery && w.delivery.milestone && !['completed', 'archived', 'cancelled'].includes(w.status))
+// On a cross-repo project the new issue joins a work package's items:, so any open one is a target; else one with a milestone.
+const issueTargets = p => p.workPackages.filter(w => (isCrossRepo(p) || (w.delivery && w.delivery.milestone)) && !['completed', 'archived', 'cancelled'].includes(w.status))
 function issueDialog(p, wp) {
   const title = el('input', { type: 'text', placeholder: 'Export the daily log as CSV' })
   const body = el('textarea', { rows: 6, placeholder: '## Why\\n\\n## What changes\\n\\n## Done when\\n' })
@@ -516,25 +527,26 @@ function issueDialog(p, wp) {
     ...issueTargets(p).map(w => el('option', { value: w.id, textContent: w.id + ' ' + w.title, selected: w.id === wp })))
   const pickWho = el('select', { title: 'assignee' }, el('option', { value: '', textContent: 'Unassigned' }),
     ...p.team.filter(m => m.login).map(m => el('option', { value: m.login, textContent: m.person })))
+  const pickRepo = isCrossRepo(p) ? el('select', { title: 'repo' }, ...p.repos.map(r => el('option', { value: r.name, textContent: r.name }))) : null
   const draft = el('a', { textContent: 'draft it with pm-issue' })
   const drafted = () => { draft.href = skillLink(p, 'pm-issue', pickWp.value || 'a work package') }
   pickWp.onchange = drafted
   drafted()
-  const preview = () => title.value.trim() && act(p, { kind: 'issue-create', title: title.value.trim(), body: body.value, wp: pickWp.value, login: pickWho.value })
+  const preview = () => title.value.trim() && act(p, Object.assign({ kind: 'issue-create', title: title.value.trim(), body: body.value, wp: pickWp.value, login: pickWho.value }, pickRepo ? { repo: pickRepo.value } : {}))
   title.onkeydown = e => { if (e.key === 'Enter') preview() }
   openDialog('New issue on ' + p.name,
-    el('div', { className: 'dialog-row' }, title), el('div', { className: 'dialog-row' }, body), el('div', { className: 'dialog-row' }, pickWp, pickWho),
+    el('div', { className: 'dialog-row' }, title), el('div', { className: 'dialog-row' }, body), el('div', { className: 'dialog-row' }, pickRepo, pickWp, pickWho),
     el('p', { className: 'dim' }, 'For the readiness headings of a work package: ', draft, '.'),
     buttons(closeButton('Cancel'), el('button', { className: 'primary', textContent: 'Preview', onclick: preview })))
   title.focus()
 }
 function newIssueButton(p, wp, label = 'New issue', className = 'act') {
-  if (!server || p.pmRef || isCrossRepo(p)) return null
+  if (!server || p.pmRef) return null
   return el('button', { className, textContent: label, title: 'create an issue' + (wp ? ' in ' + wp : ''), onclick: e => { e.stopPropagation(); issueDialog(p, wp) } })
 }
 // Assign or unassign one team member on every picked issue and pull request (the only assign control besides a drop on a member,
 // issue #58): one preview lists them all, with those left out. Only with the helper, and never on a project whose .pm/ is read from git.
-const canAssign = p => server && !p.pmRef && !isCrossRepo(p) && p.team.some(m => m.login)
+const canAssign = p => server && !p.pmRef && p.team.some(m => m.login)
 function assignManyControl(p, numbers) {
   if (!canAssign(p)) return null
   const members = p.team.filter(m => m.login)
@@ -548,7 +560,7 @@ function packageDialog(p, refs) {
   const title = el('input', { type: 'text', placeholder: 'one to three words' })
   const preview = () => title.value.trim() && act(p, { kind: 'package', refs, title: title.value.trim() })
   title.onkeydown = e => { if (e.key === 'Enter') preview() }
-  openDialog('Package ' + refs.join(' '), el('p', { className: 'dim', textContent: 'The title names the milestone and the work package.' }), el('div', { className: 'dialog-row' }, title),
+  openDialog('Package ' + refs.join(' '), el('p', { className: 'dim', textContent: isCrossRepo(p) ? 'The title names the work package; the items join its items:.' : 'The title names the milestone and the work package.' }), el('div', { className: 'dialog-row' }, title),
     buttons(closeButton('Cancel'), el('button', { className: 'primary', textContent: 'Preview', onclick: preview })))
   title.focus()
 }
@@ -565,7 +577,7 @@ const loginsOf = assignees => assignees ? assignees.map(a => (a.login || a).toLo
 // The request a drop of item on a member or a work package makes; null when that target does not accept it.
 function assignRequest(item, m) {
   if (item.kind === 'milestone' || item.kind === 'wp' || !m.login || (item.logins && item.logins.includes(m.login.toLowerCase()))) return null
-  return { kind: 'assign', number: item.number, login: m.login, op: 'add' }
+  return Object.assign({ kind: 'assign', number: item.number, login: m.login, op: 'add' }, item.repo ? { repo: item.repo } : {})
 }
 // The request a drop of a work package makes in a horizon ('' for Not placed), above or below the row beside or last; null
 // when it would leave the roadmap as it is.
@@ -583,6 +595,8 @@ function wpRequest(p, item, w) {
   if (item.kind === 'wp' || ['archived', 'cancelled'].includes(w.status)) return null
   const milestone = w.delivery ? w.delivery.milestone : ''
   if (item.kind === 'milestone') return milestone === item.title ? null : { kind: 'wp-link', target: w.id, field: 'milestone', value: item.title }
+  // On a cross-repo project the item joins the work package's items:, read from the forge and written in its file only.
+  if (isCrossRepo(p)) return w.status !== 'completed' && !((w.delivery && w.delivery.items) || []).includes(refOf(item)) ? { kind: 'wp-items', wp: w.id, ref: refOf(item) } : null
   if (!milestone) return w.title && w.status !== 'completed' ? { kind: 'issue-milestone', number: item.number, wp: w.id } : null
   return milestone !== item.milestone ? { kind: 'issue-milestone', number: item.number, wp: w.id } : null
 }
@@ -646,7 +660,8 @@ function showDock(p, item) {
 // Makes a row or a card draggable; item: { kind: 'issue' | 'pr' | 'milestone', ref, number, title, milestone, logins }, or
 // { kind: 'wp', ref, id, isPlaced } for a work package row.
 function draggable(p, node, item) {
-  if (!server || p.pmRef || (isCrossRepo(p) && item.kind !== 'wp')) return node
+  // A milestone of a cross-repo project is the same title in several repos: it is not linked by a drop.
+  if (!server || p.pmRef || (isCrossRepo(p) && item.kind === 'milestone')) return node
   node.draggable = true
   node.classList.add('drag')
   node.addEventListener('dragstart', e => {
@@ -664,7 +679,7 @@ function draggable(p, node, item) {
   node.addEventListener('dragend', endDrag)
   return node
 }
-const dragItem = (kind, x) => ({ kind, ref: refOf(x, kind), number: x.number, milestone: x.milestone || '', logins: loginsOf(x.assignees) })
+const dragItem = (kind, x) => ({ kind, repo: x.repo || '', ref: refOf(x, kind), number: x.number, milestone: x.milestone || '', logins: loginsOf(x.assignees) })
 
 let route = decodeURIComponent(location.hash.slice(1))
 const go = r => { route = r; history.replaceState(null, '', r ? '#' + encodeURIComponent(r) : location.pathname); draw() }
@@ -895,7 +910,8 @@ function itemPicks(p) {
       onchange: () => { pickedItems.has(key) ? pickedItems.delete(key) : pickedItems.set(key, ref); draw() } })),
     rowClass: key => pickedItems.has(key) ? 'checked' : '',
     refs: [...pickedItems.values()],
-    numbers: () => [...pickedItems.values()].map(r => Number(r.replace(/^(PR )?#/, ''))),
+    // On a cross-repo project an item travels as its reference, repo#<n>; else as its number.
+    numbers: () => [...pickedItems.values()].map(r => isCrossRepo(p) ? r.replace(/^PR /, '') : Number(r.replace(/^(PR )?#/, ''))),
     clear: el('a', { href: '#', textContent: 'clear', onclick: e => { e.preventDefault(); pickedItems.clear(); draw() } }),
   }
 }
@@ -932,7 +948,7 @@ function team(p) {
             el('td', { textContent: i.title }),
             el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
             el('td', { style: 'width:200px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i)) : null, ' ', pill(STATUS_LABEL[i.status], i.status))),
-          dragItem(i.kind, Object.assign({}, (i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => sameItem(x, i)), { number: i.number, assignees: i.assignees || assigneesOf(p, i) }))))))
+          dragItem(i.kind, Object.assign({}, (i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => sameItem(x, i)), { repo: i.repo, number: i.number, assignees: i.assignees || assigneesOf(p, i) }))))))
         : el('div', { className: 'empty dim', textContent: 'No open item.' }),
       actionRows(m.actions || [], false, assignable && m.login && m.items.length, refStyle(p))), x => assignRequest(x, m), m.person)),
     // The open actions of the Daily Log no person of the roles owns, last and only while no member is picked.
@@ -966,15 +982,13 @@ function activity(p) {
   if (activityFor !== p.path) { notReadyOnly = false; activityFor = p.path }
   const today = data.refreshedAt.slice(0, 10)
   const sel = itemPicks(p)
-  const pick = isCrossRepo(p) ? () => null : sel.cell, rowClass = sel.rowClass, refs = sel.refs
-  const selectionBar = isCrossRepo(p)
-    ? el('div', { className: 'activity-bar idle dim', textContent: 'The issues and pull requests carrying the label of each repo listed under repos: in project.yaml. Packaging and assigning are not available on a cross-repo project yet.' })
-    : refs.length
+  const pick = sel.cell, rowClass = sel.rowClass, refs = sel.refs
+  const selectionBar = refs.length
     ? el('div', { className: 'activity-bar' }, el('strong', { textContent: refs.length + ' selected' }), el('span', { className: 'refs', textContent: refs.join(' ') }),
         server ? el('button', { className: 'btn-primary', textContent: 'Create package', onclick: () => packageDialog(p, refs) })
-          : el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: 'Create package' }),
+          : isCrossRepo(p) ? null : el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: 'Create package' }),
         assignManyControl(p, sel.numbers()), sel.clear,
-        el('span', { className: 'dim hint', textContent: server ? 'previews the milestone and the work package, then writes them on Confirm' : 'opens a Claude session on ' + p.name + ' with the pm-package skill: ' + refs.join(' ') }))
+        el('span', { className: 'dim hint', textContent: server ? (isCrossRepo(p) ? 'previews the work package naming them, then writes it on Confirm' : 'previews the milestone and the work package, then writes them on Confirm') : 'opens a Claude session on ' + p.name + ' with the pm-package skill: ' + refs.join(' ') }))
     : el('div', { className: 'activity-bar idle dim', textContent: 'Check issues or pull requests to group them into a work package or assign them.' })
 
   const milestoneRow = m => {

@@ -651,15 +651,84 @@ class ForgeTransport(unittest.TestCase):
                 self.forge('forgejo', 'hub.example', home).call('PATCH', 'repos/o/r/issues/18', {'assignees': []})
         self.assertEqual(seen, {'url': 'https://hub.example/api/v1/repos/o/r/issues/18', 'method': 'PATCH', 'body': {'assignees': []}, 'auth': 'token t0k'})
 
-    def test_a_cross_repo_project_is_refused_before_git_is_asked(self):
-        # Its items live in the repos of `repos:`, not in the origin the actions would change (issue #89).
-        with tempfile.TemporaryDirectory() as root:
-            os.makedirs(os.path.join(root, '.pm'))
-            with open(os.path.join(root, '.pm', 'project.yaml'), 'w') as handle:
-                handle.write('name: X\nrepos:\n  - { remote: github.com/o/r, label: x }\n')
-            with unittest.mock.patch.object(ds.subprocess, 'run', side_effect=AssertionError('git asked')):
-                with self.assertRaisesRegex(ds.ActionError, 'cross-repo'):
-                    ds.Forge(root, root)
+
+CROSS = (TEAM.replace('reporting:', 'repos:\n  - { remote: github.com/acme/core, label: pm }\n  - { remote: hub.genro.com/acme/app, label: pm }  # the app\n'
+                      '  - { remote: hub.genro.com/other/app, label: pm }\nreporting:'))
+
+
+class CrossRepo(unittest.TestCase):
+    """A project listing repos: (issue #89): each action works on the item's own repo, never on the origin."""
+
+    def setUp(self):
+        self.p = Project()
+        self.p.write('.pm/project.yaml', CROSS)
+        self.p.write('.pm/work-packages/WP-01.md', WP.format(status='in-progress').replace('issue: 498\n', 'items: [core#3]\n'))
+        core = FakeForge([], {3: {'number': 3, 'title': 'Core pull', 'state': 'open', 'pull_request': {}, 'assignees': []},
+                              4: {'number': 4, 'title': 'Core issue', 'state': 'open', 'assignees': [{'login': 'dgpaci'}]}})
+        app = FakeForge([], {7: {'number': 7, 'title': 'App issue', 'state': 'open', 'assignees': []},
+                             8: {'number': 8, 'title': 'Old', 'state': 'closed', 'assignees': []}})
+        app.forge, app.host, app.repo = 'forgejo', 'hub.genro.com', 'acme/app'
+        self.forges = {'core': core, 'acme/app': app}
+
+    def tearDown(self):
+        self.p.temp.cleanup()
+
+    def act(self, **request):
+        base = {'project': self.p.root, **request}
+        answer, _ = ds.run_action(self.p.home, base, self.forges)
+        return answer['preview'], ds.run_action(self.p.home, {**base, 'confirm': answer['hash']}, self.forges)[0]
+
+    def test_the_repos_are_named_as_the_desk_names_them_and_each_has_its_forge_without_git(self):
+        self.assertEqual([(r['name'], r['label']) for r in ds.project_repos(self.p.root)], [('core', 'pm'), ('acme/app', 'pm'), ('other/app', 'pm')])
+        self.assertIsNone(ds.project_repos(Project().root))
+        with unittest.mock.patch.object(ds.subprocess, 'run', side_effect=AssertionError('git asked')):
+            forge = ds.Forge(self.p.root, self.p.home, 'acme/app')
+            self.assertEqual((forge.forge, forge.host, forge.repo), ('forgejo', 'hub.genro.com', 'acme/app'))
+            self.assertEqual(ds.Forge(self.p.root, self.p.home, 'core').forge, 'github')
+            with self.assertRaisesRegex(ds.ActionError, 'name the repo'):
+                ds.Forge(self.p.root, self.p.home)
+            with self.assertRaisesRegex(ds.ActionError, 'nope is not a repo of repos:'):
+                ds.Forge(self.p.root, self.p.home, 'nope')
+
+    def test_assigning_patches_each_item_on_its_own_repo(self):
+        preview, result = self.act(kind='assign-many', numbers=['PR core#3', 'acme/app#7', 'acme/app#8'], login='mbianchi')
+        self.assertEqual(preview['forge'], 'github.com/o/r, hub.genro.com/acme/app')
+        self.assertEqual(result['done'], ['PR core#3 assignees: mbianchi', 'acme/app#7 assignees: mbianchi'])
+        self.assertEqual(preview['skipped'], [{'ref': 'acme/app#8', 'reason': 'closed'}])
+        self.assertIn(('PATCH', 'repos/acme/app/issues/7', {'assignees': ['mbianchi']}), self.forges['acme/app'].calls)
+        with self.assertRaisesRegex(ds.ActionError, 'repo#<n> on a cross-repo project'):
+            self.act(kind='assign-many', numbers=[7], login='mbianchi')
+        _, result = self.act(kind='assign', repo='acme/app', number=7, login='dgpaci', op='add')
+        self.assertEqual(result['done'], ['acme/app#7 assignees: dgpaci'])
+
+    def test_an_item_dropped_on_a_work_package_joins_its_items_and_the_forge_is_only_read(self):
+        preview, _ = self.act(kind='wp-items', wp='WP-01', ref='acme/app#7')
+        self.assertEqual(preview['summary'], 'Attach acme/app#7 to WP-01')
+        self.assertEqual(preview['changes'], [{'line': 7, 'before': 'items: [core#3]', 'after': 'items: [core#3, acme/app#7]'}])
+        self.assertIn('items: [core#3, acme/app#7]\n', self.p.read('.pm/work-packages/WP-01.md'))
+        self.assertEqual({c[0] for f in self.forges.values() for c in f.calls}, {'GET'})
+        with self.assertRaisesRegex(ds.ActionError, 'already an item of WP-01'):
+            self.act(kind='wp-items', wp='WP-01', ref='PR core#3')
+        with self.assertRaisesRegex(ds.ActionError, 'drop it on the work package'):
+            self.act(kind='issue-milestone', number=7, wp='WP-01')
+
+    def test_a_package_writes_a_work_package_naming_its_open_items(self):
+        preview, result = self.act(kind='package', title='Login', refs=['PR core#3', 'acme/app#8', 'acme/app#7'])
+        self.assertEqual(preview['kind'], 'package-items')
+        self.assertEqual(preview['skipped'], [{'ref': 'acme/app#8', 'reason': 'closed'}])
+        self.assertEqual(result['done'], ['WP-02 written'])
+        self.assertEqual(self.p.read('.pm/work-packages/WP-02.md'),
+                         '---\nid: WP-02\ntitle: Login\nproduct: work-package\nstage: 2\nstatus: draft\nitems: [core#3, acme/app#7]\n---\n\n'
+                         '# Login\n\nPackaged items:\n\n- PR core#3 Core pull\n- acme/app#7 App issue\n')
+        self.assertFalse([c for f in self.forges.values() for c in f.calls if c[0] != 'GET'])
+
+    def test_a_new_issue_is_created_on_the_picked_repo_and_joins_the_work_package(self):
+        preview, result = self.act(kind='issue-create', repo='acme/app', title='Export', wp='WP-01', login='dgpaci')
+        self.assertEqual(preview['forge'], 'hub.genro.com/acme/app')
+        self.assertIsNone(preview['milestone'])
+        self.assertEqual(result['done'], ['acme/app#9 created, assigned to Davide Paci', 'acme/app#9 in the items of WP-01'])
+        self.assertIn(('POST', 'repos/acme/app/issues', {'title': 'Export', 'body': '', 'assignees': ['dgpaci']}), self.forges['acme/app'].calls)
+        self.assertIn('items: [core#3, acme/app#9]\n', self.p.read('.pm/work-packages/WP-01.md'))
 
 
 class Server(unittest.TestCase):
