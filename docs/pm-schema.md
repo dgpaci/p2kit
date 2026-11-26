@@ -81,6 +81,9 @@ team:                           # optional: forge logins and WIP limits of the p
     Marco Bianchi: { login: mbianchi }
 readiness:                      # optional: headings an open forge issue must carry to be ready
   headings: [Why, What changes, Done when]      # the default when absent
+repos:                          # optional: the repos a cross-repo project reads instead of its origin (### Cross-repo projects)
+  - { remote: github.com/genropy/genropy, label: privacy }
+  - { remote: hub.genro.com/anaci/anaci, label: privacy }
 documents:                      # optional: folders, relative to the repo, listed under Documents
   - anaci_app/report            #   .html, .md and .pdf files, subfolders up to 3 levels, titled by <title> / title / # heading
 reporting:
@@ -153,6 +156,28 @@ they own, listed under their items and not counted in the WIP. A person's **name
 action's `owner` gives, is the text of `roles` with a trailing note in brackets dropped
 (`Finizio (Secretary)` is `Finizio`); the match ignores case. The open actions owned by nobody,
 or by a name no person of the roles has, close the Team tab under *No team member*.
+
+### Cross-repo projects
+
+A project whose `.pm/` lives in one repo while its work is in others lists them under `repos:`, each
+`{ remote: host/owner/repo, label }`. The remote is written as in the time log (`github.com/genropy/genropy`), and its
+forge is chosen as for an origin: GitHub for `github.com`, Forgejo for any other host. With `repos:` the desk never reads
+the origin. In each repo it reads only the project's items: the open issues carrying the label (`issues?…&labels=<label>`
+on both forges) and the open pull requests that carry it or close one of those issues (the whole open list is read and
+filtered locally, since GitHub's pull list has no label filter). It also reads the open milestones holding one of those
+items or named by a work package. The closed issues and pull requests of the flow are filtered the same way. Without
+`repos:` the desk reads the origin, as described above.
+
+Each item carries `repo`, the repo's name (`owner/repo` when two repos share it), and the desk names it `genropy#498`,
+`PR genropy#12`. A `#n` in a pull request's body names an issue of its own repo. Team, WIP, Activity, Board and Metrics
+add up the repos. Milestones sharing a title are one milestone: their counts are summed and the earliest due day is kept.
+An error of a repo is prefixed with its name (`genropy: team: github issues: <reason>`). A work theme is read on the first
+repo of the list.
+
+A malformed entry is an error and is left out: `repos: expected a list of { remote, label }`,
+`repos: <entry>: expected { remote, label }`, `repos: <remote>: expected host/owner/repo`, `repos: <remote> listed twice`.
+The forge actions of the desk (assign, new issue, attach, package) are not offered on a cross-repo project yet, and the
+desk helper refuses them. The file actions (place, status, notes, Daily Log owner) work as on any project.
 
 ### Activity
 

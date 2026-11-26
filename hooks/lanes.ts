@@ -4,7 +4,8 @@ import type { Project } from '../types'
 // The open columns of a board lane; the Done column is the milestone's closed count, closed items are not read.
 export type LaneColumn = 'todo' | 'inprogress' | 'review'
 // An open issue or pull request on the board; `milestone` its title or '' (shown on the Unplanned lane).
-export type LaneCard = { kind: 'issue' | 'pr'; number: number; title: string; url: string; assignees: string[]; column: LaneColumn; milestone: string }
+// `repo` the repo of a cross-repo project the item belongs to, absent otherwise.
+export type LaneCard = { kind: 'issue' | 'pr'; repo?: string; number: number; title: string; url: string; assignees: string[]; column: LaneColumn; milestone: string }
 // One swimlane: a work package and the open items of its milestone, or the Unplanned lane (`wp` ''). `progress` the milestone's
 // closed over all items, null when the milestone is not among the open ones read; `reopened` the open items of a completed or
 // archived work package, 0 otherwise.
@@ -20,9 +21,9 @@ export function getBoardLanes(project: Project): BoardLane[] {
   const milestones = project.milestones ?? []
   const workPackages = project.workPackages ?? []
   const cards: LaneCard[] = [
-    ...issues.map(issue => ({ kind: 'issue' as const, number: issue.number, title: issue.title, url: issue.url, assignees: issue.assignees ?? [],
+    ...issues.map(issue => ({ kind: 'issue' as const, ...(issue.repo ? { repo: issue.repo } : {}), number: issue.number, title: issue.title, url: issue.url, assignees: issue.assignees ?? [],
       column: (issue.state === 'review' || issue.state === 'inprogress' ? issue.state : 'todo') as LaneColumn, milestone: issue.milestone ?? '' })),
-    ...pulls.map(pull => ({ kind: 'pr' as const, number: pull.number, title: pull.title, url: pull.url, assignees: pull.assignees ?? [],
+    ...pulls.map(pull => ({ kind: 'pr' as const, ...(pull.repo ? { repo: pull.repo } : {}), number: pull.number, title: pull.title, url: pull.url, assignees: pull.assignees ?? [],
       column: (pull.draft ? 'inprogress' : 'review') as LaneColumn, milestone: pull.milestone ?? '' })),
   ]
   const ownerOf = (title: string) => (title ? getMilestonePackage(workPackages, title) : undefined)

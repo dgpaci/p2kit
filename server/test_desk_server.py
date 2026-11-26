@@ -651,6 +651,16 @@ class ForgeTransport(unittest.TestCase):
                 self.forge('forgejo', 'hub.example', home).call('PATCH', 'repos/o/r/issues/18', {'assignees': []})
         self.assertEqual(seen, {'url': 'https://hub.example/api/v1/repos/o/r/issues/18', 'method': 'PATCH', 'body': {'assignees': []}, 'auth': 'token t0k'})
 
+    def test_a_cross_repo_project_is_refused_before_git_is_asked(self):
+        # Its items live in the repos of `repos:`, not in the origin the actions would change (issue #89).
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, '.pm'))
+            with open(os.path.join(root, '.pm', 'project.yaml'), 'w') as handle:
+                handle.write('name: X\nrepos:\n  - { remote: github.com/o/r, label: x }\n')
+            with unittest.mock.patch.object(ds.subprocess, 'run', side_effect=AssertionError('git asked')):
+                with self.assertRaisesRegex(ds.ActionError, 'cross-repo'):
+                    ds.Forge(root, root)
+
 
 class Server(unittest.TestCase):
     def setUp(self):

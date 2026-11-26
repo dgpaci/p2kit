@@ -109,7 +109,7 @@ test('Team and Activity assign through the checked items and one control on top,
     expect(tab).toContain('itemPicks(p)')
     expect(tab).toContain('assignManyControl(p, sel.numbers())')
   }
-  expect(script).toContain("sel.cell(i.kind[0] + i.number, (i.kind === 'pr' ? 'PR #' : '#') + i.number)")
+  expect(script).toContain('sel.cell(i.kind[0] + refOf(i), refOf(i, i.kind))')
   // The control assigns or unassigns: the op travels with the request, previewed before Confirm.
   const control = script.slice(script.indexOf('function assignManyControl'), script.indexOf('function packageDialog'))
   expect(control).toContain("group('add', 'Assign'), group('remove', 'Unassign')")

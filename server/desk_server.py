@@ -562,10 +562,18 @@ def detect_forge(url):
     return {'forge': 'github' if host == 'github.com' else 'forgejo', 'host': host, 'repo': f'{match.group(2)}/{match.group(3)}'}
 
 
+def is_cross_repo(root):
+    """Whether .pm/project.yaml lists `repos:`: its items live in other repos than the origin, which the actions would change."""
+    path = os.path.join(root, '.pm', 'project.yaml')
+    return os.path.exists(path) and re.search(r'^repos:[ \t]*(#.*)?$', read_text(path), re.M) is not None
+
+
 class Forge:
     """GitHub through `gh api`, Forgejo through its REST API with the token `fj auth` saved."""
 
     def __init__(self, root, home):
+        if is_cross_repo(root):
+            raise ActionError('a cross-repo project (repos: in .pm/project.yaml) has no forge action yet')
         result = subprocess.run(['git', '-C', root, 'remote', 'get-url', 'origin'], capture_output=True, text=True, timeout=FORGE_TIMEOUT)
         target = detect_forge(result.stdout.strip()) if result.returncode == 0 else None
         if not target:

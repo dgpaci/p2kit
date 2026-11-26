@@ -8,6 +8,7 @@ import { EditError, placeWp, setNoteStatus, setWpStatus } from './edits'
 import type { LineChange } from './edits'
 import { getFlowCell } from './flow'
 import { getBoardLanes } from './lanes'
+import { getItemRef } from './repos'
 import { getItemProgress, getMilestonePackage } from './milestones'
 import { getWorkThemes, loadProjects } from './project'
 import { getAttentionRisks, getRiskResponseLine, getRiskState, isRiskCovered } from './risks'
@@ -420,8 +421,8 @@ export const register: Register = on => {
     const themeId = chosenView.startsWith('theme:') ? chosenView.slice('theme:'.length) : ''
     const theme = p.workPackages.find(wp => wp.id === themeId && wp.delivery)
 
-    const notReady = new Set(p.forgeIssues.filter(issue => issue.missing.length > 0).map(issue => issue.number))
-    const notReadySuffix = (number: number) => (notReady.has(number) ? ' · notready' : '')
+    const notReady = new Set(p.forgeIssues.filter(issue => issue.missing.length > 0).map(issue => getItemRef(issue)))
+    const notReadySuffix = (item: { repo?: string; number: number }) => (notReady.has(getItemRef(item)) ? ' · notready' : '')
 
     const placed = (['now', 'next', 'later'] as const).flatMap(horizon => p.roadmap[horizon].flatMap(id => {
       const wp = p.workPackages.find(one => one.id === id)
@@ -438,7 +439,7 @@ export const register: Register = on => {
             : `Unplanned · ${lane.cards.length} open`
           const columns = BOARD_COLUMNS.flatMap(([column, label]) => {
             const list = lane.cards.filter(card => card.column === column)
-            return list.length ? [<Text wrap="truncate-end">{`  ${label}: ${list.map(card => `${card.kind === 'pr' ? 'PR ' : ''}#${card.number} ${card.assignees.length ? card.assignees.map(login => `@${login}`).join(' ') : 'unassigned'}`).join(', ')}`}</Text>] : []
+            return list.length ? [<Text wrap="truncate-end">{`  ${label}: ${list.map(card => `${getItemRef(card, card.kind)} ${card.assignees.length ? card.assignees.map(login => `@${login}`).join(' ') : 'unassigned'}`).join(', ')}`}</Text>] : []
           })
           return [<Text bold color={lane.reopened ? 'warning' : undefined} wrap="truncate-end">{head}</Text>, ...(columns.length ? columns : [<Text dimColor>{'  No open item.'}</Text>])]
         }),
@@ -447,7 +448,7 @@ export const register: Register = on => {
         // Activity: the open milestones with their work package, the open pull requests, the open issues grouped by milestone.
         id: 'activity', label: 'Activity', count: p.forgeIssues.length + p.forgePulls.length,
         render: () => {
-          const shown = isNotReadyOnly ? p.forgeIssues.filter(issue => notReady.has(issue.number)) : p.forgeIssues
+          const shown = isNotReadyOnly ? p.forgeIssues.filter(issue => notReady.has(getItemRef(issue))) : p.forgeIssues
           // Open issues of a milestone that is not open (closed, or past the one-page read): one group per title, after the open ones.
           const openTitles = new Set(p.milestones.map(m => m.title))
           const others = [...new Set(shown.map(issue => issue.milestone).filter(title => title && !openTitles.has(title)))]
@@ -475,7 +476,7 @@ export const register: Register = on => {
             })),
             <Text bold>Pull requests</Text>,
             ...(p.forgePulls.length === 0 ? [<Text dimColor>No open pull request.</Text>] : p.forgePulls.map(pull => (
-              <Text wrap="truncate-end">{`  PR #${pull.number} ${pull.title}${pull.draft ? ' · draft' : pull.inReview ? ' · in review' : ''}`}</Text>
+              <Text wrap="truncate-end">{`  ${getItemRef(pull, 'pr')} ${pull.title}${pull.draft ? ' · draft' : pull.inReview ? ' · in review' : ''}`}</Text>
             ))),
             <Box flexDirection="row" columnGap={1}>
               <Text bold>Issues</Text>
@@ -484,7 +485,7 @@ export const register: Register = on => {
             ...(issueGroups.length === 0 ? [<Text dimColor>No open issue.</Text>] : issueGroups.map(([head, list]) => (
               <Box key={`issues:${head}`} flexDirection="column">
                 <Text bold wrap="truncate-end">{head}</Text>
-                {list.map(issue => <Text wrap="truncate-end">{`  #${issue.number} ${issue.title}${notReadySuffix(issue.number)}`}</Text>)}
+                {list.map(issue => <Text wrap="truncate-end">{`  ${getItemRef(issue)} ${issue.title}${notReadySuffix(issue)}`}</Text>)}
               </Box>
             ))),
           ]
@@ -507,7 +508,7 @@ export const register: Register = on => {
                 ? <Text color={member.isOverLimit ? 'red' : undefined} bold wrap="truncate-end">{`${member.person} · @${member.login} · ${member.roles.join(', ')} · WIP ${member.wip}/${member.wipLimit}`}</Text>
                 : <Text dimColor wrap="truncate-end">{`${member.person} · no forge login`}</Text>}
               {member.items.map(item => (
-                <Text wrap="truncate-end">{`  ${item.kind === 'pr' ? 'PR ' : ''}#${item.number} ${item.title} · ${STATUS_LABEL[item.status]}${item.kind === 'issue' ? notReadySuffix(item.number) : ''}`}</Text>
+                <Text wrap="truncate-end">{`  ${getItemRef(item, item.kind)} ${item.title} · ${STATUS_LABEL[item.status]}${item.kind === 'issue' ? notReadySuffix(item) : ''}`}</Text>
               ))}
               {member.login && member.items.length === 0 && <Text dimColor>{'  No open item.'}</Text>}
               {(member.actions ?? []).map(entry => <Text color={entry.isOverdue ? 'red' : undefined} wrap="truncate-end">{getActionLine(entry, false)}</Text>)}

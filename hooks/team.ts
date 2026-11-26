@@ -9,21 +9,29 @@ const STATUS_ORDER: TeamStatus[] = ['review', 'inprogress', 'todo', 'waiting', '
 
 type RestUser = { login: string }
 type RestMilestoneRef = { title: string } | null
+type RestLabel = { name: string }
 export type RestIssue = {
   number: number; title: string; html_url: string; updated_at: string; assignees?: RestUser[] | null; pull_request?: unknown; state?: string
-  milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null
+  milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null; labels?: RestLabel[] | null
   // Not from the list: set by the desk from the issue's timeline, true once a commit references the issue.
   has_commits?: boolean
+  // Not from the list: on a cross-repo project, the name of the repo the desk read it from.
+  repo?: string
 }
 export type RestPull = {
   number: number; title: string; html_url: string; updated_at: string; draft?: boolean
   user?: RestUser | null; assignees?: RestUser[] | null; requested_reviewers?: RestUser[] | null
   milestone?: RestMilestoneRef; body?: string | null; created_at?: string; closed_at?: string | null; merged_at?: string | null
+  labels?: RestLabel[] | null; repo?: string
 }
 
 export const logins = (users: RestUser[] | null | undefined): string[] => (users ?? []).map(user => user.login)
 /** An issue, not a pull request: GitHub omits `pull_request` on issues, Forgejo sends it as null. */
 export const isPlainIssue = (issue: RestIssue): boolean => issue.pull_request == null
+/** Whether an item carries the label, by name. */
+export const hasLabel = (item: RestIssue | RestPull, label: string): boolean => (item.labels ?? []).some(one => one.name === label)
+/** The `repo` of an item, kept only when the desk set one: the same object shape as before on a project that reads its origin. */
+export const repoOf = (item: { repo?: string }): { repo?: string } => (item.repo ? { repo: item.repo } : {})
 
 // An event of an issue's timeline: GitHub marks a commit referencing the issue `referenced` with its `commit_id`,
 // Forgejo `commit_ref`.
@@ -47,7 +55,8 @@ export const hasCommitRef = (events: TimelineEvent[] | null): boolean =>
  */
 export function getIssueState(issue: RestIssue, pulls: RestPull[]): IssueState {
   if (issue.state === 'closed') return 'done'
-  const closing = pulls.filter(pull => getClosedRefs(pull.body).includes(issue.number))
+  // `#n` names an issue of the pull's own repo.
+  const closing = pulls.filter(pull => (pull.repo ?? '') === (issue.repo ?? '') && getClosedRefs(pull.body).includes(issue.number))
   if (closing.some(pull => !pull.draft)) return 'review'
   if (issue.has_commits || closing.length > 0) return 'inprogress'
   return 'todo'
@@ -91,7 +100,7 @@ export function readTeam(roles: RoleLine[], team: Value | undefined, errors: str
 export function toTeamItems(login: string, issues: RestIssue[], pulls: RestPull[], now: number): TeamItem[] {
   const found: { item: TeamItem; at: string }[] = []
   const add = (kind: TeamItem['kind'], one: RestIssue | RestPull, status: TeamStatus) =>
-    found.push({ item: { kind, number: one.number, title: one.title, status, url: one.html_url, updatedAt: one.updated_at.slice(0, 10) }, at: one.updated_at })
+    found.push({ item: { kind, ...repoOf(one), number: one.number, title: one.title, status, url: one.html_url, updatedAt: one.updated_at.slice(0, 10) }, at: one.updated_at })
   for (const issue of issues) {
     if (isPlainIssue(issue) && logins(issue.assignees).includes(login)) add('issue', issue, ISSUE_STATUS[getIssueState(issue, pulls)])
   }

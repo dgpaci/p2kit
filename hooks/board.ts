@@ -299,9 +299,16 @@ const stageEffort = e => 'Stage ' + e.stage + ' effort: ' + e.actual + 'h of ' +
 // The open iteration: "iteration <n> · <done>/<planned> WPs · ends <end>", red and " overdue" past its end.
 const iterationFact = it => el('span', { className: it.isOverdue ? 'err' : '', textContent: 'iteration ' + it.number + ' · ' + it.done + '/' + it.planned + ' WPs · ends ' + (it.end || '—') + (it.isOverdue ? ' overdue' : '') })
 // Readiness: an open issue lacking a heading of project.yaml readiness.headings carries a notready pill naming what is missing.
-const missingOf = (p, number) => (p.forgeIssues.find(i => i.number === number) || {}).missing || []
+// How an issue or a pull request is named: its repo in front on a cross-repo project (project.yaml repos:), as genropy#498.
+const refOf = (x, kind) => (kind === 'pr' ? 'PR ' : '') + (x.repo || '') + '#' + x.number
+const sameItem = (a, b) => a.number === b.number && (a.repo || '') === (b.repo || '')
+// A cross-repo project has no forge action yet (issue #89): its issues and pull requests are shown, not changed.
+const isCrossRepo = p => (p.repos || []).length > 0
+// The reference column: 80px, on a cross-repo project as wide as its longest reference, which carries the repo (PR genropy#12).
+const refStyle = p => 'width:' + (isCrossRepo(p) ? Math.max(8, ...p.forgeIssues.map(i => refOf(i).length), ...p.forgePulls.map(x => refOf(x, 'pr').length)) + 2 + 'ch' : '80px') + '; white-space:nowrap'
+const missingOf = (p, item) => (p.forgeIssues.find(i => sameItem(i, item)) || {}).missing || []
 // The assignees of a team item, from the project's open issues or pull requests once they carry them; undefined until then.
-const assigneesOf = (p, i) => ((i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => x.number === i.number) || {}).assignees
+const assigneesOf = (p, i) => ((i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => sameItem(x, i)) || {}).assignees
 const notReadyPill = missing => missing.length ? Object.assign(pill('notready', 'notready'), { title: 'missing: ' + missing.join(', ') }) : null
 
 // Desk actions. Served by the desk helper (server/desk_server.py), the page carries its token: every action is previewed, then
@@ -348,7 +355,7 @@ function clockDialog() {
   const targets = () => {
     const p = data.projects.find(x => x.path === project.value)
     target.replaceChildren(el('option', { value: '', textContent: 'the project' }),
-      ...(p ? p.forgeIssues : []).map(i => el('option', { value: '#' + i.number, textContent: '#' + i.number + ' ' + i.title })))
+      ...(p ? p.forgeIssues : []).map(i => el('option', { value: refOf(i), textContent: refOf(i) + ' ' + i.title })))
   }
   project.onchange = targets
   targets()
@@ -522,12 +529,12 @@ function issueDialog(p, wp) {
   title.focus()
 }
 function newIssueButton(p, wp, label = 'New issue', className = 'act') {
-  if (!server || p.pmRef) return null
+  if (!server || p.pmRef || isCrossRepo(p)) return null
   return el('button', { className, textContent: label, title: 'create an issue' + (wp ? ' in ' + wp : ''), onclick: e => { e.stopPropagation(); issueDialog(p, wp) } })
 }
 // Assign or unassign one team member on every picked issue and pull request (the only assign control besides a drop on a member,
 // issue #58): one preview lists them all, with those left out. Only with the helper, and never on a project whose .pm/ is read from git.
-const canAssign = p => server && !p.pmRef && p.team.some(m => m.login)
+const canAssign = p => server && !p.pmRef && !isCrossRepo(p) && p.team.some(m => m.login)
 function assignManyControl(p, numbers) {
   if (!canAssign(p)) return null
   const members = p.team.filter(m => m.login)
@@ -639,7 +646,7 @@ function showDock(p, item) {
 // Makes a row or a card draggable; item: { kind: 'issue' | 'pr' | 'milestone', ref, number, title, milestone, logins }, or
 // { kind: 'wp', ref, id, isPlaced } for a work package row.
 function draggable(p, node, item) {
-  if (!server || p.pmRef) return node
+  if (!server || p.pmRef || (isCrossRepo(p) && item.kind !== 'wp')) return node
   node.draggable = true
   node.classList.add('drag')
   node.addEventListener('dragstart', e => {
@@ -657,7 +664,7 @@ function draggable(p, node, item) {
   node.addEventListener('dragend', endDrag)
   return node
 }
-const dragItem = (kind, x) => ({ kind, ref: (kind === 'pr' ? 'PR #' : '#') + x.number, number: x.number, milestone: x.milestone || '', logins: loginsOf(x.assignees) })
+const dragItem = (kind, x) => ({ kind, ref: refOf(x, kind), number: x.number, milestone: x.milestone || '', logins: loginsOf(x.assignees) })
 
 let route = decodeURIComponent(location.hash.slice(1))
 const go = r => { route = r; history.replaceState(null, '', r ? '#' + encodeURIComponent(r) : location.pathname); draw() }
@@ -877,8 +884,8 @@ function themePanel(p, w) {
 const wpStatus = status => pill(status || 'no status', status === 'completed' || status === 'archived' ? 'ready' : status === 'in-progress' ? 'inprogress' : '')
 
 const STATUS_LABEL = { review: 'review asked', inprogress: 'in progress', todo: 'to do', waiting: 'waiting for review', stalled: 'stalled' }
-// The issues and pull requests checked on the Team and Activity tabs: one page-local selection shared by both, keyed 'i<n>' or
-// 'p<n>' with the reference; another project starts with nothing picked. A reload waits until nothing is picked.
+// The issues and pull requests checked on the Team and Activity tabs: one page-local selection shared by both, keyed 'i' or
+// 'p' and the reference (genropy#498 on a cross-repo project), mapped to the reference; another project starts with nothing picked. A reload waits until nothing is picked.
 const pickedItems = new Map()
 let pickedItemsFor = ''
 function itemPicks(p) {
@@ -919,28 +926,28 @@ function team(p) {
         el('div', { className: 'who' }, el('strong', { textContent: m.person }), el('small', { textContent: (m.login ? '@' + m.login : 'no forge login') + ' · ' + m.roles.join(', ') })),
         m.login ? pill('WIP ' + m.wip + '/' + m.wipLimit, m.isOverLimit ? 'wip-over' : '') : el('span', { className: 'dim', textContent: 'add team.people in project.yaml' })),
       !m.login ? null : m.items.length
-        ? el('table', { className: 'rows' }, el('tbody', {}, ...m.items.map(i => draggable(p, el('tr', { className: sel.rowClass(i.kind[0] + i.number) },
-            assignable ? sel.cell(i.kind[0] + i.number, (i.kind === 'pr' ? 'PR #' : '#') + i.number) : null,
-            el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: (i.kind === 'pr' ? 'PR #' : '#') + i.number })),
+        ? el('table', { className: 'rows' }, el('tbody', {}, ...m.items.map(i => draggable(p, el('tr', { className: sel.rowClass(i.kind[0] + refOf(i)) },
+            assignable ? sel.cell(i.kind[0] + refOf(i), refOf(i, i.kind)) : null,
+            el('td', { style: refStyle(p) }, el('a', { href: i.url, className: 'mono', textContent: refOf(i, i.kind) })),
             el('td', { textContent: i.title }),
             el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt }),
-            el('td', { style: 'width:200px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i.number)) : null, ' ', pill(STATUS_LABEL[i.status], i.status))),
-          dragItem(i.kind, Object.assign({}, (i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => x.number === i.number), { number: i.number, assignees: i.assignees || assigneesOf(p, i) }))))))
+            el('td', { style: 'width:200px; text-align:right' }, i.kind === 'issue' ? notReadyPill(missingOf(p, i)) : null, ' ', pill(STATUS_LABEL[i.status], i.status))),
+          dragItem(i.kind, Object.assign({}, (i.kind === 'pr' ? p.forgePulls : p.forgeIssues).find(x => sameItem(x, i)), { number: i.number, assignees: i.assignees || assigneesOf(p, i) }))))))
         : el('div', { className: 'empty dim', textContent: 'No open item.' }),
-      actionRows(m.actions || [], false, assignable && m.login && m.items.length)), x => assignRequest(x, m), m.person)),
+      actionRows(m.actions || [], false, assignable && m.login && m.items.length, refStyle(p))), x => assignRequest(x, m), m.person)),
     // The open actions of the Daily Log no person of the roles owns, last and only while no member is picked.
     !picked.size && (p.strayActions || []).length ? el('div', { className: 'person' },
       el('div', { className: 'person-head' }, el('div', { className: 'who' }, el('strong', { textContent: 'No team member' }),
         el('small', { textContent: 'open Daily Log actions owned by nobody, or by someone not in the roles' }))),
-      actionRows(p.strayActions, true)) : null)
+      actionRows(p.strayActions, true, false, refStyle(p))) : null)
 }
 // A person's open actions of the Daily Log under their issues and pull requests, assigned from the Daily log section of Registers:
 // the id, the text (with the owner when it is not theirs), the due date, red once past; lead keeps a blank check column, in line
-// with the checked items above.
-function actionRows(actions, withOwner, lead) {
+// with the checked items above; idStyle sizes the id column as the reference column above it.
+function actionRows(actions, withOwner, lead, idStyle) {
   if (!actions.length) return null
   return el('table', { className: 'rows' }, el('tbody', {}, ...actions.map(d => el('tr', {}, lead ? el('td', { className: 'sel-col' }) : null,
-    el('td', { className: 'mono', style: 'width:80px; white-space:nowrap', textContent: d.id }),
+    el('td', { className: 'mono', style: idStyle || 'width:80px; white-space:nowrap', textContent: d.id }),
     el('td', {}, d.text, withOwner ? el('span', { className: 'dim', textContent: ' · ' + (d.owner || 'no owner') }) : null),
     el('td', { style: 'width:100px; white-space:nowrap' }, dueCell(d)),
     el('td', { style: 'width:200px; text-align:right' }, pill('action', 'kind-action'))))))
@@ -959,8 +966,10 @@ function activity(p) {
   if (activityFor !== p.path) { notReadyOnly = false; activityFor = p.path }
   const today = data.refreshedAt.slice(0, 10)
   const sel = itemPicks(p)
-  const pick = sel.cell, rowClass = sel.rowClass, refs = sel.refs
-  const selectionBar = refs.length
+  const pick = isCrossRepo(p) ? () => null : sel.cell, rowClass = sel.rowClass, refs = sel.refs
+  const selectionBar = isCrossRepo(p)
+    ? el('div', { className: 'activity-bar idle dim', textContent: 'The issues and pull requests carrying the label of each repo in project.yaml repos:. Packaging and assigning are not available on a cross-repo project yet.' })
+    : refs.length
     ? el('div', { className: 'activity-bar' }, el('strong', { textContent: refs.length + ' selected' }), el('span', { className: 'refs', textContent: refs.join(' ') }),
         server ? el('button', { className: 'btn-primary', textContent: 'Create package', onclick: () => packageDialog(p, refs) })
           : el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: 'Create package' }),
@@ -981,19 +990,19 @@ function activity(p) {
       el('div', { className: 'wp' }, wp
         ? el('a', { href: '#', className: 'wp-link', onclick: e => { e.preventDefault(); go(p.path + '/theme/' + wp.id) } }, el('span', { className: 'mono', textContent: wp.id + ' ' }), wp.title)
         : el('span', {}, el('span', { className: 'nowp', textContent: 'no work package' }),
-            server ? el('button', { textContent: 'Create work package', onclick: () => act(p, { kind: 'package', title: m.title, fromMilestone: true }) })
+            isCrossRepo(p) ? null : server ? el('button', { textContent: 'Create work package', onclick: () => act(p, { kind: 'package', title: m.title, fromMilestone: true }) })
               : el('a', { className: 'btn', href: packageLink(p, ['--milestone', "'" + m.title + "'"]), textContent: 'Create work package' })))),
       { kind: 'milestone', ref: 'milestone ' + m.title, title: m.title })
   }
 
-  const pullRow = pr => draggable(p, el('tr', { className: rowClass('p' + pr.number) }, pick('p' + pr.number, 'PR #' + pr.number),
-    el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: pr.url, className: 'mono', textContent: 'PR #' + pr.number })),
+  const pullRow = pr => draggable(p, el('tr', { className: rowClass('p' + refOf(pr)) }, pick('p' + refOf(pr), refOf(pr, 'pr')),
+    el('td', { style: refStyle(p) }, el('a', { href: pr.url, className: 'mono', textContent: refOf(pr, 'pr') })),
     el('td', { textContent: pr.title }),
     el('td', { style: 'width:220px; text-align:right' }, pr.milestone ? pill(pr.milestone) : null, ' ', pr.draft ? pill('draft') : pr.inReview ? pill('in review', 'review') : null),
     el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: pr.updatedAt })), dragItem('pr', pr))
 
-  const issueRow = i => draggable(p, el('tr', { className: rowClass('i' + i.number) }, pick('i' + i.number, '#' + i.number),
-    el('td', { style: 'width:80px; white-space:nowrap' }, el('a', { href: i.url, className: 'mono', textContent: '#' + i.number })),
+  const issueRow = i => draggable(p, el('tr', { className: rowClass('i' + refOf(i)) }, pick('i' + refOf(i), refOf(i)),
+    el('td', { style: refStyle(p) }, el('a', { href: i.url, className: 'mono', textContent: refOf(i) })),
     el('td', { textContent: i.title }),
     el('td', { style: 'width:220px; text-align:right' }, notReadyPill(i.missing || [])),
     el('td', { className: 'dim', style: 'width:100px; white-space:nowrap', textContent: i.updatedAt })), dragItem('issue', i))
@@ -1255,8 +1264,8 @@ const LANE_COLUMNS = [['todo', 'To do'], ['inprogress', 'In progress'], ['review
 const lanesOf = p => p.lanes || []
 const unplannedCount = p => { const last = lanesOf(p).find(l => !l.wp); return last ? last.cards.length : 0 }
 function boardCard(c) {
-  return el('div', { className: 'bcard', title: (c.kind === 'pr' ? 'pull request' : 'issue') + ' #' + c.number },
-    el('a', { href: c.url, className: 'mono', textContent: (c.kind === 'pr' ? 'PR #' : '#') + c.number }), ' ', c.title,
+  return el('div', { className: 'bcard', title: (c.kind === 'pr' ? 'pull request ' : 'issue ') + refOf(c) },
+    el('a', { href: c.url, className: 'mono', textContent: refOf(c, c.kind) }), ' ', c.title,
     c.milestone && !c.inLane ? el('span', { className: 'ms', textContent: ' · ' + c.milestone }) : null,
     c.assignees.length ? el('span', { className: 'who', textContent: c.assignees.map(a => '@' + a).join(' ') }) : el('span', { className: 'who none', textContent: 'unassigned' }))
 }
