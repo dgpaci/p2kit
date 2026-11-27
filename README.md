@@ -82,6 +82,8 @@ Status: phase 1 skeleton, under development.
 | `/pm-note` | adds or closes an internal note on a commit of a work package's branch (`.pm/registers/commit-notes.yaml`) |
 | `/pm-digest` | writes the weekly digest for the alignment meeting from the desk's data (`.pm/digests/`, clipboard on request) |
 | `/pm-report` | drafts the Highlight Report for the Board and, after your OK, saves it and moves the next report date |
+| `/pm-problem` | adds a problem to the Problems register; on request writes its report for the Board — impact, options, recommendation — saves it after your OK (`.pm/reports/`) and records the Board's decision once you state it |
+| `/pm-document` | drafts a report no other skill writes (exception, checkpoint, end stage, end project, lessons) or a free project document in a `documents:` folder, saved after your OK |
 | `/pm-register` | adds the current repo to the project desk (`~/.config/p2kit/projects.yaml`) |
 
 `/pm-desk` opens the pane.

@@ -24,7 +24,8 @@ The screenshots below come from a demo project, *Webshop renewal*, on the fictio
 | decide what comes first | `/pm-roadmap`: Now / Next / Later, plus a version for outsiders with no internal ids |
 | know where things stand | the desk, refreshed from git and the forge (GitHub or Forgejo) |
 | see who is overloaded or stuck | the Team tab: each person's items, WIP limit, stalled reviews |
-| report | `/pm-digest` (weekly, for the alignment meeting), `/pm-report` (Highlight Report for the Board) |
+| report | `/pm-digest` (weekly, for the alignment meeting), `/pm-report` (Highlight Report for the Board), `/pm-document` (exception, end stage, end project and other reports, specs, manuals) |
+| handle problems | `/pm-problem`: add a problem to the register and, on request, its report for the Board — impact, options, recommendation — and its decision |
 | keep a diary | `/pm-log`: forge events, meeting decisions and actions |
 | account for time | the desk clock for your own time, `/pm-log` to write the day to your timesheet; the work packages' actual follows |
 | handle risks | `/pm-risk`: how each risk is handled, an adequate / not adequate verdict, closure on your confirmation |

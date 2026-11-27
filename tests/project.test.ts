@@ -52,6 +52,24 @@ test('the overview figures come from the .pm files', async () => {
   expect(project.errors).toEqual([])
 })
 
+test('a Problems register entry with its report and decision (/pm-problem) reads as before', async () => {
+  const issues = `issues:
+  - id: I-004
+    title: Payment provider moves the sandbox go-live
+    type: problem
+    priority: high
+    status: open
+    raised: 2026-11-20
+    report: reports/2026-11-21-problem-I-004.md
+    decision: "option 2, go-live moved a week, budget unchanged"
+`
+  const project = buildProject({ path: '/p', project: PROJECT, products: [], workPackages: [], issues }, '2026-11-27')
+
+  expect(project.issues).toEqual([{ id: 'I-004', title: 'Payment provider moves the sandbox go-live', type: 'problem', priority: 'high', status: 'open' }])
+  expect(project.openIssues).toBe(1)
+  expect(project.errors).toEqual([])
+})
+
 test('a project without .pm is listed with the error', async () => {
   const project = buildProject({ path: '/src/empty', products: [], workPackages: [] }, '2026-11-03')
 
