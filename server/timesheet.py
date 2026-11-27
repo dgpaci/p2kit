@@ -155,10 +155,19 @@ def draft(root, home, day, login=None, forge=None):
     path = timesheet_path(root, login, day)
     return {
         'date': day, 'login': login, 'file': os.path.relpath(path, root), 'lines': lines, 'overlaps': shown, 'errors': errors,
-        'clockRunning': bool(clock and timelog.belongs(clock, root, remote)),
+        'clockRunning': bool(clock and timelog.belongs(clock, root, remote) and clock_covers(clock, day)),
         'existing': [line.strip() for line in day_lines(path, day)],
         'forge': forge.forge if forge else None,
     }
+
+
+def clock_covers(clock, day):
+    """Whether the running clock can still add time to `day`: it started on that local day or before it."""
+    try:
+        started = timelog.parse_time(clock['start']).astimezone().date().isoformat()
+    except ValueError:
+        return True
+    return started <= day
 
 
 def draft_hash(result):
@@ -196,7 +205,7 @@ def write(root, home, day, digest, login=None, replace=False, forge=None):
     if draft_hash(result) != digest:
         raise TimesheetError('the time log changed since the draft: show it again')
     if result['clockRunning']:
-        raise TimesheetError('the desk clock is running on this project: stop it first')
+        raise TimesheetError(f'the desk clock is running on this project and still adds time to {day}: stop it first')
     if not result['lines']:
         raise TimesheetError(f'no time logged on {day} for this project')
     path = timesheet_path(root, result['login'], day)
