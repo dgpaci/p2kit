@@ -47,6 +47,7 @@ the PM reads it before it is saved.
 | Attach an issue or pull request to a work package | the milestone of an open item on the forge: the work package's `milestone:`, created after the work package's title when it has none | a drop on a work package (drag dock or Board lane), preview old / new milestone, confirm; a checked group goes through *+ work package* |
 | Add a Daily Log entry, a problem or a risk | one entry appended to `daily-log.yaml`, `issues.yaml` or `risks.yaml`, with the next id | browser page only: *+ log*, *+ problem*, *+ risk* next to the register, dialog, preview, confirm |
 | Digest, Highlight Report, Presentation, Retrospective, document, iteration, issue draft | new text | opens a session with the skill; from a dialog (*+ report*, *+ document*, *+ iteration*, or *Open in Claude* in any dialog) with the fields typed |
+| Draft the fields of an issue, a risk, a problem or a Daily Log entry | nothing: the dialog's fields | browser page only: *Draft with Claude* in *+ issue*, *+ risk*, *+ problem*, *+ log* runs a headless Claude with the skill, read-only, and fills the fields; the write is still *Preview*, *Confirm* |
 
 A direct action never writes without a preview. The confirmation applies only to the file as
 the preview showed it: if the file has changed since, the action is refused and the preview is
@@ -66,6 +67,8 @@ shown again.
     actions change one line; placing a work package may also renumber the `rank:` of the others
     in its horizon, assigning many patches each checked item, and a new register entry appends its
     lines at the end of the register, its free text on one line in quotes.
+  - *Draft with Claude* runs `claude -p` in the project's folder with only the `Skill` and `Read`
+    tools: Claude can write nothing, and the helper writes nothing for it — it only fills the dialog.
   - It serves a project's Markdown documents as read-only HTML pages (`GET /doc`): only `.md`
     files inside a registered project, rendered with every tag escaped and scripts blocked.
   - It assigns only the logins of `team.people`, gives a Daily Log action only an owner named in

@@ -51,6 +51,10 @@ task's journey from assignment to merge.
   shows the change and writes it on Confirm, without opening a session; text — reports, digests, presentations — is still
   drafted in a session with its skill. Small buttons next to what they act on (*+ log*, *+ problem*, *+ risk*, *+ iteration*,
   *+ document*, *+ report*, a lane's *+ issue*) open a dialog whose *Open in Claude* starts that session with the fields typed.
+  In *+ issue*, *+ risk*, *+ problem* and *+ log*, **Draft with Claude** turns rough notes into the dialog's fields: the
+  helper runs a headless Claude with the skill, read-only, and fills them for you to edit; *Preview* and *Confirm* still do
+  the write — Claude writes nothing. Each click is one Claude call on your account, on `sonnet` by default
+  (`P2KIT_DRAFT_MODEL=haiku`, or the helper's `--draft-model`, to change it).
   In the browser the writes need **Python 3** (a standard-library helper the mod starts); without
   it the page writes nothing and the dialogs open Claude only. What acts directly and why: [docs/scope.md](docs/scope.md).
 - **Work themes.** The work packages of a stage run in parallel; one linked with `/pm-link` to an

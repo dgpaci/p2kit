@@ -802,6 +802,150 @@ class CrossRepo(unittest.TestCase):
         self.assertIn('items: [core#3, acme/app#9]\n', self.p.read('.pm/work-packages/WP-01.md'))
 
 
+class FakeClaude:
+    """The headless Claude of Draft with Claude: records the call and answers as told."""
+
+    def __init__(self, answer=None, code=0, stdout=None, stderr='', error=None):
+        self.answer, self.code, self.stdout, self.stderr, self.error = answer, code, stdout, stderr, error
+        self.calls = []
+
+    def __call__(self, command, cwd, prompt, timeout):
+        self.calls.append({'command': command, 'cwd': cwd, 'prompt': prompt, 'timeout': timeout})
+        if self.error:
+            raise self.error
+        return self.code, self.stdout if self.stdout is not None else json.dumps(self.answer), self.stderr
+
+    def flag(self, name):
+        command = self.calls[-1]['command']
+        return command[command.index(name) + 1]
+
+
+def claude_answer(fields, cost=0.0123, **extra):
+    return {'type': 'result', 'subtype': 'success', 'is_error': False, 'result': json.dumps(fields), 'structured_output': fields, 'total_cost_usd': cost, **extra}
+
+
+class Draft(unittest.TestCase):
+    """Draft with Claude: a headless Claude drafts a dialog's fields with the target's skill; nothing is written."""
+
+    def setUp(self):
+        self.p = Project()
+        self.p.write('.pm/project.yaml', PEOPLE)
+
+    def tearDown(self):
+        self.p.temp.cleanup()
+
+    def draft(self, target, fields, fake, **options):
+        return ds.run_draft(self.p.home, {'project': self.p.root, 'target': target, 'fields': fields}, run=fake, claude='/bin/claude', day='2026-11-27', **options)
+
+    def test_an_issue_draft_runs_claude_read_only_in_the_project_with_its_skill_and_schema(self):
+        fake = FakeClaude(claude_answer({'title': 'Export the daily log as CSV', 'body': '## Why\nx\n\n## What changes\ny\n\n## Done when\nz',
+                                         'remarks': 'No work package\ngiven.'}))
+        before = {name: self.p.read(name) for name in ('.pm/project.yaml', '.pm/work-packages/WP-01.md', '.pm/registers/commit-notes.yaml')}
+        answer = self.draft('issue', {'title': 'csv export', 'body': 'daily log as csv from the desk', 'wp': 'WP-01'}, fake)
+        call = fake.calls[0]
+        self.assertEqual(call['cwd'], self.p.root)
+        self.assertEqual(call['timeout'], ds.DRAFT_TIMEOUT)
+        self.assertEqual(call['command'][:2], ['/bin/claude', '-p'])
+        self.assertEqual(fake.flag('--tools'), 'Skill,Read')
+        self.assertEqual(fake.flag('--output-format'), 'json')
+        self.assertEqual(fake.flag('--model'), 'sonnet')
+        self.assertIn('--no-session-persistence', call['command'])
+        self.assertIn('--strict-mcp-config', call['command'])
+        self.assertIn('Draft only', fake.flag('--append-system-prompt'))
+        schema = json.loads(fake.flag('--json-schema'))
+        self.assertEqual(sorted(schema['properties']), ['body', 'remarks', 'title'])
+        self.assertIn('p2kit:pm-issue', call['prompt'])
+        self.assertIn('.pm/work-packages/WP-01.md', call['prompt'])
+        self.assertIn('daily log as csv from the desk', call['prompt'])
+        self.assertEqual(answer['fields']['title'], 'Export the daily log as CSV')
+        self.assertTrue(answer['fields']['body'].startswith('## Why'))
+        self.assertEqual((answer['model'], answer['cost'], answer['dropped'], answer['remarks']), ('sonnet', 0.0123, [], 'No work package given.'))
+        self.assertNotIn('remarks', answer['fields'])
+        self.assertIsInstance(answer['seconds'], int)
+        self.assertEqual(before, {name: self.p.read(name) for name in before})
+        self.assertFalse(os.path.exists(os.path.join(self.p.root, '.pm', 'registers', 'daily-log.yaml')))
+
+    def test_each_target_names_its_skill_and_its_fields_with_the_helpers_enums(self):
+        expected = {'issue': ('pm-issue', ['body', 'remarks', 'title']),
+                    'risk': ('pm-risk', ['actions', 'category', 'cause', 'impact', 'probability', 'remarks', 'response', 'title']),
+                    'problem': ('pm-problem', ['priority', 'remarks', 'title', 'type']),
+                    'log': ('pm-log', ['due', 'kind', 'owner', 'remarks', 'text'])}
+        for target, (skill, keys) in expected.items():
+            fake = FakeClaude(claude_answer({'title': 't', 'text': 't'}))
+            self.draft(target, {'notes': 'x'}, fake, model='haiku')
+            schema = json.loads(fake.flag('--json-schema'))
+            self.assertEqual(sorted(schema['properties']), keys, target)
+            self.assertIn(f'p2kit:{skill} skill', fake.calls[0]['prompt'])
+            self.assertEqual(fake.flag('--model'), 'haiku')
+        risk = ds.draft_schema('risk', [])['properties']
+        self.assertEqual(risk['response']['enum'], list(ds.RISK_RESPONSES))
+        self.assertEqual(risk['probability']['enum'], list(ds.LEVELS))
+        self.assertEqual(ds.draft_schema('problem', [])['properties']['type']['enum'], list(ds.PROBLEM_TYPES))
+        log = ds.draft_schema('log', ds.project_people(self.p.root))['properties']
+        self.assertEqual(log['kind']['enum'], list(ds.LOG_KINDS))
+        self.assertIn('Finizio', log['owner']['enum'])
+        self.assertNotIn('owner', ds.draft_schema('log', [])['properties'])
+
+    def test_an_invalid_value_is_dropped_never_passed_on(self):
+        fake = FakeClaude(claude_answer({'title': 'API change\nbefore go-live', 'cause': 'vendor', 'category': 'menace', 'probability': 'HIGH',
+                                         'impact': 'high', 'response': 'pray', 'actions': 'watch the changelog'}))
+        answer = self.draft('risk', {'title': 'api'}, fake)
+        self.assertEqual(answer['fields'], {'title': 'API change before go-live', 'cause': 'vendor', 'impact': 'high', 'actions': 'watch the changelog'})
+        self.assertEqual(answer['dropped'], ['category', 'probability', 'response'])
+
+    def test_a_log_draft_keeps_an_owner_of_the_project_and_a_due_day_only_on_an_action(self):
+        fake = FakeClaude(claude_answer({'kind': 'action', 'text': 'call the bank', 'owner': 'finizio', 'due': '2026-12-01'}))
+        self.assertEqual(self.draft('log', {'text': 'bank'}, fake)['fields'], {'kind': 'action', 'text': 'call the bank', 'owner': 'Finizio', 'due': '2026-12-01'})
+        fake = FakeClaude(claude_answer({'kind': 'action', 'text': 'call', 'owner': 'Nobody', 'due': 'next week'}))
+        answer = self.draft('log', {'text': 'bank'}, fake)
+        self.assertEqual((answer['fields'], answer['dropped']), ({'kind': 'action', 'text': 'call'}, ['due', 'owner']))
+        fake = FakeClaude(claude_answer({'kind': 'note', 'text': 'noted', 'owner': 'Roberta', 'due': '2026-12-01'}))
+        self.assertEqual(self.draft('log', {'text': 'x'}, fake)['fields'], {'kind': 'note', 'text': 'noted'})
+
+    def test_errors_are_clear_and_nothing_is_drafted(self):
+        cases = [
+            (FakeClaude(claude_answer({}, is_error=True, result='API Error: overloaded')), 'Claude answered with an error: API Error: overloaded'),
+            (FakeClaude(code=1, stdout='', stderr='Invalid API key'), 'Claude answered no JSON (exit 1): Invalid API key'),
+            (FakeClaude(claude_answer(None)), 'Claude returned no fields'),
+            (FakeClaude(claude_answer({'category': 'menace'})), 'Claude returned no usable field'),
+            (FakeClaude(error=FileNotFoundError('no such file')), 'claude did not start: no such file'),
+        ]
+        for fake, message in cases:
+            with self.assertRaises(ds.ActionError) as caught:
+                self.draft('risk', {'title': 'x'}, fake)
+            self.assertEqual(str(caught.exception), message)
+
+    def test_claude_missing_and_bad_requests_are_refused_before_any_run(self):
+        fake = FakeClaude(claude_answer({'title': 't'}))
+        with unittest.mock.patch.object(ds, 'claude_path', return_value=None), self.assertRaises(ds.ActionError) as caught:
+            ds.run_draft(self.p.home, {'project': self.p.root, 'target': 'issue', 'fields': {}}, run=fake)
+        self.assertEqual(str(caught.exception), 'claude is not on PATH: the desk helper cannot draft')
+        for request in ({'project': self.p.root, 'target': 'report', 'fields': {}}, {'project': self.p.root, 'target': 'issue', 'fields': {'title': 3}},
+                        {'project': '/etc', 'target': 'issue', 'fields': {}}):
+            with self.assertRaises(ds.ActionError):
+                ds.run_draft(self.p.home, request, run=fake, claude='/bin/claude')
+        self.assertEqual(fake.calls, [])
+
+    def test_a_run_past_the_timeout_is_killed(self):
+        process = unittest.mock.Mock(pid=4242)
+        process.communicate.side_effect = [ds.subprocess.TimeoutExpired('claude', 120), ('', '')]
+        with unittest.mock.patch.object(ds.subprocess, 'Popen', return_value=process) as popen, unittest.mock.patch.object(ds.os, 'killpg') as killpg:
+            with self.assertRaises(ds.ActionError) as caught:
+                ds.run_claude(['claude', '-p'], self.p.root, 'prompt', 120)
+        self.assertEqual(str(caught.exception), 'Claude did not answer in 120 s: nothing drafted')
+        self.assertTrue(popen.call_args.kwargs['start_new_session'])
+        self.assertEqual(popen.call_args.kwargs['cwd'], self.p.root)
+        killpg.assert_called_once_with(4242, ds.signal.SIGKILL)
+
+    def test_the_model_comes_from_the_flag_else_the_environment_else_sonnet(self):
+        for flag, env, expected in ((None, None, 'sonnet'), (None, 'haiku', 'haiku'), ('opus', 'haiku', 'opus')):
+            environ = {key: value for key, value in os.environ.items() if key != 'P2KIT_DRAFT_MODEL'}
+            with unittest.mock.patch.dict(ds.os.environ, {**environ, **({'P2KIT_DRAFT_MODEL': env} if env else {})}, clear=True):
+                server = ds.make_server(self.p.home, draft_model=flag)
+                server.server_close()
+            self.assertEqual(server.draft_model, expected)
+
+
 class Server(unittest.TestCase):
     def setUp(self):
         self.p = Project()
@@ -859,6 +1003,24 @@ class Server(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)['opened'], doc)
         self.assertEqual(run.call_args[0][0][1], doc)
+
+    def test_a_draft_needs_the_token_and_runs_outside_the_action_lock(self):
+        draft = {'project': self.p.root, 'target': 'problem', 'fields': {'title': 'server down'}}
+        self.assertEqual(self.request('POST', '/draft', draft, **{ds.TOKEN_HEADER: 'x'})[0], 403)
+        self.assertEqual(self.request('POST', '/draft', draft, Origin='https://evil.example')[0], 403)
+        seen = []
+
+        def fake(home, request, model):
+            seen.append(self.server.lock.locked())
+            return {'fields': {'title': 'Test server down'}, 'dropped': [], 'model': model, 'seconds': 1, 'cost': 0.01}
+        with unittest.mock.patch.object(ds, 'run_draft', side_effect=fake):
+            status, body = self.request('POST', '/draft', draft)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['fields'], {'title': 'Test server down'})
+        self.assertEqual(seen, [False])
+        with unittest.mock.patch.object(ds, 'run_draft', side_effect=ds.ActionError('claude is not on PATH: the desk helper cannot draft')):
+            status, body = self.request('POST', '/draft', draft)
+        self.assertEqual((status, json.loads(body)['error']), (409, 'claude is not on PATH: the desk helper cannot draft'))
 
     def doc(self, path, **headers):
         return self.request('GET', '/doc?path=' + ds.urllib.parse.quote(path), **headers)

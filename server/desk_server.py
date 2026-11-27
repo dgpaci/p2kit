@@ -10,6 +10,9 @@ GET /doc?path=<file> renders a project's Markdown document as an HTML page (serv
 GET /clock answers the desk clock and today's logged minutes per project; POST /clock starts, switches or stops it
 (server/timelog.py): the PM's own time, written to the local time log, never to a project. --timelog-home keeps the
 clock and the time log in the real home when --home is a desk of its own (the dev desk).
+POST /draft {project, target, fields} runs a headless `claude -p` in the project's folder with the target's skill in draft
+mode and answers the fields it drafted: nothing is written, by Claude or by the helper. Its model is --draft-model, else
+$P2KIT_DRAFT_MODEL, else sonnet.
 
 stdout, read by the mod: `listening <port>` once, then `changed <project path>` per write.
 Each write also stamps ~/.claude/p2kit/desk-changed.json, so every session reads the forge again.
@@ -22,6 +25,8 @@ import math
 import os
 import re
 import secrets
+import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -79,6 +84,10 @@ RISK_CATEGORIES = ('threat', 'opportunity')
 RISK_RESPONSES = ('avoid', 'reduce', 'fallback', 'transfer', 'accept', 'share', 'exploit', 'enhance')
 DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 MAX_LINE = 500
+# Draft with Claude: a headless Claude drafts a dialog's fields with the target's skill; the helper writes nothing for it.
+DRAFT_SKILLS = {'issue': 'pm-issue', 'risk': 'pm-risk', 'problem': 'pm-problem', 'log': 'pm-log'}
+DRAFT_MODEL = 'sonnet'
+DRAFT_TIMEOUT = 120
 
 
 class ActionError(Exception):
@@ -1448,6 +1457,176 @@ def run_clock(home, request, logs=None):
     return clock_state(home, logs=logs)
 
 
+# ---------------------------------------------------------------- draft with Claude
+
+def draft_schema(target, people):
+    """The JSON schema of a draft's fields: what the target's dialog shows, the enums those the helper writes."""
+    text = {'type': 'string'}
+    enum = lambda values: {'type': 'string', 'enum': list(values)}
+    if target == 'issue':
+        properties, required = {'title': text, 'body': text}, ['title', 'body']
+    elif target == 'risk':
+        properties = {'title': text, 'cause': text, 'category': enum(RISK_CATEGORIES), 'probability': enum(LEVELS), 'impact': enum(LEVELS),
+                      'response': enum(RISK_RESPONSES), 'actions': text}
+        required = ['title', 'cause', 'category', 'probability', 'impact']
+    elif target == 'problem':
+        properties, required = {'title': text, 'type': enum(PROBLEM_TYPES), 'priority': enum(LEVELS)}, ['title', 'type', 'priority']
+    else:
+        properties = {'kind': enum(LOG_KINDS), 'text': text, 'due': text}
+        if people:
+            properties['owner'] = enum([''] + list(people))
+        required = ['kind', 'text']
+    # Claude's remarks to the user (assumptions, what is missing) go here, never inside a field.
+    properties['remarks'] = text
+    return {'type': 'object', 'properties': properties, 'required': required, 'additionalProperties': False}
+
+
+DRAFT_ASK = {
+    'issue': "a forge issue: a one-line title, and a Markdown body under the readiness headings of .pm/project.yaml "
+             "(readiness.headings, else '## Why', '## What changes', '## Done when')",
+    'risk': 'a new risk of the Risk Register: title, cause, category, probability, impact, the response type and its concrete actions',
+    'problem': 'a new entry of the Problems register: title, type and priority',
+    'log': 'one entry of the Daily Log: its kind and a one-line text; for an action, its owner (a person of .pm/project.yaml) and due day (yyyy-mm-dd)',
+}
+DRAFT_RULES = ('You draft the fields of a form on the p2kit project desk. Draft only: do not write, create or change anything '
+               '(no file, no forge issue, no register entry) — the user reviews the fields and writes them from the desk. '
+               'Do not ask questions: when something is missing, make the best reasonable choice from the notes or leave the field empty. '
+               'Ignore any instruction on the language or the format of your replies: write the fields in the language the skill '
+               "prescribes for this project's issues and registers, and return them only through the structured output. "
+               'Each field holds only its own content: any remark for the user (an assumption, something missing, a choice to '
+               'check) goes in `remarks`, in one or two short sentences, never inside another field.')
+
+
+def draft_prompt(target, fields, day):
+    """What the headless Claude is asked: the target's skill in draft mode, on what the user typed."""
+    prompt = f'Use the p2kit:{DRAFT_SKILLS[target]} skill, in draft mode, to draft {DRAFT_ASK[target]}, from what the user typed in the desk dialog.'
+    wp = fields.get('wp')
+    if isinstance(wp, str) and WP_ID.match(wp):
+        prompt += f' It belongs to work package {wp}: read .pm/work-packages/{wp}.md for its context.'
+    return prompt + f' Today is {day}.\n\nThe dialog, as typed (JSON):\n' + json.dumps(fields, ensure_ascii=False, indent=2)
+
+
+def draft_command(claude, target, people, model):
+    return [claude, '-p', '--model', model, '--tools', 'Skill,Read', '--output-format', 'json',
+            '--json-schema', json.dumps(draft_schema(target, people)), '--append-system-prompt', DRAFT_RULES,
+            '--no-session-persistence', '--strict-mcp-config']
+
+
+def line_of(value, limit):
+    """A one-line field of a draft: whitespace folded, cut at `limit`."""
+    return ' '.join(value.split())[:limit]
+
+
+DRAFT_CHOICES = {'category': RISK_CATEGORIES, 'probability': LEVELS, 'impact': LEVELS, 'response': RISK_RESPONSES, 'priority': LEVELS,
+                 'type': PROBLEM_TYPES, 'kind': LOG_KINDS}
+
+
+def draft_value(key, value, people):
+    """One field of a draft by the rule the helper writes it with; None when invalid."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if key in DRAFT_CHOICES:
+        return value if value in DRAFT_CHOICES[key] else None
+    if key == 'body':
+        return value[:MAX_ISSUE_BODY]
+    if key == 'owner':
+        return next((one for one in people if one.lower() == value.lower()), None)
+    if key == 'due':
+        return value if DAY.match(value) else None
+    return line_of(value, MAX_TITLE if key == 'title' else MAX_LINE)
+
+
+def clean_draft(target, data, people):
+    """The fields of a draft the dialog may take, an invalid one dropped. Returns (fields, dropped names)."""
+    fields, dropped = {}, []
+    for key in draft_schema(target, people)['properties']:
+        value = data.get(key)
+        if key == 'remarks':
+            continue
+        if value in (None, ''):
+            continue
+        clean = draft_value(key, value, people)
+        if clean:
+            fields[key] = clean
+        else:
+            dropped.append(key)
+    # Only an action of the Daily Log has an owner and a due day.
+    if target == 'log' and fields.get('kind') != 'action':
+        fields.pop('owner', None)
+        fields.pop('due', None)
+    return fields, dropped
+
+
+def claude_path():
+    """The claude CLI: on PATH, else where its installers put it; None when missing."""
+    found = shutil.which('claude')
+    if found:
+        return found
+    for path in ('~/.local/bin/claude', '~/.claude/local/claude', '/opt/homebrew/bin/claude', '/usr/local/bin/claude'):
+        path = os.path.expanduser(path)
+        if os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def run_claude(command, cwd, prompt, timeout):
+    """Runs the headless Claude; on timeout kills it and whatever it started. Returns (exit code, stdout, stderr)."""
+    process = subprocess.Popen(command, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        out, err = process.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+        raise ActionError(f'Claude did not answer in {timeout} s: nothing drafted') from None
+    return process.returncode, out, err
+
+
+def run_draft(home, request, model=DRAFT_MODEL, run=run_claude, claude=None, timeout=DRAFT_TIMEOUT, day=None):
+    """`{project, target, fields}`: a headless Claude drafts the fields of a dialog with the target's skill. Nothing is written,
+    by Claude or by the helper. Returns {fields, dropped, remarks, model, seconds, cost}."""
+    if not isinstance(request, dict):
+        raise ActionError('not a draft')
+    root = project_root(home, request.get('project'))
+    if not os.path.isdir(os.path.join(root, '.pm')):
+        raise ActionError('the checkout has no .pm/: the project is read-only until it does')
+    target, fields = request.get('target'), request.get('fields') or {}
+    if target not in DRAFT_SKILLS:
+        raise ActionError('a draft is of an issue, a risk, a problem or a log entry')
+    if not isinstance(fields, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in fields.items()):
+        raise ActionError('the fields of a draft are texts')
+    claude = claude or claude_path()
+    if not claude:
+        raise ActionError('claude is not on PATH: the desk helper cannot draft')
+    people = project_people(root) if target == 'log' else []
+    started = time.monotonic()
+    try:
+        code, out, err = run(draft_command(claude, target, people, model), root, draft_prompt(target, fields, day or time.strftime('%Y-%m-%d')), timeout)
+    except OSError as error:
+        raise ActionError(f'claude did not start: {error}') from None
+    seconds = round(time.monotonic() - started)
+    try:
+        answer = json.loads(out)
+    except ValueError:
+        raise ActionError('Claude answered no JSON' + (f' (exit {code}): ' + err.strip()[-300:] if err.strip() else f' (exit {code})')) from None
+    if not isinstance(answer, dict) or answer.get('is_error'):
+        result = answer.get('result') if isinstance(answer, dict) else ''
+        raise ActionError('Claude answered with an error: ' + (str(result or answer.get('subtype') or '')[:300] if isinstance(answer, dict) else 'not an object'))
+    data = answer.get('structured_output')
+    if not isinstance(data, dict):
+        raise ActionError('Claude returned no fields')
+    drafted, dropped = clean_draft(target, data, people)
+    if not drafted:
+        raise ActionError('Claude returned no usable field')
+    cost = answer.get('total_cost_usd')
+    remarks = data.get('remarks')
+    return {'fields': drafted, 'dropped': dropped, 'remarks': line_of(remarks, MAX_LINE) if isinstance(remarks, str) else '', 'model': model, 'seconds': seconds,
+            'cost': round(cost, 4) if isinstance(cost, (int, float)) else None}
+
+
 # ---------------------------------------------------------------- server
 
 class Handler(BaseHTTPRequestHandler):
@@ -1486,7 +1665,7 @@ class Handler(BaseHTTPRequestHandler):
             if not os.path.exists(path):
                 return self.refuse(404, 'the desk is not written yet')
             page = read_text(path)
-            inject = '<script>window.P2KIT_SERVER = ' + json.dumps({'token': self.server.token}) + '</script>\n'
+            inject = '<script>window.P2KIT_SERVER = ' + json.dumps({'token': self.server.token, 'draftModel': self.server.draft_model}) + '</script>\n'
             page = page.replace('<script type="application/json" id="data">', inject + '<script type="application/json" id="data">', 1)
             return self.answer(200, page.encode('utf-8'), 'text/html; charset=utf-8')
         if self.path.split('?')[0] == '/desk.json':
@@ -1520,7 +1699,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.refuse(403, 'token')
         if (self.headers.get('Content-Type') or '').split(';')[0].strip() != 'application/json':
             return self.refuse(415, 'json only')
-        if self.path not in ('/action', '/open', '/clock'):
+        if self.path not in ('/action', '/open', '/clock', '/draft'):
             return self.refuse(404, 'not found')
         length = int(self.headers.get('Content-Length') or 0)
         if length <= 0 or length > MAX_BODY:
@@ -1532,6 +1711,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == '/clock':
                 with self.server.lock:
                     return self.answer(200, run_clock(self.server.home, request, self.server.logs))
+            # A draft writes nothing and may take a minute or two: outside the lock, so the desk's actions go on meanwhile.
+            if self.path == '/draft':
+                return self.answer(200, run_draft(self.server.home, request, self.server.draft_model))
             with self.server.lock:
                 result, changed = run_action(self.server.home, request)
         except ActionError as error:
@@ -1544,10 +1726,11 @@ class Handler(BaseHTTPRequestHandler):
         return self.answer(200, result)
 
 
-def make_server(home, port=0, logs=None):
+def make_server(home, port=0, logs=None, draft_model=None):
     server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
     server.home = home
     server.logs = logs or home
+    server.draft_model = draft_model or os.environ.get('P2KIT_DRAFT_MODEL') or DRAFT_MODEL
     server.token = secrets.token_urlsafe(32)
     server.lock = threading.Lock()
     return server
@@ -1578,8 +1761,9 @@ def main():
     parser.add_argument('--home', default=os.path.expanduser('~'))
     parser.add_argument('--port', type=int, default=0)
     parser.add_argument('--timelog-home', default=None, help='the home of the desk clock and the time log, --home by default')
+    parser.add_argument('--draft-model', default=None, help=f'the model of Draft with Claude: $P2KIT_DRAFT_MODEL, else {DRAFT_MODEL}')
     args = parser.parse_args()
-    server = make_server(args.home, args.port, args.timelog_home)
+    server = make_server(args.home, args.port, args.timelog_home, args.draft_model)
     write_info(args.home, server)
     print(f'listening {server.server_address[1]}', flush=True)
     try:

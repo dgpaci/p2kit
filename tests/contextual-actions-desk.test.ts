@@ -61,6 +61,30 @@ test('every dialog opens Claude with its skill and the fields typed; Preview onl
   expect(bodyOf(code, 'function iterateDialog(p')).toContain("formRow('Work packages', wps)")
 })
 
+test('Draft with Claude: the four dialogs the helper writes carry it, the Open-in-Claude-only ones do not', () => {
+  // wf:contract: Issue #95: a `Draft with Claude` button in + issue, + risk, + problem and + log, only with the helper and .pm/ not read
+  // wf:contract: from git (canWrite); it POSTs { project, target, fields } to /draft and fills the dialog's controls with the answer.
+  // wf:contract: + document, + report and + iteration get none.
+  const code = script()
+  expect(bodyOf(code, 'function formDialog(')).toContain('const drafting = draft && canWrite(p) ? draftControl(p, draft) : null')
+  expect(bodyOf(code, 'function formDialog(')).toContain("buttons(closeButton('Cancel'), drafting && drafting.button, claudeLink(p, skill, args)")
+  const control = bodyOf(code, 'function draftControl(p, draft) {')
+  expect(control).toContain("textContent: 'Draft with Claude'")
+  expect(control).toContain("post({ project: p.path, target: draft.target, fields: draft.read() }, '/draft')")
+  expect(control).toContain("'Drafting with Claude… '")
+  expect(control).toContain("if (document.getElementById('dialog') !== dialog) return")
+  expect(control).toContain('setField(draft.controls[key], value)')
+  expect(code).toContain("async function post(body, path = '/action') {")
+  for (const [name, target] of [['issueDialog', 'issue'], ['riskDialog', 'risk'], ['problemDialog', 'problem'], ['logDialog', 'log']]) {
+    expect(bodyOf(code, `function ${name}(p`)).toContain(`{ target: '${target}', read: () => `)
+  }
+  for (const name of ['documentDialog', 'reportDialog', 'iterateDialog']) {
+    const body = bodyOf(code, `function ${name}(p`)
+    expect(body).not.toContain('target:')
+    expect(body).toMatch(/, null, \w+\)$/)
+  }
+})
+
 test('an empty Problems register points at /pm-problem, in the page and the pane', async ($, on) => {
   expect(script()).toContain("p => p.issues.filter(i => isOpen(i.status)).length + ' open', '/pm-problem',")
   mock.store(on)
