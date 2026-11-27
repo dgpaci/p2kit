@@ -1,0 +1,7 @@
+entries:
+  - { id: D-001, date: 2026-11-27, kind: event, source: forge, text: 'issue opened: Desk: make the browser desk fluid and self-sufficient for routine operations', ref: '#93' }
+  - { id: D-002, date: 2026-11-27, kind: event, source: forge, text: 'issue opened: Desk: replace the big New issue button with contextual actions', ref: '#94' }
+  - { id: D-003, date: 2026-11-27, kind: event, source: forge, text: 'issue opened: Desk helper: Draft with Claude in the action dialogs', ref: '#95' }
+  - { id: D-004, date: 2026-11-27, kind: event, source: forge, text: 'issue opened: New skills: pm-problem (Issue Report) and pm-document', ref: '#96' }
+  - { id: D-005, date: 2026-11-27, kind: event, source: forge, text: "pull request merged: fix(time): let a past day be written while today's desk clock runs", ref: '#92' }
+  - { id: D-006, date: 2026-11-27, kind: decision, source: manual, text: 'desk actions: Claude drafts the fields in the background, the helper writes on Confirm; the Issue Report is named pm-problem', ref: '#95' }
