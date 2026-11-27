@@ -866,6 +866,26 @@ helper and never on a read-only project; the others open Claude only. The append
 `addRisk` in `hooks/edits.ts`, on the shared cases; the id is the next after the highest of the
 file, and a file whose list is not its last top-level key is refused.
 
+**Draft with Claude** (issue #95). *+ issue*, *+ risk*, *+ problem* and *+ log* — the dialogs the
+helper writes — also have *Draft with Claude*, with the helper and never on a read-only project.
+`POST /draft { project, target: 'issue' | 'risk' | 'problem' | 'log', fields }` (the dialog as typed,
+rough notes included) runs `claude -p` in the project's folder with the target's skill (`pm-issue`,
+`pm-risk`, `pm-problem`, `pm-log`) in draft mode: tools `Skill,Read` only, `--json-schema` of the
+target's fields (issue: `title`, `body` under the readiness headings; risk: `title`, `cause`,
+`category`, `probability`, `impact`, `response`, `actions`; problem: `title`, `type`, `priority`; log:
+`kind`, `text`, `owner`, `due`), no session saved, no MCP server, a 120 s timeout after which the run
+is killed. It answers `{ fields, dropped, remarks, model, seconds, cost }` — `remarks` is Claude's note
+to the user (assumptions, what is missing), kept out of the fields — each field checked by the rule the
+helper writes it with — an enum outside its list, an owner who is no person of the project, a due day
+not `yyyy-mm-dd` are dropped and named in `dropped` — or a 409 with the reason (`claude` not found,
+timeout, an error from Claude, no usable field). The page fills the dialog's fields with it (an empty
+value or an option the select lacks leaves the field as it is) and shows model, seconds, cost and the
+remarks on one line; the user edits them, then *Preview* and *Confirm* write as above. **Nothing is written by
+the draft**: not by Claude, which has no write tool, nor by the helper. Each click is one Claude call,
+billed to the user's Claude account: the model is `--draft-model` of the helper, else
+`$P2KIT_DRAFT_MODEL`, else `sonnet` (`haiku` is the cheap one). A draft runs outside the lock of the
+actions, so the desk keeps working while it runs; closing the dialog drops its late answer.
+
 **Browser page.** `server/desk_server.py`, standard-library Python 3, serves the page on
 `127.0.0.1` at a random port. The mod starts it on *Open in browser* (or reuses one another session
 started) and writes nothing else; the helper writes `~/.claude/p2kit/desk-server.json`
@@ -874,7 +894,7 @@ started) and writes nothing else; the helper writes `~/.claude/p2kit/desk-server
 (`server/doc_page.py`: a Markdown subset, everything escaped, no script; 403 for any other file, 404
 when missing) — the Documents tab links its `.md` files there, and to the file itself without the helper;
 `POST /action` returns `{ preview, hash }`, and the same request with `confirm: <hash>` applies it
-only if the preview, computed again, has the same hash. A request is refused (403) unless its
+only if the preview, computed again, has the same hash; `POST /draft` drafts a dialog's fields (above). A request is refused (403) unless its
 `Host` is `127.0.0.1:<port>` or `localhost:<port>`, its `Origin` the same, and its `X-P2kit-Token`
 the page's token; only projects of the registry are touched. After a write the helper prints
 `changed <path>` and stamps `~/.claude/p2kit/desk-changed.json` (`{ at, project }`, `at` in epoch ms);

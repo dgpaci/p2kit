@@ -324,8 +324,8 @@ const server = window.P2KIT_SERVER || null
 let dialogOpen = false
 let current = null
 const skillLink = (p, skill, args) => p.linkBase + encodeURIComponent('[p2kit] Use the p2kit:' + skill + ' skill with: ' + args)
-async function post(body) {
-  const res = await fetch('/action', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-P2kit-Token': server.token }, body: JSON.stringify(body) })
+async function post(body, path = '/action') {
+  const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-P2kit-Token': server.token }, body: JSON.stringify(body) })
   const answer = await res.json().catch(() => ({ error: 'HTTP ' + res.status }))
   if (!res.ok) throw new Error(answer.error || 'HTTP ' + res.status)
   return answer
@@ -537,7 +537,8 @@ function issueDialog(p, wp) {
   const args = () => said([(pickWp.value || 'no work package') + ': ' + (title.value.trim() || 'a new issue'), pickRepo && 'repo ' + pickRepo.value,
     pickWho.value && 'assignee ' + pickWho.value, body.value.trim() && 'notes: ' + body.value.trim().replace(/\\s*\\n\\s*/g, ' / ')])
   formDialog(p, 'New issue on ' + p.name, [el('div', { className: 'dialog-row' }, title), el('div', { className: 'dialog-row' }, body), el('div', { className: 'dialog-row' }, pickRepo, pickWp, pickWho)],
-    'pm-issue', args, () => title.value.trim() ? Object.assign({ kind: 'issue-create', title: title.value.trim(), body: body.value, wp: pickWp.value, login: pickWho.value }, pickRepo ? { repo: pickRepo.value } : {}) : null, title)
+    'pm-issue', args, () => title.value.trim() ? Object.assign({ kind: 'issue-create', title: title.value.trim(), body: body.value, wp: pickWp.value, login: pickWho.value }, pickRepo ? { repo: pickRepo.value } : {}) : null, title,
+    { target: 'issue', read: () => ({ title: title.value, body: body.value, wp: pickWp.value, repo: pickRepo ? pickRepo.value : '', assignee: pickWho.value }), controls: { title, body } })
 }
 // + issue: a lane's, its work package picked, or the Unplanned lane's, with none. Without the helper it opens Claude only.
 const newIssueButton = (p, wp) => contextButton('+ issue', 'create an issue' + (wp ? ' in ' + wp : ' in no work package'), () => issueDialog(p, wp))
@@ -582,12 +583,48 @@ function claudeLink(p, skill, args) {
 }
 // A dialog of fields: Cancel, Open in Claude, and Preview when request is given and the helper can write; request() is null while a
 // required field is empty, and Preview then goes back to the first field.
-function formDialog(p, title, body, skill, args, request, first) {
+// draft, on the dialogs whose entry the helper writes: { target, read, controls }, the Draft with Claude button.
+function formDialog(p, title, body, skill, args, request, first, draft) {
   const preview = () => { const r = request(); r ? act(p, r) : first.focus() }
   const writes = Boolean(request) && canWrite(p)
   if (writes) first.onkeydown = e => { if (e.key === 'Enter') preview() }
-  openDialog(title, ...body, buttons(closeButton('Cancel'), claudeLink(p, skill, args), writes ? el('button', { className: 'primary', textContent: 'Preview', onclick: preview }) : null))
+  const drafting = draft && canWrite(p) ? draftControl(p, draft) : null
+  openDialog(title, ...body, drafting && drafting.status, buttons(closeButton('Cancel'), drafting && drafting.button, claudeLink(p, skill, args), writes ? el('button', { className: 'primary', textContent: 'Preview', onclick: preview }) : null))
   first.focus()
+}
+// Draft with Claude (issue #95): the helper runs a headless Claude in the project's folder with the dialog's skill in draft mode, on
+// what is typed in draft.read(); the fields it answers fill draft.controls, an empty one or an option the select lacks left as it is.
+// The user edits them, then Preview and Confirm write as ever: Claude writes nothing. A Claude call per click, on the helper's model.
+// A dialog closed or replaced while Claude drafts drops the late answer.
+const setField = (control, value) => {
+  if (!control || !value) return
+  if (control.tagName === 'SELECT' && ![...control.options].some(o => o.value === value)) return
+  control.value = value
+  if (control.onchange) control.onchange()
+}
+function draftControl(p, draft) {
+  const status = el('p', { className: 'dim', hidden: true })
+  const say = (className, text) => Object.assign(status, { className, textContent: text, hidden: false })
+  const button = el('button', { textContent: 'Draft with Claude', title: 'Claude (' + (server.draftModel || 'sonnet') + ') drafts these fields from what is typed here, one call per click; nothing is written until Preview and Confirm' })
+  button.onclick = async () => {
+    const dialog = document.getElementById('dialog')
+    const started = Date.now()
+    const tick = () => say('dim', 'Drafting with Claude… ' + Math.round((Date.now() - started) / 1000) + ' s')
+    button.disabled = true
+    tick()
+    const timer = setInterval(tick, 1000)
+    let answer = null
+    let failure = null
+    try { answer = await post({ project: p.path, target: draft.target, fields: draft.read() }, '/draft') } catch (error) { failure = error }
+    clearInterval(timer)
+    if (document.getElementById('dialog') !== dialog) return
+    button.disabled = false
+    if (failure) return say('err', 'Not drafted: ' + failure.message)
+    Object.entries(answer.fields).forEach(([key, value]) => setField(draft.controls[key], value))
+    say('dim', 'Drafted by Claude (' + answer.model + ') in ' + answer.seconds + ' s' + (answer.cost === null ? '' : ' · $' + answer.cost.toFixed(2))
+      + (answer.dropped.length ? ' · dropped: ' + answer.dropped.join(', ') : '') + ' — check the fields, then Preview.' + (answer.remarks ? ' Claude: ' + answer.remarks : ''))
+  }
+  return { button, status }
 }
 // Log: one entry of the Daily Log, source manual; an action may carry an owner and a due day.
 const LOG_ENTRY_KINDS = ['decision', 'action', 'problem', 'event', 'note']
@@ -602,7 +639,8 @@ function logDialog(p) {
   kind.onchange()
   formDialog(p, 'Log on ' + p.name, [formGrid(formRow('Kind', kind), formRow('Text', text), ...actionRows)], 'pm-log',
     () => said(['add ' + (/^[ae]/.test(kind.value) ? 'an ' : 'a ') + kind.value + ' to the daily log: ' + (text.value.trim() || '…'), isAction() && owner.value && 'owner ' + owner.value, isAction() && due.value && 'due ' + due.value]),
-    () => text.value.trim() ? Object.assign({ kind: 'log-add', type: kind.value, text: text.value.trim() }, isAction() ? { owner: owner.value, due: due.value } : {}) : null, text)
+    () => text.value.trim() ? Object.assign({ kind: 'log-add', type: kind.value, text: text.value.trim() }, isAction() ? { owner: owner.value, due: due.value } : {}) : null, text,
+    { target: 'log', read: () => Object.assign({ kind: kind.value, text: text.value }, isAction() ? { owner: owner.value, due: due.value } : {}), controls: { kind, text, owner, due } })
 }
 // + problem: a new entry of the Problems register (issues.yaml); its report is pm-problem's.
 function problemDialog(p) {
@@ -611,7 +649,8 @@ function problemDialog(p) {
   const priority = el('select', {}, ...choices(['low', 'medium', 'high'], 'priority…'))
   formDialog(p, 'New problem on ' + p.name, [formGrid(formRow('Title', title), formRow('Type', type), formRow('Priority', priority))], 'pm-problem',
     () => said(['raise a new problem: ' + (title.value.trim() || '…'), type.value && 'type ' + type.value, priority.value && 'priority ' + priority.value]),
-    () => title.value.trim() && type.value && priority.value ? { kind: 'problem-add', title: title.value.trim(), type: type.value, priority: priority.value } : null, title)
+    () => title.value.trim() && type.value && priority.value ? { kind: 'problem-add', title: title.value.trim(), type: type.value, priority: priority.value } : null, title,
+    { target: 'problem', read: () => ({ title: title.value, type: type.value, priority: priority.value }), controls: { title, type, priority } })
 }
 // + risk: a new open risk; the verdict on its response is pm-risk's, so the desk shows it "not assessed" until then.
 function riskDialog(p) {
@@ -629,7 +668,9 @@ function riskDialog(p) {
       impact.value && 'impact ' + impact.value, owner.value && 'owner ' + owner.value, (response.value || actions.value.trim()) && 'response ' + [response.value, actions.value.trim()].filter(Boolean).join(': '),
       'then assess the response']),
     () => title.value.trim() && probability.value && impact.value ? { kind: 'risk-add', title: title.value.trim(), cause: cause.value.trim(), category: category.value,
-      probability: probability.value, impact: impact.value, owner: owner.value, response: response.value, actions: actions.value.trim() } : null, title)
+      probability: probability.value, impact: impact.value, owner: owner.value, response: response.value, actions: actions.value.trim() } : null, title,
+    { target: 'risk', read: () => ({ title: title.value, cause: cause.value, category: category.value, probability: probability.value, impact: impact.value, owner: owner.value,
+      response: response.value, actions: actions.value }), controls: { title, cause, category, probability, impact, response, actions } })
 }
 // + document: a management report or a free document in a folder of documents:, drafted by Claude.
 const DOCUMENT_TYPES = ['Exception Report', 'Checkpoint Report', 'End Stage Report', 'End Project Report', 'Lessons Report', 'Free document']
