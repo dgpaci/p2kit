@@ -13,7 +13,8 @@ committed with the code. The skills write it; the project desk reads it.
   business-case.md          Business Case            (full profile, or inside pid.md in light)
   stages/<n>/plan.md        Stage Plan of stage n
   work-packages/WP-<nn>.md  one Work Package per file
-  reports/<date>-<kind>.md  highlight, checkpoint, exception, end-stage, end-project reports
+  reports/<date>-<kind>.md  highlight (/pm-report); checkpoint, exception, end-stage, end-project, lessons (/pm-document)
+  reports/<date>-problem-I-<nnn>.md  report of a Problems register entry for the Board (/pm-problem)
   presentations/WP-<nn>.md  presentation of a work package to its users and the Board (/pm-present), listed under Documents
   digests/<date>.md         weekly digests (/pm-digest), listed under Documents after the reports
   registers/risks.yaml      Risk Register: response and Claude's verdict on it (/pm-risk)
@@ -84,7 +85,7 @@ readiness:                      # optional: headings an open forge issue must ca
 repos:                          # optional: the repos a cross-repo project reads instead of its origin (### Cross-repo projects)
   - { remote: github.com/genropy/genropy, label: privacy }
   - { remote: hub.genro.com/anaci/anaci, label: privacy }
-documents:                      # optional: folders, relative to the repo, listed under Documents
+documents:                      # optional: folders, relative to the repo, listed under Documents; /pm-document saves free documents here
   - anaci_app/report            #   .html, .md and .pdf files, subfolders up to 3 levels, titled by <title> / title / # heading
 reporting:
   highlight_every_days: 14
@@ -364,7 +365,7 @@ Every product starts with a YAML frontmatter block:
 ```markdown
 ---
 title: Project Brief
-product: brief            # brief | pid | business-case | stage-plan | work-package | report | digest | roadmap | presentation
+product: brief            # brief | pid | business-case | stage-plan | work-package | report | problem-report | digest | roadmap | presentation
 version: 0.1
 status: draft             # draft | submitted | approved | superseded
 updated: 2026-11-03
@@ -530,7 +531,13 @@ issues:
     priority: high                # low | medium | high
     status: open                  # open | closed
     raised: 2026-10-28
+    report: reports/2026-10-29-problem-I-001.md   # optional: its report, relative to .pm/ (/pm-problem)
+    decision: "SSO moved to stage 3, no change to the stage-2 budget"   # optional: the Board's decision, one line
 ```
+
+`/pm-problem` writes an entry's report under `reports/` and sets `report:` after the user's OK;
+`decision:` only once the user states the Board's decision in chat (double quotes, it often holds
+a `,`). Both are optional and the desk does not read them yet.
 
 ### `registers/commit-notes.yaml`
 

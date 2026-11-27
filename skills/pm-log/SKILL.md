@@ -82,6 +82,7 @@ user's timesheet only after its own OK, and commits nothing.
    Then write the entry's `register: <I-id | R-id>` or `issue: <n>` in `daily-log.yaml`, nothing
    else changed. No OK → the entry stays in the log only. A failed creation → report it and write
    nothing for that entry.
+   A problem that needs the Board's decision → say that `/pm-problem <I-id>` writes its report.
 8. **The day's time** (docs/pm-schema.md → *Time log* and *Timesheets*), after the entries — or
    alone, when the user asks only for the time. Run, from the repo, the helper at the plugin root
    (two levels up from this skill's folder).
