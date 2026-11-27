@@ -110,8 +110,10 @@ user's timesheet only after its own OK, and commits nothing.
    `errors` (unreadable lines of the log), `clockRunning`, `existing` (lines of that day already in
    the timesheet), `file`, `login`, `forge` and `hash`. `error` instead → report it and skip the time.
    - No `lines` → say there is no time logged for the project on that day, and stop here.
-   - `clockRunning` → the desk clock is still running on this project: ask the user to stop it on
-     the desk (or switch it), then run `show` again.
+   - `clockRunning` → the desk clock is still running on this project and still adds time to that
+     day (it started on that day or before it): ask the user to stop it on the desk (or switch it),
+     then run `show` again. A clock started on a later day, as today's clock is for yesterday,
+     leaves `clockRunning` false: write the day and let the clock run.
    - Show the lines as hours and minutes with their issue and work package, a line on the
      overlaps when there are any, the total, and the file they go to. A line without `wp` stays
      on the project. `existing` not empty → say the day is already in the timesheet and that

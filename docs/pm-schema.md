@@ -726,7 +726,9 @@ entries:
   The time log is read across every project: where intervals overlap, the time counts once, for
   declared time first (a `p2kit-manual` entry, then the desk clock `p2kit-desk`, then any other
   source), then for the interval on an issue before one on the project, then for the latest started,
-  and the draft lists the overlaps. A day is not written while the desk clock runs on the project.
+  and the draft lists the overlaps. A day is not written while the desk clock runs on the project and
+  started on that day or before it (`clockRunning`); a clock started on a later day leaves it free, so
+  yesterday's time is written while today's clock runs.
 
 The desk reads every timesheet: per work package the sum of its lines is its `tracked` hours and its
 `actual` (*Effort*), and per project `time` (`{ hours, byKind, people }`), shown as `time <h>h` in

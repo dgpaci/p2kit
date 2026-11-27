@@ -269,13 +269,21 @@ class TimesheetTest(unittest.TestCase):
         with open(path) as handle:
             self.assertEqual(handle.read().count('date: 2026-11-26'), 1)
 
-    def test_a_running_clock_on_the_project_blocks_the_write(self):
+    def test_a_running_clock_on_the_project_blocks_the_write_of_its_own_day_only(self):
         self.h.log(at(9), at(10), '#85')
-        timelog.start_clock(self.h.home, self.h.root, None, 'desk', at(10))
+        # Started the next morning: the day before can no longer change, so it is written.
+        timelog.start_clock(self.h.home, self.h.root, None, 'desk', at(9, 40, '2026-11-27'))
         result = self.draft()
-        self.assertTrue(result['clockRunning'])
-        with self.assertRaises(timesheet.TimesheetError):
-            timesheet.write(self.h.root, self.h.home, DAY, timesheet.draft_hash(result), None, False, self.forge)
+        self.assertFalse(result['clockRunning'])
+        timesheet.write(self.h.root, self.h.home, DAY, timesheet.draft_hash(result), None, False, self.forge)
+        # Started on the day itself, or the evening before and still running: the day is refused.
+        for start in (at(10), at(23, 30, '2026-11-25')):
+            os.remove(timelog.clock_path(self.h.home))
+            timelog.start_clock(self.h.home, self.h.root, None, 'desk', start)
+            result = self.draft()
+            self.assertTrue(result['clockRunning'])
+            with self.assertRaisesRegex(timesheet.TimesheetError, 'desk clock'):
+                timesheet.write(self.h.root, self.h.home, DAY, timesheet.draft_hash(result), None, True, self.forge)
 
     def test_push_adds_tracked_times_on_forgejo_once(self):
         self.h.log(at(9), at(10), '#85')
