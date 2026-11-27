@@ -76,12 +76,16 @@ test('the browser page has a Board tab after Metrics, its count the Unplanned it
   expect(script).not.toContain('${')
   // A hand-built project without lanes still renders: the count reads them as empty.
   expect(script).toContain('const lanesOf = p => p.lanes || []')
-  // Issue #66: the board header is one flex row, the text shrinking and the larger New issue button kept on the right.
+  // Issue #94: no big New issue button in the header; a small + issue on every lane that takes one, the Unplanned lane's for no
+  // work package, and with no lane at all on the header's line, the text shrinking.
   expect(script).toContain("el('div', { className: 'board-head' }")
-  expect(script).toContain("newIssueButton(p, '', 'New issue', 'btn-primary new-issue')")
+  expect(script).not.toContain('new-issue')
+  expect(page).not.toContain('.new-issue')
+  expect(script).toContain("!l.wp || issueTargets(p).some(w => w.id === l.wp) ? newIssueButton(p, l.wp) : null")
+  expect(script).toContain("boardHead(\"No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo.\", newIssueButton(p, ''))")
+  expect(script).toContain("contextButton('+ issue', ")
   expect(page).toContain('.board-head { display: flex;')
   expect(page).toContain('.board-head p { flex: 1; min-width: 0;')
-  expect(page).toContain('.new-issue { flex-shrink: 0; margin-left: auto;')
 })
 
 const FILES: Record<string, string> = {

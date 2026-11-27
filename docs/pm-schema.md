@@ -234,9 +234,9 @@ failed read is one error, `team: <forge> timeline: <message>`, and leaves the is
 A pull request closing an issue of another repo with `owner/repo#n` is not read as closing it.
 
 The browser page can also start a package; it never writes. Checking issues and pull requests shows
-a bar with **Create package**, a link that opens a new Claude Desktop session in the project's folder
+a bar with **+ work package**, a link that opens a new Claude Desktop session in the project's folder
 asking for the pm-package skill on the picked references (`#12 #15 PR #18`); on a milestone with no
-work package, **Create work package** opens one on `--milestone '<title>'`. The linked prompt is plain
+work package, **+ work package** on a milestone opens one on `--milestone '<title>'`. The linked prompt is plain
 text naming the skill, not `/p2kit:pm-package`: Claude Desktop turns the leading `/` of a linked
 prompt into `／`, so a link never runs a command. The session needs p2kit loaded. The pane shows the
 same blocks, without the selection: there `/pm-package` is typed in a session. `/pm-package` shows its plan and writes to
@@ -346,7 +346,7 @@ For the work themes — the linked work packages of the current stage whose stat
 at once), the desk reads the forge of the repo's `origin` (`github.com` → GitHub through `gh api`;
 any other host → Forgejo REST with the `fj` token of that host from
 `~/Library/Application Support/forgejo-cli.forgejo-cli/keys.json`). GET only — reading never
-writes to a forge; the one desk action that does is *Create package* (see *Desk actions*). `issue` → the issue's title and state; `milestone` → the milestone with that
+writes to a forge; the one desk action that does is *+ work package* (see *Desk actions*). `issue` → the issue's title and state; `milestone` → the milestone with that
 title, shown `<title> <closed>/<open+closed>` with its due day — the count covers issues and pull
 requests alike — and every issue and pull request in it, any state (GitHub
 `issues?milestone=<number>&state=all`, Forgejo `issues?state=all&milestones=<id>`, up to 5 pages),
@@ -511,7 +511,9 @@ concrete actions taken, on one line (double quotes when it holds a `,` or a `'`)
 `verdict_reason` are Claude's assessment of those actions against the risk's cause, probability
 and impact — `adequate` or `not-adequate` (`not adequate` reads the same), with one line of
 reasoning — written by `/pm-risk` only after the user's OK, and cleared when the actions change.
-All four are optional: a risk without them has no response.
+All four are optional: a risk without them has no response. `cause`, optional, is what would make
+the risk happen, on one line in double quotes; the desk's *+ risk* writes it when given, and
+`/pm-risk` weighs the response against it.
 
 A risk is **covered** when it has `response_actions` and `verdict: adequate`. The desk shows every
 high open risk (score 6 or more) in Needs attention: red with `no response`, `response not assessed` or
@@ -764,8 +766,11 @@ committed.
 | Place | `horizon:` (`now` / `next` / `later`, or removed with `rank:`), `rank:` (1–999) of the work package, and the `rank:` of the others of its horizon when it is renumbered | an open work package |
 | Link | `issue:` (a number), `milestone:` (a title, quoted within the YAML subset), `branch:` | any work package |
 | Close / reopen a note | `status:` of the note of `commit-notes.yaml` with that `sha` and that exact `text` | a flow-map note line |
-| Create package | the milestone (created or reused), its items, a new `WP-<nn>.md` (`status: draft`) | open issues and pull requests |
-| Create work package | a new `WP-<nn>.md` for an existing milestone, listing its open items | a milestone no work package carries |
+| Log | one entry appended to `registers/daily-log.yaml` (created with `entries:` when missing): the next `D-<nnn>`, today, `source: manual`, the text in single quotes (double when it holds a `'`); an action with `status: open` and optionally `owner:` and `due:` | a kind (decision, action, problem, event, note) and a text of one line; an owner and a due day only on an action, the owner a person of the roles or `team.people` |
+| + problem | one entry appended to `registers/issues.yaml` (`issues: []` becomes `issues:`; created when missing): the next `I-<nnn>`, `title`, `type`, `priority`, `status: open`, `raised:` today | a title of one line; a type and a priority picked |
+| + risk | one entry appended to `registers/risks.yaml` (as above): the next `R-<nnn>`, `title`, `cause` when given, `category`, `probability`, `impact`, `owner` when given, `status: open`, `response` and `response_actions` when given; no verdict | a title; probability and impact picked; an owner of the roles or `team.people` |
+| + work package | the milestone (created or reused), its items, a new `WP-<nn>.md` (`status: draft`) | open issues and pull requests |
+| + work package (on a milestone) | a new `WP-<nn>.md` for an existing milestone, listing its open items | a milestone no work package carries |
 | Assign / unassign | `PATCH issues/<n>` with the full `assignees` list, the login added or removed (pull requests too, both forges) | an open item; a login of `team.people` |
 | Assign to many | one `PATCH issues/<n>` per picked item, the login added to or removed from its `assignees` | open items that login does not hold (add) or holds (remove), 1–50; a login of `team.people` |
 | New issue | `POST issues` with `title`, `body`, and optionally `milestone` (the work package's, `number` on GitHub, `id` on Forgejo) and `assignees` (one login) | a title; a work package whose `milestone:` exists on the forge; a login of `team.people` |
@@ -779,7 +784,7 @@ helper from `repos:` (never the origin). An item travels as its reference, `repo
 | Assign / unassign | `{ kind: 'assign', repo, number, login, op }`: the `PATCH` on that repo | as above |
 | Assign to many | `numbers` holds references (`genropy#12`), each patched on its repo; the preview names every forge | as above |
 | Attach to a work package | `{ kind: 'wp-items', wp, ref }`: the reference added to the work package's `items:`; the forge is only read | an item not in its `items:`; a work package neither completed, archived nor cancelled |
-| Create package | a new `WP-<nn>.md` (`status: draft`) naming the open picked items in `items:`; nothing on the forge | open items; closed or unreadable ones are *Left out* |
+| + work package | a new `WP-<nn>.md` (`status: draft`) naming the open picked items in `items:`; nothing on the forge | open items; closed or unreadable ones are *Left out* |
 | New issue | `{ kind: 'issue-create', repo, … }`: the issue created on the picked repo; with a work package, `repo#<n>` added to its `items:` after it is created | a title; any open work package |
 
 An item dropped on a work package or a Board lane is attached through `items:`. A milestone is neither dropped nor turned
@@ -822,7 +827,7 @@ write. Refused: a closed item, an item already in that milestone, a work package
 of an open issue or pull request on a work package (the drag dock or a Board lane): those with a
 milestone that are not archived or cancelled, less the one the item is already in, and those with
 a title and no milestone that are not completed. Rows carry no per-row select for it; a checked
-group goes through *Create package*. Hidden on a read-only project.
+group goes through *+ work package*. Hidden on a read-only project.
 
 **Place.** `{ kind: 'wp-place', target: 'WP-<nn>', horizon: 'now' | 'next' | 'later' | '', beside?:
 'WP-<nn>', side?: 'above' | 'below' }`, from a drag and drop in the Work packages tab (issue #67): an
@@ -838,14 +843,28 @@ a closed work package, a `beside` that is not in the horizon or is the work pack
 that changes nothing. The rule is `place_wp` in the helper and `placeWp` in `hooks/edits.ts`, on the
 shared cases. Hidden on a read-only project.
 
-**New issue.** `{ kind: 'issue-create', title, body?, wp?, login? }`, from the *New issue* button of
-the Board tab or a lane's *+ issue* (its work package picked). The preview shows the forge, the
+**New issue.** `{ kind: 'issue-create', title, body?, wp?, login? }`, from a lane's *+ issue* (its work
+package picked; the *Unplanned* lane's, or the Board header's when there is no lane, with none). The preview shows the forge, the
 title and body, the milestone and the assignee, and says that an issue cannot be deleted once
 created. Refused: a title empty, longer than 200 characters or of more than one line, a body over
 20000 characters, a login outside `team.people`, a work package without `milestone:` or whose
-milestone is missing on the forge; a closed milestone is allowed and flagged. The dialog links the
-`pm-issue` skill for an issue drafted with the readiness headings. Starting the work is not a desk
+milestone is missing on the forge; a closed milestone is allowed and flagged. *Open in Claude* in the
+dialog drafts it with `pm-issue` instead, with the readiness headings. Starting the work is not a desk
 action: the developer does it from their forge desk's Solve. Hidden on a read-only project.
+
+**Contextual actions** (issue #94). Each sits, as a small button, next to what it acts on and opens a
+dialog of fields: *+ log* by the Daily log, *+ problem* by Problems, *+ risk* by Risks, *+ iteration* by
+Iterations (next to the register's title, or its name on the *Empty* line), *+ document* on the
+Documents tab, *+ report* in the recap's Next report card, *+ issue* on the Board lanes. Every dialog
+has *Open in Claude*: a link to a session with the skill (`pm-log`, `pm-problem`, `pm-risk`,
+`pm-iterate`, `pm-document`, `pm-report`, `pm-issue`) and the fields as typed. *+ log*, *+ problem*,
+*+ risk* and *+ issue* also have *Preview*, the helper's write — `{ kind: 'log-add', type, text,
+owner?, due? }`, `{ kind: 'problem-add', title, type, priority }`, `{ kind: 'risk-add', title, cause?,
+category, probability, impact, owner?, response?, actions? }`, `issue-create` — shown only with the
+helper and never on a read-only project; the others open Claude only. The appended lines are
+`add_log_entry`, `add_problem` and `add_risk` in the helper and `addLogEntry`, `addProblem`,
+`addRisk` in `hooks/edits.ts`, on the shared cases; the id is the next after the highest of the
+file, and a file whose list is not its last top-level key is refused.
 
 **Browser page.** `server/desk_server.py`, standard-library Python 3, serves the page on
 `127.0.0.1` at a random port. The mod starts it on *Open in browser* (or reuses one another session
@@ -862,8 +881,9 @@ the page's token; only projects of the registry are touched. After a write the h
 the mod reads the projects again, and the page reloads once the snapshot's `refreshedAt` moves.
 Every other session reads the forge again, past its cache, when the stamp is newer than its last
 read, so none writes the desk back with the state before the change. Forge writes use `gh api` on GitHub and the `fj` token on Forgejo. With no
-`python3`, *Open in browser* opens the file: Archive, Link, Create package and note buttons become
-links to a session with their skill, and the others are not offered.
+`python3`, *Open in browser* opens the file: Archive, Link, + work package and note buttons become
+links to a session with their skill, the contextual dialogs offer *Open in Claude* only, and the
+others are not offered.
 
 **Pane.** The Desktop pane writes the file itself (`hooks/edits.ts`, the helper's rules, checked
 by both suites on `server/edit-cases.mjs`): Archive and Mark completed in a work theme, close /

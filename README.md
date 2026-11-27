@@ -47,10 +47,12 @@ task's journey from assignment to merge.
   checked issues and pull requests are grouped into a work package.
 - **Actions on the desk.** Archive or complete a work package, place it on the roadmap by drag and
   drop, link it, close a note, package issues, attach an item to a work package, create an issue,
-  assign or unassign checked items, give checked Daily Log actions an owner: each shows the change and writes it on Confirm, without opening a
-  session; text — reports, digests, presentations — is still drafted in a session with its skill.
-  In the browser the actions need **Python 3** (a standard-library helper the mod starts); without
-  it the page stays read-only. What acts directly and why: [docs/scope.md](docs/scope.md).
+  assign or unassign checked items, give checked Daily Log actions an owner, add a Daily Log entry, a problem or a risk: each
+  shows the change and writes it on Confirm, without opening a session; text — reports, digests, presentations — is still
+  drafted in a session with its skill. Small buttons next to what they act on (*+ log*, *+ problem*, *+ risk*, *+ iteration*,
+  *+ document*, *+ report*, a lane's *+ issue*) open a dialog whose *Open in Claude* starts that session with the fields typed.
+  In the browser the writes need **Python 3** (a standard-library helper the mod starts); without
+  it the page writes nothing and the dialogs open Claude only. What acts directly and why: [docs/scope.md](docs/scope.md).
 - **Work themes.** The work packages of a stage run in parallel; one linked with `/pm-link` to an
   issue, a milestone or a branch shows the phases of the phased-workflow plan found on its branch,
   each with what it adds, read with local git — or, with no plan, a bar of its milestone's closed

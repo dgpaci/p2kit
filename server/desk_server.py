@@ -71,6 +71,14 @@ FLOW_LINE = re.compile(r'^(\s*-\s*\{)(.*)(\}\s*)$')
 # A trailing note in brackets is no part of a person's name: `Finizio (Secretary)` is owner `Finizio`.
 NAME_NOTE = re.compile(r'\s*\([^()]*\)\s*$')
 MAX_LOG_OWNER = 50
+# A new entry of a register, from the desk's contextual dialogs: Log, + problem, + risk.
+LOG_KINDS = ('decision', 'action', 'problem', 'event', 'note')
+PROBLEM_TYPES = ('request-for-change', 'off-specification', 'problem')
+LEVELS = ('low', 'medium', 'high')
+RISK_CATEGORIES = ('threat', 'opportunity')
+RISK_RESPONSES = ('avoid', 'reduce', 'fallback', 'transfer', 'accept', 'share', 'exploit', 'enhance')
+DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+MAX_LINE = 500
 
 
 class ActionError(Exception):
@@ -432,6 +440,124 @@ def render_document(home, path):
     """The HTML page of a project's Markdown document."""
     real = readable_document(home, path)
     return document_page(real, read_text(real))
+
+
+def quoted(value, prefer):
+    """A text in quotes, `prefer` (' or ") unless it holds that quote: the subset has no escapes."""
+    other = '"' if prefer == "'" else "'"
+    if prefer not in value:
+        return prefer + value + prefer
+    if other not in value:
+        return other + value + other
+    raise ActionError('a value cannot hold both kinds of quote')
+
+
+def one_line(value, limit, message):
+    """A text field of a new entry: trimmed, one line, up to `limit` characters; '' when absent."""
+    value = value.strip() if isinstance(value, str) else ''
+    if '\n' in value or '\r' in value or len(value) > limit:
+        raise ActionError(message)
+    return value
+
+
+def next_entry_id(text, prefix):
+    """The id after the highest `<prefix>-<n>` of the file, three digits at least: D-001, I-004, R-012."""
+    found = [int(n) for n in re.findall(r'\bid:\s*[\'"]?' + re.escape(prefix) + r'-(\d+)', text or '')]
+    return f'{prefix}-{max(found, default=0) + 1:03d}'
+
+
+def append_entry(text, key, block):
+    """Appends the lines of one entry to the list `key:` of a register, the last top-level key of the file; a missing file or
+    an empty `key: []` becomes `key:`. Returns the new text and the changes: the `[]` line when replaced, then the entry."""
+    changes = []
+    lines = (text or '').splitlines(keepends=True)
+    if lines and not lines[-1].endswith('\n'):
+        lines[-1] += '\n'
+    if not any(line.strip() and not line.lstrip().startswith('#') for line in lines):
+        lines.append(key + ':\n')
+        changes.append({'line': len(lines), 'before': '', 'after': key + ':'})
+    else:
+        head = [index for index, line in enumerate(lines) if re.match(r'^' + re.escape(key) + r':(\s|$)', line)]
+        if len(head) != 1:
+            raise ActionError(f'the file has no single {key}: list')
+        index = head[0]
+        rest = lines[index][len(key) + 1:].split(' #', 1)[0].strip()
+        if rest == '[]':
+            changes.append({'line': index + 1, 'before': lines[index].rstrip('\n'), 'after': key + ':'})
+            lines[index] = key + ':\n'
+        elif rest:
+            raise ActionError(f'{key}: is not a block list')
+        if any(re.match(r'^[^\s#-]', line) for line in lines[index + 1:]):
+            raise ActionError(f'{key}: is not the last list of the file')
+    changes.append({'line': len(lines) + 1, 'before': '', 'after': '\n'.join(block)})
+    return ''.join(lines) + ''.join(line + '\n' for line in block), changes
+
+
+def add_log_entry(text, day, kind, entry_text, owner='', due=''):
+    """A new one-line entry of the Daily Log, `source: manual`, as /pm-log writes it: an action carries status open, and
+    optionally its owner and due day. Returns the new text, the entry's id and the changes."""
+    if kind not in LOG_KINDS:
+        raise ActionError('a log entry is a decision, an action, a problem, an event or a note')
+    entry_text = one_line(entry_text, MAX_LINE, f'a log entry needs a text of one line, up to {MAX_LINE} characters')
+    if not entry_text:
+        raise ActionError(f'a log entry needs a text of one line, up to {MAX_LINE} characters')
+    owner = one_line(owner, 100, 'an owner is a name')
+    due = due.strip() if isinstance(due, str) else ''
+    if kind != 'action' and (owner or due):
+        raise ActionError('only an action has an owner and a due date')
+    if due and not DAY.match(due):
+        raise ActionError('a due date is yyyy-mm-dd')
+    entry_id = next_entry_id(text, 'D')
+    fields = [f'id: {entry_id}', f'date: {day}', f'kind: {kind}', 'source: manual', 'text: ' + quoted(entry_text, "'")]
+    fields += ['owner: ' + to_flow_scalar(owner)] if owner else []
+    fields += [f'due: {due}'] if due else []
+    fields += ['status: open'] if kind == 'action' else []
+    new_text, changes = append_entry(text, 'entries', ['  - { ' + ', '.join(fields) + ' }'])
+    return new_text, entry_id, changes
+
+
+def add_problem(text, day, title, kind, priority):
+    """A new entry of the Problems register (issues.yaml), open and raised today, as /pm-problem raises it."""
+    title = one_line(title, MAX_TITLE, f'a problem needs a title of one line, up to {MAX_TITLE} characters')
+    if not title:
+        raise ActionError(f'a problem needs a title of one line, up to {MAX_TITLE} characters')
+    if kind not in PROBLEM_TYPES:
+        raise ActionError('a problem is a request-for-change, an off-specification or a problem')
+    if priority not in LEVELS:
+        raise ActionError('a priority is low, medium or high')
+    entry_id = next_entry_id(text, 'I')
+    block = [f'  - id: {entry_id}', '    title: ' + to_scalar(title), f'    type: {kind}', f'    priority: {priority}', '    status: open', f'    raised: {day}']
+    new_text, changes = append_entry(text, 'issues', block)
+    return new_text, entry_id, changes
+
+
+def add_risk(text, risk):
+    """A new open risk of the Risk Register, as /pm-risk adds it: no verdict, which /pm-risk writes once it has assessed the
+    response. risk: title, cause, category, probability, impact, owner, response, actions — cause, owner, response and
+    actions optional."""
+    title = one_line(risk.get('title'), MAX_TITLE, f'a risk needs a title of one line, up to {MAX_TITLE} characters')
+    if not title:
+        raise ActionError(f'a risk needs a title of one line, up to {MAX_TITLE} characters')
+    cause = one_line(risk.get('cause'), MAX_LINE, f'the cause is one line, up to {MAX_LINE} characters')
+    if risk.get('category') not in RISK_CATEGORIES:
+        raise ActionError('a risk is a threat or an opportunity')
+    if risk.get('probability') not in LEVELS or risk.get('impact') not in LEVELS:
+        raise ActionError('probability and impact are low, medium or high')
+    owner = one_line(risk.get('owner'), 100, 'an owner is a name')
+    response = risk.get('response') or ''
+    if response and response not in RISK_RESPONSES:
+        raise ActionError('a response is avoid, reduce, fallback, transfer, accept, share, exploit or enhance')
+    actions = one_line(risk.get('actions'), MAX_LINE, f'the response actions are one line, up to {MAX_LINE} characters')
+    entry_id = next_entry_id(text, 'R')
+    block = [f'  - id: {entry_id}', '    title: ' + to_scalar(title)]
+    block += ['    cause: ' + quoted(cause, '"')] if cause else []
+    block += [f"    category: {risk['category']}", f"    probability: {risk['probability']}", f"    impact: {risk['impact']}"]
+    block += ['    owner: ' + to_scalar(owner)] if owner else []
+    block += ['    status: open']
+    block += [f'    response: {response}'] if response else []
+    block += ['    response_actions: ' + quoted(actions, '"')] if actions else []
+    new_text, changes = append_entry(text, 'risks', block)
+    return new_text, entry_id, changes
 
 
 def read_text(path):
@@ -875,6 +1001,49 @@ def plan_log_owner(root, request):
     return preview, lambda: write_text(path, new_text)
 
 
+REGISTER_ADD = {'log-add': 'daily-log.yaml', 'problem-add': 'issues.yaml', 'risk-add': 'risks.yaml'}
+
+
+def person_of(root, name):
+    """An owner as the project names them: '' for none, else a person of the roles or team.people, case aside."""
+    if name in (None, ''):
+        return ''
+    if not isinstance(name, str):
+        raise ActionError('an owner is a name')
+    found = next((one for one in project_people(root) if one.lower() == name.strip().lower()), None)
+    if found is None:
+        raise ActionError(f'{name} is no person of roles or team.people in .pm/project.yaml')
+    return found
+
+
+def plan_register_add(root, request, day=None):
+    """The preview of a new entry of the Daily Log, the Problems or the Risk Register: the file (created when missing) and the
+    lines it gains, the entry's id being the next after the highest."""
+    kind = request.get('kind')
+    day = day or time.strftime('%Y-%m-%d')
+    path = os.path.join(root, '.pm', 'registers', REGISTER_ADD[kind])
+    text = read_text(path) if os.path.exists(path) else None
+    if kind == 'log-add':
+        new_text, entry_id, changes = add_log_entry(text, day, request.get('type'), request.get('text'), person_of(root, request.get('owner')), request.get('due'))
+        summary = f'Add {entry_id} to the daily log'
+    elif kind == 'problem-add':
+        new_text, entry_id, changes = add_problem(text, day, request.get('title'), request.get('type'), request.get('priority'))
+        summary = f'Add problem {entry_id}'
+    else:
+        fields = {key: request.get(key) for key in ('title', 'cause', 'category', 'probability', 'impact', 'response', 'actions')}
+        new_text, entry_id, changes = add_risk(text, dict(fields, owner=person_of(root, request.get('owner'))))
+        summary = f'Add risk {entry_id}'
+    preview = {
+        'kind': kind, 'project': root, 'summary': summary, 'id': entry_id,
+        'file': os.path.relpath(path, root), 'fileHash': file_hash(text or ''), 'changes': changes,
+    }
+
+    def write():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_text(path, new_text)
+    return preview, write
+
+
 def plan_assign(root, home, request, forge=None):
     """The change of the assignees of one issue or pull request: who, before and after, as the forge has it now."""
     number, login, op, repo = request.get('number'), request.get('login'), request.get('op'), request.get('repo') or ''
@@ -1228,6 +1397,9 @@ def run_action(home, request, forge=None):
     elif request.get('kind') == 'log-owner':
         preview, write = plan_log_owner(root, request)
         apply = lambda: (write(), ['written'])[1]
+    elif request.get('kind') in REGISTER_ADD:
+        preview, write = plan_register_add(root, request)
+        apply = lambda: (write(), [preview['id'] + ' written'])[1]
     else:
         preview, write = plan_file_action(root, request)
         apply = lambda: (write(), ['written'])[1]

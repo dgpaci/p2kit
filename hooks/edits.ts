@@ -1,5 +1,6 @@
 // One-line edits of .pm/ files, as the pane applies them: the same rules and messages as the desk helper
-// (server/desk_server.py `set_key`, `set_note_status`, `place_wp`), checked by both suites on server/edit-cases.mjs.
+// (server/desk_server.py `set_key`, `set_note_status`, `place_wp`, `add_log_entry`, `add_problem`, `add_risk`), checked by
+// both suites on server/edit-cases.mjs.
 
 export class EditError extends Error {}
 
@@ -167,4 +168,138 @@ export function placeWp(files: Record<string, string>, target: string, horizon: 
       return { id, text, changes }
     }),
   }
+}
+
+// A new entry of a register, from the desk's contextual dialogs (Log, + problem, + risk): the helper's `add_log_entry`,
+// `add_problem`, `add_risk`, on the shared cases.
+export const LOG_KINDS = ['decision', 'action', 'problem', 'event', 'note'] as const
+export const PROBLEM_TYPES = ['request-for-change', 'off-specification', 'problem'] as const
+export const LEVELS = ['low', 'medium', 'high'] as const
+export const RISK_CATEGORIES = ['threat', 'opportunity'] as const
+export const RISK_RESPONSES = ['avoid', 'reduce', 'fallback', 'transfer', 'accept', 'share', 'exploit', 'enhance'] as const
+const MAX_TITLE = 200
+const MAX_LINE = 500
+const PLAIN = /^[A-Za-z0-9][A-Za-z0-9 _.,()/&+-]*$/
+const SPECIAL = /^([-+.\d]+|true|false|null|yes|no)$/i
+const DAY = /^\d{4}-\d{2}-\d{2}$/
+
+export type EntryChange = { line: number; before: string; after: string }
+export type NewEntry = { text: string; id: string; changes: EntryChange[] }
+
+/** A text as a scalar of the .pm/ YAML subset: plain when safe, else quoted; the subset has no escapes. */
+export function toScalar(value: string): string {
+  if (/[\r\n]/.test(value)) throw new EditError('a value cannot span lines')
+  if (PLAIN.test(value) && value.trim() === value && !SPECIAL.test(value)) return value
+  if (!value.includes("'")) return `'${value}'`
+  if (!value.includes('"')) return `"${value}"`
+  throw new EditError('a value cannot hold both kinds of quote')
+}
+
+/** As toScalar, quoted when it holds a comma: a scalar inside a flow map. */
+export function toFlowScalar(value: string): string {
+  const rendered = toScalar(value)
+  return rendered.includes(',') && !`'"`.includes(rendered[0]) ? `'${rendered}'` : rendered
+}
+
+/** A text in quotes, `prefer` unless it holds that quote. */
+function quoted(value: string, prefer: "'" | '"'): string {
+  const other = prefer === "'" ? '"' : "'"
+  if (!value.includes(prefer)) return prefer + value + prefer
+  if (!value.includes(other)) return other + value + other
+  throw new EditError('a value cannot hold both kinds of quote')
+}
+
+/** A text field of a new entry: trimmed, one line, up to `limit` characters; '' when absent. */
+function oneLine(value: unknown, limit: number, message: string): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (/[\r\n]/.test(text) || text.length > limit) throw new EditError(message)
+  return text
+}
+
+/** The id after the highest `<prefix>-<n>` of the file, three digits at least. */
+function getNextEntryId(text: string | null, prefix: string): string {
+  const found = [...(text ?? '').matchAll(new RegExp(`\\bid:\\s*['"]?${escape(prefix)}-(\\d+)`, 'g'))].map(m => Number(m[1]))
+  return `${prefix}-${String(Math.max(0, ...found) + 1).padStart(3, '0')}`
+}
+
+/**
+ * Appends the lines of one entry to the list `key:` of a register, the last top-level key of the file; a missing file or an
+ * empty `key: []` becomes `key:`. The changes: the `[]` line when replaced, then the entry.
+ */
+function appendEntry(text: string | null, key: string, block: string[]): { text: string; changes: EntryChange[] } {
+  const changes: EntryChange[] = []
+  const all = text ? lines(text) : []
+  if (all.length && !all.at(-1)!.endsWith('\n')) all[all.length - 1] += '\n'
+  if (!all.some(line => line.trim() && !line.trimStart().startsWith('#'))) {
+    all.push(`${key}:\n`)
+    changes.push({ line: all.length, before: '', after: `${key}:` })
+  } else {
+    const pattern = new RegExp(`^${escape(key)}:(\\s|$)`)
+    const head = all.flatMap((line, index) => (pattern.test(line) ? [index] : []))
+    if (head.length !== 1) throw new EditError(`the file has no single ${key}: list`)
+    const index = head[0]
+    const rest = all[index].slice(key.length + 1).split(' #')[0].trim()
+    if (rest === '[]') {
+      changes.push({ line: index + 1, before: strip(all[index]), after: `${key}:` })
+      all[index] = `${key}:\n`
+    } else if (rest) {
+      throw new EditError(`${key}: is not a block list`)
+    }
+    if (all.slice(index + 1).some(line => /^[^\s#-]/.test(line))) throw new EditError(`${key}: is not the last list of the file`)
+  }
+  changes.push({ line: all.length + 1, before: '', after: block.join('\n') })
+  return { text: all.join('') + block.map(line => `${line}\n`).join(''), changes }
+}
+
+/** A new one-line entry of the Daily Log, `source: manual`: an action carries status open, and optionally its owner and due day. */
+export function addLogEntry(text: string | null, day: string, kind: string, entryText: unknown, owner: unknown = '', due: unknown = ''): NewEntry {
+  if (!(LOG_KINDS as readonly string[]).includes(kind)) throw new EditError('a log entry is a decision, an action, a problem, an event or a note')
+  const message = `a log entry needs a text of one line, up to ${MAX_LINE} characters`
+  const body = oneLine(entryText, MAX_LINE, message)
+  if (!body) throw new EditError(message)
+  const who = oneLine(owner, 100, 'an owner is a name')
+  const when = typeof due === 'string' ? due.trim() : ''
+  if (kind !== 'action' && (who || when)) throw new EditError('only an action has an owner and a due date')
+  if (when && !DAY.test(when)) throw new EditError('a due date is yyyy-mm-dd')
+  const id = getNextEntryId(text, 'D')
+  const fields = [`id: ${id}`, `date: ${day}`, `kind: ${kind}`, 'source: manual', `text: ${quoted(body, "'")}`,
+    ...(who ? [`owner: ${toFlowScalar(who)}`] : []), ...(when ? [`due: ${when}`] : []), ...(kind === 'action' ? ['status: open'] : [])]
+  return { id, ...appendEntry(text, 'entries', [`  - { ${fields.join(', ')} }`]) }
+}
+
+/** A new entry of the Problems register (issues.yaml), open and raised on `day`. */
+export function addProblem(text: string | null, day: string, title: unknown, kind: string, priority: string): NewEntry {
+  const message = `a problem needs a title of one line, up to ${MAX_TITLE} characters`
+  const name = oneLine(title, MAX_TITLE, message)
+  if (!name) throw new EditError(message)
+  if (!(PROBLEM_TYPES as readonly string[]).includes(kind)) throw new EditError('a problem is a request-for-change, an off-specification or a problem')
+  if (!(LEVELS as readonly string[]).includes(priority)) throw new EditError('a priority is low, medium or high')
+  const id = getNextEntryId(text, 'I')
+  return { id, ...appendEntry(text, 'issues', [`  - id: ${id}`, `    title: ${toScalar(name)}`, `    type: ${kind}`, `    priority: ${priority}`, '    status: open', `    raised: ${day}`]) }
+}
+
+export type NewRisk = { title?: unknown; cause?: unknown; category?: string; probability?: string; impact?: string; owner?: unknown; response?: string; actions?: unknown }
+
+/** A new open risk of the Risk Register, with no verdict: /pm-risk writes it once it has assessed the response. */
+export function addRisk(text: string | null, risk: NewRisk): NewEntry {
+  const message = `a risk needs a title of one line, up to ${MAX_TITLE} characters`
+  const title = oneLine(risk.title, MAX_TITLE, message)
+  if (!title) throw new EditError(message)
+  const cause = oneLine(risk.cause, MAX_LINE, `the cause is one line, up to ${MAX_LINE} characters`)
+  if (!(RISK_CATEGORIES as readonly string[]).includes(risk.category ?? '')) throw new EditError('a risk is a threat or an opportunity')
+  if (!(LEVELS as readonly string[]).includes(risk.probability ?? '') || !(LEVELS as readonly string[]).includes(risk.impact ?? '')) {
+    throw new EditError('probability and impact are low, medium or high')
+  }
+  const owner = oneLine(risk.owner, 100, 'an owner is a name')
+  const response = risk.response || ''
+  if (response && !(RISK_RESPONSES as readonly string[]).includes(response)) {
+    throw new EditError('a response is avoid, reduce, fallback, transfer, accept, share, exploit or enhance')
+  }
+  const actions = oneLine(risk.actions, MAX_LINE, `the response actions are one line, up to ${MAX_LINE} characters`)
+  const id = getNextEntryId(text, 'R')
+  const block = [`  - id: ${id}`, `    title: ${toScalar(title)}`, ...(cause ? [`    cause: ${quoted(cause, '"')}`] : []),
+    `    category: ${risk.category}`, `    probability: ${risk.probability}`, `    impact: ${risk.impact}`,
+    ...(owner ? [`    owner: ${toScalar(owner)}`] : []), '    status: open',
+    ...(response ? [`    response: ${response}`] : []), ...(actions ? [`    response_actions: ${quoted(actions, '"')}`] : [])]
+  return { id, ...appendEntry(text, 'risks', block) }
 }

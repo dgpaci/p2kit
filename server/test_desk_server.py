@@ -252,6 +252,63 @@ class LogOwner(unittest.TestCase):
             ds.run_action(self.p.home, {'project': self.p.root, 'kind': 'log-owner', 'ids': ['D-004'], 'owner': 'Roberta', 'confirm': answer['hash']})
 
 
+class RegisterAdd(unittest.TestCase):
+    """The contextual dialogs of the desk: Log, + problem, + risk append one entry to their register."""
+
+    def setUp(self):
+        self.p = Project()
+        self.p.write('.pm/project.yaml', PEOPLE)
+        self.p.write('.pm/registers/daily-log.yaml', LOG)
+        self.today = ds.time.strftime('%Y-%m-%d')
+
+    def tearDown(self):
+        self.p.temp.cleanup()
+
+    def test_a_log_action_is_appended_with_the_next_id_its_owner_as_the_roles_name_it(self):
+        result, preview = self.p.act(kind='log-add', type='action', text='call the bank', owner='finizio', due='2026-12-01')
+        line = f"  - {{ id: D-006, date: {self.today}, kind: action, source: manual, text: 'call the bank', owner: Finizio, due: 2026-12-01, status: open }}"
+        self.assertEqual(self.p.read('.pm/registers/daily-log.yaml'), LOG + line + '\n')
+        self.assertEqual(preview['summary'], 'Add D-006 to the daily log')
+        self.assertEqual(preview['changes'], [{'line': 7, 'before': '', 'after': line}])
+        self.assertEqual(result['done'], ['D-006 written'])
+
+    def test_a_problem_creates_its_register_when_missing(self):
+        _, preview = self.p.act(kind='problem-add', title='Test server down', type='problem', priority='high')
+        self.assertEqual(self.p.read('.pm/registers/issues.yaml'),
+                         f'issues:\n  - id: I-001\n    title: Test server down\n    type: problem\n    priority: high\n    status: open\n    raised: {self.today}\n')
+        self.assertEqual((preview['summary'], preview['file']), ('Add problem I-001', os.path.join('.pm', 'registers', 'issues.yaml')))
+
+    def test_a_risk_is_appended_without_a_verdict(self):
+        self.p.write('.pm/registers/risks.yaml', 'risks: []\n')
+        _, preview = self.p.act(kind='risk-add', title='Key user leaves', cause='one person knows the process', category='threat',
+                                probability='medium', impact='high', owner='Eva Neri', response='reduce', actions='pair a second user, write the manual')
+        self.assertEqual(self.p.read('.pm/registers/risks.yaml'), 'risks:\n  - id: R-001\n    title: Key user leaves\n    cause: "one person knows the process"\n'
+                         '    category: threat\n    probability: medium\n    impact: high\n    owner: Eva Neri\n    status: open\n    response: reduce\n'
+                         '    response_actions: "pair a second user, write the manual"\n')
+        self.assertEqual(preview['changes'][0], {'line': 1, 'before': 'risks: []', 'after': 'risks:'})
+
+    def test_refused_and_nothing_written(self):
+        cases = ((dict(kind='log-add', type='action', text='x', owner='Marco'), 'Marco is no person of roles or team.people'),
+                 (dict(kind='log-add', type='note', text='  '), 'a log entry needs a text'),
+                 (dict(kind='problem-add', title='x', type='problem', priority=None), 'a priority is low, medium or high'),
+                 (dict(kind='risk-add', title='x', category='threat', probability='high', impact=3), 'probability and impact'),
+                 (dict(kind='risk-add', title=['x'], category='threat', probability='high', impact='high'), 'a risk needs a title'))
+        for request, message in cases:
+            with self.subTest(message), self.assertRaisesRegex(ds.ActionError, message):
+                self.p.act(**request)
+        self.assertEqual(self.p.read('.pm/registers/daily-log.yaml'), LOG)
+        self.assertFalse(os.path.exists(os.path.join(self.p.root, '.pm', 'registers', 'issues.yaml')))
+        self.assertFalse(os.path.exists(os.path.join(self.p.root, '.pm', 'registers', 'risks.yaml')))
+
+    def test_a_preview_writes_nothing_and_a_change_after_it_is_refused(self):
+        answer, changed = ds.run_action(self.p.home, {'project': self.p.root, 'kind': 'log-add', 'type': 'note', 'text': 'a note'})
+        self.assertFalse(changed)
+        self.assertEqual(self.p.read('.pm/registers/daily-log.yaml'), LOG)
+        self.p.write('.pm/registers/daily-log.yaml', LOG + "  - { id: D-006, date: 2026-11-06, kind: note, text: 'meanwhile' }\n")
+        with self.assertRaisesRegex(ds.ActionError, 'changed since the preview'):
+            ds.run_action(self.p.home, {'project': self.p.root, 'kind': 'log-add', 'type': 'note', 'text': 'a note', 'confirm': answer['hash']})
+
+
 def shared_cases():
     """server/edit-cases.mjs: one JSON array behind `export default`, run by this suite and tests/edits.test.ts."""
     with open(os.path.join(os.path.dirname(__file__), 'edit-cases.mjs')) as handle:
@@ -284,6 +341,20 @@ class SharedCases(unittest.TestCase):
                                 ds.place_wp(case['files'], case['target'], case['horizon'], case['beside'], case['side'])
                         else:
                             self.assertEqual(ds.place_wp(case['files'], case['target'], case['horizon'], case['beside'], case['side']), case['expect'])
+                    continue
+                elif case['op'] in ('log', 'problem', 'risk'):
+                    if case['op'] == 'log':
+                        add = lambda: ds.add_log_entry(case['text'], case['day'], case['kind'], case['entryText'], case['owner'], case['due'])
+                    elif case['op'] == 'problem':
+                        add = lambda: ds.add_problem(case['text'], case['day'], case['title'], case['type'], case['priority'])
+                    else:
+                        add = lambda: ds.add_risk(case['text'], case['risk'])
+                    if 'error' in case:
+                        with self.assertRaisesRegex(ds.ActionError, case['error']):
+                            add()
+                    else:
+                        new_text, entry_id, changes = add()
+                        self.assertEqual({'text': new_text, 'id': entry_id, 'changes': changes}, case['expect'])
                     continue
                 else:
                     run = lambda: ds.set_note_status(case['text'], case['sha'], case['noteText'], case['value'])

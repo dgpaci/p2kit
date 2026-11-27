@@ -46,7 +46,7 @@ tolerances, and *Needs attention*.
 
 **Board** — one swimlane per work package: To do, In progress, In review, Done. *Unplanned* holds
 the open items that belong to no work package. Drag an item onto a lane to put it in that work
-package, or create a new issue in it with *+ issue* (or with *New issue* in the tab's header);
+package, or create a new issue in it with its *+ issue* (the *Unplanned* lane's for an issue in no work package);
 assigning is on the Team and Activity tabs.
 (The demo page here is read-only, so those buttons are not shown.)
 
