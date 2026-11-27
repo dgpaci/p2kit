@@ -5,3 +5,12 @@ entries:
   - { id: D-004, date: 2026-11-27, kind: event, source: forge, text: 'issue opened: New skills: pm-problem (Issue Report) and pm-document', ref: '#96' }
   - { id: D-005, date: 2026-11-27, kind: event, source: forge, text: "pull request merged: fix(time): let a past day be written while today's desk clock runs", ref: '#92' }
   - { id: D-006, date: 2026-11-27, kind: decision, source: manual, text: 'desk actions: Claude drafts the fields in the background, the helper writes on Confirm; the Issue Report is named pm-problem', ref: '#95' }
+  - { id: D-007, date: 2026-11-27, kind: event, source: forge, text: 'issue closed: Desk: replace the big New issue button with contextual actions', ref: '#94' }
+  - { id: D-008, date: 2026-11-27, kind: event, source: forge, text: 'issue closed: New skills: pm-problem (Issue Report) and pm-document', ref: '#96' }
+  - { id: D-009, date: 2026-11-27, kind: event, source: forge, text: 'issue closed: Desk helper: Draft with Claude in the action dialogs', ref: '#95' }
+  - { id: D-010, date: 2026-11-27, kind: event, source: forge, text: 'pull request merged: Desk: contextual + actions instead of the big New issue button', ref: '#98' }
+  - { id: D-011, date: 2026-11-27, kind: event, source: forge, text: 'pull request merged: Add pm-problem and pm-document skills', ref: '#97' }
+  - { id: D-012, date: 2026-11-27, kind: event, source: forge, text: 'pull request merged: Desk: Draft with Claude in the action dialogs', ref: '#99' }
+  - { id: D-013, date: 2026-11-27, kind: decision, source: manual, text: 'desk buttons use the + form: + issue, + risk, + problem, + log, + iteration, + report, + document, + work package', ref: '#94' }
+  - { id: D-014, date: 2026-11-27, kind: decision, source: manual, text: 'Draft with Claude: default model sonnet, no spend cap per click', ref: '#95' }
+  - { id: D-015, date: 2026-11-27, kind: action, source: manual, text: 'resume from #78, the objectives review', owner: Davide Paci, status: open, ref: '#78' }

@@ -1,3 +1,4 @@
 # Time crystallized by /pm-log from the local time log (docs/pm-schema.md → Timesheets).
 entries:
-  - { date: 2026-11-27, kind: dev, minutes: 7 }
+  - { date: 2026-11-27, kind: desk, minutes: 59 }
+  - { date: 2026-11-27, kind: dev, minutes: 44 }
