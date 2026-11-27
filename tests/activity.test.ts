@@ -80,7 +80,7 @@ test('the browser page embeds the package link, the pull requests and the work p
   expect(script).toContain("p.packageLink + encodeURIComponent(' ' + refs.join(' '))")
   expect(script).toContain("'PR #' + pr.number")
   expect(script).toContain("['--milestone', \"'\" + m.title + \"'\"]")
-  for (const label of ["'Milestones'", "'Pull requests'", "'Issues'", "'Create package'", "'Create work package'", "'no work package'", "' selected'", "'No open pull request.'", "'No open issue.'"]) {
+  for (const label of ["'Milestones'", "'Pull requests'", "'Issues'", "'+ work package'", "'no work package'", "' selected'", "'No open pull request.'", "'No open issue.'"]) {
     expect(script).toContain(label)
   }
   // Blocks in the order settled at the gate: Milestones, Pull requests, Issues.

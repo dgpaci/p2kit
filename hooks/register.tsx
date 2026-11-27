@@ -578,7 +578,7 @@ export const register: Register = on => {
         ]) },
             { id: 'approvals', label: 'Approvals', size: p.approvals.length, sub: String(p.approvals.length), skill: '/pm-start-up', render: () => p.approvals.length === 0 ? <Text dimColor>None recorded.</Text>
           : p.approvals.map(one => <Text wrap="truncate-end">{`${one.date} ${one.decision} — ${one.by}`}</Text>) },
-            { id: 'problems', label: 'Problems', size: p.issues.length, sub: `${openIssues.length} open`, skill: '/pm-log', render: () => allIssues.length === 0 ? <Text dimColor>None.</Text>
+            { id: 'problems', label: 'Problems', size: p.issues.length, sub: `${openIssues.length} open`, skill: '/pm-problem', render: () => allIssues.length === 0 ? <Text dimColor>None.</Text>
           : allIssues.map(issue => (
             <Text dimColor={issue.status !== 'open'} wrap="truncate-end">
               {`${issue.id} ${issue.priority} · ${issue.title}${issue.status === 'open' ? '' : ` · ${issue.status}`}`}

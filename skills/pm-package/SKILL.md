@@ -1,6 +1,6 @@
 ---
 name: pm-package
-description: Group forge issues and pull requests into a work package — a forge milestone they all join and a .pm/work-packages/WP-<nn>.md linked to it — or make the work package of an existing milestone. Shows the plan and writes to GitHub or Forgejo only after the user's explicit OK. Use when the user picks issues or pull requests to package together, presses Create package or Create work package on the project desk, or asks for /pm-package.
+description: Group forge issues and pull requests into a work package — a forge milestone they all join and a .pm/work-packages/WP-<nn>.md linked to it — or make the work package of an existing milestone. Shows the plan and writes to GitHub or Forgejo only after the user's explicit OK. Use when the user picks issues or pull requests to package together, presses + work package on the project desk, or asks for /pm-package.
 ---
 
 # Package issues and pull requests into a work package

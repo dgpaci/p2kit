@@ -44,8 +44,9 @@ the PM reads it before it is saved.
 | Give Daily Log actions an owner | `owner:` of the open actions checked in the Daily Log, set to a person of `roles` or `team.people`, or removed | browser page only: checkboxes and *Assign to…* in Registers, preview before / after, confirm |
 | Start, switch or stop the clock | the local time log `~/.claude/timelog/` and `~/.claude/p2kit/clock.json` — no project file | browser page only: *⏱ Start clock*, *Switch…*, *Stop*; no preview, the day is reviewed at `/pm-log` |
 | Create an issue | a new forge issue, optionally in a work package's milestone and assigned to a team member | dialog, preview, confirm |
-| Attach an issue or pull request to a work package | the milestone of an open item on the forge: the work package's `milestone:`, created after the work package's title when it has none | a drop on a work package (drag dock or Board lane), preview old / new milestone, confirm; a checked group goes through *Create package* |
-| Digest, Highlight Report, Presentation, Retrospective, issue draft | new text | opens a session with the skill |
+| Attach an issue or pull request to a work package | the milestone of an open item on the forge: the work package's `milestone:`, created after the work package's title when it has none | a drop on a work package (drag dock or Board lane), preview old / new milestone, confirm; a checked group goes through *+ work package* |
+| Add a Daily Log entry, a problem or a risk | one entry appended to `daily-log.yaml`, `issues.yaml` or `risks.yaml`, with the next id | browser page only: *+ log*, *+ problem*, *+ risk* next to the register, dialog, preview, confirm |
+| Digest, Highlight Report, Presentation, Retrospective, document, iteration, issue draft | new text | opens a session with the skill; from a dialog (*+ report*, *+ document*, *+ iteration*, or *Open in Claude* in any dialog) with the fields typed |
 
 A direct action never writes without a preview. The confirmation applies only to the file as
 the preview showed it: if the file has changed since, the action is refused and the preview is
@@ -63,11 +64,12 @@ shown again.
   - It edits only projects listed in `~/.config/p2kit/projects.yaml`.
   - It changes only the lines the preview listed, and only to a value from a fixed set. Most
     actions change one line; placing a work package may also renumber the `rank:` of the others
-    in its horizon, and assigning many patches each checked item.
+    in its horizon, assigning many patches each checked item, and a new register entry appends its
+    lines at the end of the register, its free text on one line in quotes.
   - It serves a project's Markdown documents as read-only HTML pages (`GET /doc`): only `.md`
     files inside a registered project, rendered with every tag escaped and scripts blocked.
   - It assigns only the logins of `team.people`, gives a Daily Log action only an owner named in
-    `roles` or `team.people`, and writes nothing on a project whose
+    `roles` or `team.people` (a new action or risk too), and writes nothing on a project whose
     checkout has no `.pm/`.
   - Forge writes go through the CLI the user has already authenticated (`gh`, `fj`). No new
     token is needed.

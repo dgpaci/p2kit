@@ -193,7 +193,12 @@ button.primary, button.btn-primary { background: var(--on); border-color: var(--
 .clock-form select { width: 100%; min-width: 0; }
 .clock.on .clock-time { color: var(--red); font-weight: 600; font-variant-numeric: tabular-nums; }
 .board-head p { flex: 1; min-width: 0; margin: 0; }
-.new-issue { flex-shrink: 0; margin-left: auto; font-size: 14px; padding: 6px 16px; white-space: nowrap; }
+.board-head .act { flex-shrink: 0; }
+/* The fields of a contextual dialog: a label column and the controls; a hidden row takes its label with it. */
+.form-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; align-items: center; margin: 10px 0; }
+.form-row { display: contents; } .form-row[hidden] { display: none; }
+.form-grid input:not([type=checkbox]), .form-grid select, .form-grid textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.tab-actions { display: flex; justify-content: flex-end; margin: 4px 0 8px; }
 .dialog { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 60px 16px; }
 .dialog-box { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; width: min(640px, 100%); max-height: calc(100vh - 120px); overflow: auto; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
 .dialog-box h3 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--fg); margin: 0 0 10px; }
@@ -528,22 +533,14 @@ function issueDialog(p, wp) {
   const pickWho = el('select', { title: 'assignee' }, el('option', { value: '', textContent: 'Unassigned' }),
     ...p.team.filter(m => m.login).map(m => el('option', { value: m.login, textContent: m.person })))
   const pickRepo = isCrossRepo(p) ? el('select', { title: 'repo' }, ...p.repos.map(r => el('option', { value: r.name, textContent: r.name }))) : null
-  const draft = el('a', { textContent: 'draft it with pm-issue' })
-  const drafted = () => { draft.href = skillLink(p, 'pm-issue', pickWp.value || 'a work package') }
-  pickWp.onchange = drafted
-  drafted()
-  const preview = () => title.value.trim() && act(p, Object.assign({ kind: 'issue-create', title: title.value.trim(), body: body.value, wp: pickWp.value, login: pickWho.value }, pickRepo ? { repo: pickRepo.value } : {}))
-  title.onkeydown = e => { if (e.key === 'Enter') preview() }
-  openDialog('New issue on ' + p.name,
-    el('div', { className: 'dialog-row' }, title), el('div', { className: 'dialog-row' }, body), el('div', { className: 'dialog-row' }, pickRepo, pickWp, pickWho),
-    el('p', { className: 'dim' }, 'For the readiness headings of a work package: ', draft, '.'),
-    buttons(closeButton('Cancel'), el('button', { className: 'primary', textContent: 'Preview', onclick: preview })))
-  title.focus()
+  // Open in Claude: pm-issue drafts it with the readiness headings of the work package, from what is typed here.
+  const args = () => said([(pickWp.value || 'no work package') + ': ' + (title.value.trim() || 'a new issue'), pickRepo && 'repo ' + pickRepo.value,
+    pickWho.value && 'assignee ' + pickWho.value, body.value.trim() && 'notes: ' + body.value.trim().replace(/\\s*\\n\\s*/g, ' / ')])
+  formDialog(p, 'New issue on ' + p.name, [el('div', { className: 'dialog-row' }, title), el('div', { className: 'dialog-row' }, body), el('div', { className: 'dialog-row' }, pickRepo, pickWp, pickWho)],
+    'pm-issue', args, () => title.value.trim() ? Object.assign({ kind: 'issue-create', title: title.value.trim(), body: body.value, wp: pickWp.value, login: pickWho.value }, pickRepo ? { repo: pickRepo.value } : {}) : null, title)
 }
-function newIssueButton(p, wp, label = 'New issue', className = 'act') {
-  if (!server || p.pmRef) return null
-  return el('button', { className, textContent: label, title: 'create an issue' + (wp ? ' in ' + wp : ''), onclick: e => { e.stopPropagation(); issueDialog(p, wp) } })
-}
+// + issue: a lane's, its work package picked, or the Unplanned lane's, with none. Without the helper it opens Claude only.
+const newIssueButton = (p, wp) => contextButton('+ issue', 'create an issue' + (wp ? ' in ' + wp : ' in no work package'), () => issueDialog(p, wp))
 // Assign or unassign one team member on every picked issue and pull request (the only assign control besides a drop on a member,
 // issue #58): one preview lists them all, with those left out. Only with the helper, and never on a project whose .pm/ is read from git.
 const canAssign = p => server && !p.pmRef && p.team.some(m => m.login)
@@ -565,8 +562,114 @@ function packageDialog(p, refs) {
   title.focus()
 }
 
+// Contextual actions (issue #94): a small button next to what it acts on opens a dialog of fields. Open in Claude starts a session
+// with the skill and the fields as typed; Preview, where the helper writes the entry itself, only with the helper and never on a
+// project whose .pm/ is read from git. Without the helper the buttons stay and the dialog opens Claude only.
+const canWrite = p => Boolean(server) && !p.pmRef
+const contextButton = (label, title, open) => el('button', { className: 'act', textContent: label, title, onclick: e => { e.stopPropagation(); open() } })
+// One labelled field of a dialog; hidden, both the label and the control go.
+const formRow = (label, control) => el('label', { className: 'form-row' }, el('span', { className: 'dim', textContent: label }), control)
+const formGrid = (...rows) => el('div', { className: 'form-grid' }, ...rows)
+const choices = (list, blank) => [blank === undefined ? null : el('option', { value: '', textContent: blank }), ...list.map(v => el('option', { value: v, textContent: v }))].filter(Boolean)
+const peopleOf = p => [...new Map(p.team.map(m => [nameOf(m).toLowerCase(), nameOf(m)])).values()]
+const localDay = (d = new Date()) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+const said = parts => parts.filter(Boolean).join('; ')
+// Open in Claude: the link is composed again when clicked, so the session gets the fields as typed.
+function claudeLink(p, skill, args) {
+  const a = el('a', { className: 'btn', textContent: 'Open in Claude', title: 'a Claude session with the p2kit:' + skill + ' skill and these fields', href: skillLink(p, skill, args()) })
+  a.onclick = e => { e.stopPropagation(); a.href = skillLink(p, skill, args()); setTimeout(closeDialog, 0) }
+  return a
+}
+// A dialog of fields: Cancel, Open in Claude, and Preview when request is given and the helper can write; request() is null while a
+// required field is empty, and Preview then goes back to the first field.
+function formDialog(p, title, body, skill, args, request, first) {
+  const preview = () => { const r = request(); r ? act(p, r) : first.focus() }
+  const writes = Boolean(request) && canWrite(p)
+  if (writes) first.onkeydown = e => { if (e.key === 'Enter') preview() }
+  openDialog(title, ...body, buttons(closeButton('Cancel'), claudeLink(p, skill, args), writes ? el('button', { className: 'primary', textContent: 'Preview', onclick: preview }) : null))
+  first.focus()
+}
+// Log: one entry of the Daily Log, source manual; an action may carry an owner and a due day.
+const LOG_ENTRY_KINDS = ['decision', 'action', 'problem', 'event', 'note']
+function logDialog(p) {
+  const kind = el('select', {}, ...choices(LOG_ENTRY_KINDS))
+  const text = el('input', { type: 'text', placeholder: 'what was decided, done or noticed' })
+  const owner = el('select', {}, ...choices(peopleOf(p), 'no owner'))
+  const due = el('input', { type: 'date' })
+  const actionRows = [formRow('Owner', owner), formRow('Due', due)]
+  const isAction = () => kind.value === 'action'
+  kind.onchange = () => actionRows.forEach(r => { r.hidden = !isAction() })
+  kind.onchange()
+  formDialog(p, 'Log on ' + p.name, [formGrid(formRow('Kind', kind), formRow('Text', text), ...actionRows)], 'pm-log',
+    () => said(['add ' + (/^[ae]/.test(kind.value) ? 'an ' : 'a ') + kind.value + ' to the daily log: ' + (text.value.trim() || '…'), isAction() && owner.value && 'owner ' + owner.value, isAction() && due.value && 'due ' + due.value]),
+    () => text.value.trim() ? Object.assign({ kind: 'log-add', type: kind.value, text: text.value.trim() }, isAction() ? { owner: owner.value, due: due.value } : {}) : null, text)
+}
+// + problem: a new entry of the Problems register (issues.yaml); its report is pm-problem's.
+function problemDialog(p) {
+  const title = el('input', { type: 'text', placeholder: 'the test server is down since Friday' })
+  const type = el('select', {}, ...choices(['request-for-change', 'off-specification', 'problem'], 'type…'))
+  const priority = el('select', {}, ...choices(['low', 'medium', 'high'], 'priority…'))
+  formDialog(p, 'New problem on ' + p.name, [formGrid(formRow('Title', title), formRow('Type', type), formRow('Priority', priority))], 'pm-problem',
+    () => said(['raise a new problem: ' + (title.value.trim() || '…'), type.value && 'type ' + type.value, priority.value && 'priority ' + priority.value]),
+    () => title.value.trim() && type.value && priority.value ? { kind: 'problem-add', title: title.value.trim(), type: type.value, priority: priority.value } : null, title)
+}
+// + risk: a new open risk; the verdict on its response is pm-risk's, so the desk shows it "not assessed" until then.
+function riskDialog(p) {
+  const title = el('input', { type: 'text', placeholder: 'the payment provider changes its API before go-live' })
+  const cause = el('input', { type: 'text', placeholder: 'what would make it happen' })
+  const category = el('select', {}, ...choices(['threat', 'opportunity']))
+  const probability = el('select', {}, ...choices(['low', 'medium', 'high'], 'probability…'))
+  const impact = el('select', {}, ...choices(['low', 'medium', 'high'], 'impact…'))
+  const owner = el('select', {}, ...choices(peopleOf(p), 'no owner'))
+  const response = el('select', {}, ...choices(['avoid', 'reduce', 'fallback', 'transfer', 'accept', 'share', 'exploit', 'enhance'], 'no response yet'))
+  const actions = el('input', { type: 'text', placeholder: 'optional: the concrete actions taken or planned' })
+  formDialog(p, 'New risk on ' + p.name, [formGrid(formRow('Title', title), formRow('Cause', cause), formRow('Category', category), formRow('Probability', probability),
+    formRow('Impact', impact), formRow('Owner', owner), formRow('Response', response), formRow('Actions', actions))], 'pm-risk',
+    () => said(['add a risk: ' + (title.value.trim() || '…'), cause.value.trim() && 'cause: ' + cause.value.trim(), category.value, probability.value && 'probability ' + probability.value,
+      impact.value && 'impact ' + impact.value, owner.value && 'owner ' + owner.value, (response.value || actions.value.trim()) && 'response ' + [response.value, actions.value.trim()].filter(Boolean).join(': '),
+      'then assess the response']),
+    () => title.value.trim() && probability.value && impact.value ? { kind: 'risk-add', title: title.value.trim(), cause: cause.value.trim(), category: category.value,
+      probability: probability.value, impact: impact.value, owner: owner.value, response: response.value, actions: actions.value.trim() } : null, title)
+}
+// + document: a management report or a free document in a folder of documents:, drafted by Claude.
+const DOCUMENT_TYPES = ['Exception Report', 'Checkpoint Report', 'End Stage Report', 'End Project Report', 'Lessons Report', 'Free document']
+function documentDialog(p) {
+  const type = el('select', {}, ...choices(DOCUMENT_TYPES))
+  const folder = el('select', {}, ...choices([...new Set(p.documents.filter(d => d.folder).map(d => d.folder))], 'Claude asks'))
+  const notes = el('textarea', { rows: 5, placeholder: 'what it must say, for whom, the sources to read' })
+  const folderRow = formRow('Folder', folder)
+  const isFree = () => type.value === 'Free document'
+  type.onchange = () => { folderRow.hidden = !isFree() }
+  type.onchange()
+  formDialog(p, 'New document on ' + p.name, [formGrid(formRow('Type', type), folderRow, formRow('Notes', notes))], 'pm-document',
+    () => said([(isFree() ? 'a free document' + (folder.value ? ' in the folder ' + folder.value : '') : 'the ' + type.value), notes.value.trim() && 'notes: ' + notes.value.trim()]), null, type)
+}
+// Report: the Highlight Report the Next report card announces, drafted by Claude.
+function reportDialog(p) {
+  const notes = el('textarea', { rows: 5, placeholder: 'optional: what the Board must hear this time' })
+  formDialog(p, 'Highlight report of ' + p.name, [el('p', { className: 'dim', textContent: p.nextReport.due ? 'Next report due ' + p.nextReport.due + (p.nextReport.isOverdue ? ', overdue' : '') : 'No report date set.' }),
+    formGrid(formRow('Notes', notes))], 'pm-report', () => said(['the highlight report' + (p.nextReport.due ? ' due ' + p.nextReport.due : ''), notes.value.trim() && 'notes: ' + notes.value.trim()]), null, notes)
+}
+// Iterate: open the next iteration, its number, goal, dates and work packages prefilled as pm-iterate proposes them.
+function iterateDialog(p) {
+  const last = p.iterations.slice().sort((a, b) => b.number - a.number)[0]
+  const span = last && last.start && last.end ? Math.round((new Date(last.end) - new Date(last.start)) / 86400000) : 14
+  const number = el('input', { type: 'number', min: 1, value: String(last ? last.number + 1 : 1) })
+  const goal = el('input', { type: 'text', placeholder: 'checkout end to end' })
+  const start = el('input', { type: 'date', value: localDay() })
+  const end = el('input', { type: 'date', value: localDay(new Date(Date.now() + span * 86400000)) })
+  const open = p.workPackages.filter(w => isOpenWp(w) && (p.stage.current === null || w.stage === null || w.stage === p.stage.current))
+  const picks = open.map(w => el('input', { type: 'checkbox', value: w.id }))
+  const wps = el('div', {}, ...(open.length ? open.map((w, i) => el('label', { style: 'display:block' }, picks[i], ' ' + w.id + ' ' + w.title)) : [el('span', { className: 'dim', textContent: 'no open work package' })]))
+  formDialog(p, 'New iteration on ' + p.name, [
+    p.iteration ? el('p', { className: 'warn', textContent: 'Iteration ' + p.iteration.number + ' is open (ends ' + (p.iteration.end || '—') + '): the session offers to close it first.' }) : null,
+    formGrid(formRow('Number', number), formRow('Goal', goal), formRow('Start', start), formRow('End', end), formRow('Work packages', wps))].filter(Boolean), 'pm-iterate',
+    () => said(['open iteration ' + number.value + ': ' + (goal.value.trim() || '…'), (start.value || '—') + ' → ' + (end.value || '—'),
+      'work packages ' + (picks.filter(c => c.checked).map(c => c.value).join(', ') || 'to pick')]), null, goal)
+}
+
 // Drag and drop: the same preview and Confirm as the selects; attaching one issue or pull request to a work package is a drop only
-// (no per-row select, issue #57), a checked group goes through Create package. An issue or pull request dropped on a
+// (no per-row select, issue #57), a checked group goes through + work package. An issue or pull request dropped on a
 // member is assigned to them, on a work package attached to its milestone; a milestone dropped on a work package is linked to it.
 // While a drag is on, a dock lists the members and work packages that accept it, from any tab; Board lanes and Team members
 // accept a drop too. An open work package dragged in the Work packages tab is placed: dropped on a horizon group (or its dock
@@ -837,7 +940,8 @@ function recap(p) {
       card('Work packages', progressOf(p), p.themes.length + ' work themes active'),
       p.iteration ? card('Iteration', p.iteration.number + ' · ' + p.iteration.done + '/' + p.iteration.planned, p.iteration.goal + ' · ends ' + (p.iteration.end || '—'), p.iteration.isOverdue ? 'err' : '') : null,
       card('Blockers', String(p.openBlockers), 'open blocker notes', p.openBlockers ? 'err' : ''),
-      card('Next report', p.nextReport.due || '—', p.nextReport.isOverdue ? 'overdue' : 'highlight report', p.nextReport.isOverdue ? 'err' : '')),
+      card('Next report', el('span', {}, p.nextReport.due || '—', contextButton('+ report', 'draft the highlight report with Claude', () => reportDialog(p))),
+        p.nextReport.isOverdue ? 'overdue' : 'highlight report', p.nextReport.isOverdue ? 'err' : '')),
     objectivesSection(p),
     el('div', { className: 'grid2' },
       el('div', {}, el('h3', { textContent: 'Tolerances' }), tableOf(['', 'Area', 'Used / limit'], p.tolerances.map(t => [dot(t.light), t.area, t.used + ' / ' + t.limit + ' ' + t.unit + (t.isComputed ? ' · from work packages' : '')]))),
@@ -972,7 +1076,7 @@ function actionRows(actions, withOwner, lead, idStyle) {
 // Activity tab: the open milestones with their work package, the open pull requests, the open issues grouped by milestone.
 // The "Not ready only" toggle filters the issues, page-local like the member filter; another project starts unfiltered. The
 // checked issues and pull requests are the selection shared with the Team tab (itemPicks). Without the helper the page never
-// writes: Create package only opens a session.
+// writes: + work package only opens a session.
 let notReadyOnly = false
 let activityFor = ''
 // The package link carries the prompt last: the picked references are appended to it (hooks/actions.ts getPackageLink).
@@ -985,8 +1089,8 @@ function activity(p) {
   const pick = sel.cell, rowClass = sel.rowClass, refs = sel.refs
   const selectionBar = refs.length
     ? el('div', { className: 'activity-bar' }, el('strong', { textContent: refs.length + ' selected' }), el('span', { className: 'refs', textContent: refs.join(' ') }),
-        server ? el('button', { className: 'btn-primary', textContent: 'Create package', onclick: () => packageDialog(p, refs) })
-          : isCrossRepo(p) ? null : el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: 'Create package' }),
+        server ? el('button', { className: 'btn-primary', textContent: '+ work package', onclick: () => packageDialog(p, refs) })
+          : isCrossRepo(p) ? null : el('a', { className: 'btn btn-primary', href: packageLink(p, refs), textContent: '+ work package' }),
         assignManyControl(p, sel.numbers()), sel.clear,
         el('span', { className: 'dim hint', textContent: server ? (isCrossRepo(p) ? 'previews the work package naming them, then writes it on Confirm' : 'previews the milestone and the work package, then writes them on Confirm') : 'opens a Claude session on ' + p.name + ' with the pm-package skill: ' + refs.join(' ') }))
     : el('div', { className: 'activity-bar idle dim', textContent: 'Check issues or pull requests to group them into a work package or assign them.' })
@@ -1004,8 +1108,8 @@ function activity(p) {
       el('div', { className: 'wp' }, wp
         ? el('a', { href: '#', className: 'wp-link', onclick: e => { e.preventDefault(); go(p.path + '/theme/' + wp.id) } }, el('span', { className: 'mono', textContent: wp.id + ' ' }), wp.title)
         : el('span', {}, el('span', { className: 'nowp', textContent: 'no work package' }),
-            isCrossRepo(p) ? null : server ? el('button', { textContent: 'Create work package', onclick: () => act(p, { kind: 'package', title: m.title, fromMilestone: true }) })
-              : el('a', { className: 'btn', href: packageLink(p, ['--milestone', "'" + m.title + "'"]), textContent: 'Create work package' })))),
+            isCrossRepo(p) ? null : server ? el('button', { textContent: '+ work package', onclick: () => act(p, { kind: 'package', title: m.title, fromMilestone: true }) })
+              : el('a', { className: 'btn', href: packageLink(p, ['--milestone', "'" + m.title + "'"]), textContent: '+ work package' })))),
       { kind: 'milestone', ref: 'milestone ' + m.title, title: m.title })
   }
 
@@ -1074,6 +1178,7 @@ function documents(p) {
   const own = p.documents.filter(d => !d.folder)
   const folders = [...new Set(p.documents.filter(d => d.folder).map(d => d.folder))]
   return el('div', {},
+    el('div', { className: 'tab-actions' }, contextButton('+ document', 'a report or a document of a documents: folder, drafted by Claude', () => documentDialog(p))),
     p.documents.length ? null : el('p', { className: 'dim', textContent: 'None yet.' }),
     own.length ? tableOf(['Document', 'Status', 'Version'], own.map(d => [docLink(d.path, d.title), d.status, d.version])) : null,
     // Every folder's File column has the same width, so the folders line up one under the other.
@@ -1168,7 +1273,7 @@ const REGISTERS = [
     p => tableOf(['', 'Risk', 'P × I', 'Response', 'Verdict', 'Status'], openFirst(p.risks).map(riskRow))],
   ['approvals', 'Approvals', p => p.approvals.length, p => String(p.approvals.length), '/pm-start-up',
     p => tableOf(['Date', 'Decision', 'By', 'Note'], p.approvals.map(a => [a.date, a.decision, a.by, a.note]))],
-  ['problems', 'Problems', p => p.issues.length, p => p.issues.filter(i => isOpen(i.status)).length + ' open', '/pm-log',
+  ['problems', 'Problems', p => p.issues.length, p => p.issues.filter(i => isOpen(i.status)).length + ' open', '/pm-problem',
     p => tableOf(['', 'Problem', 'Type', 'Priority', 'Status'], openFirst(p.issues).map(i => dimUnlessOpen(i.status, [i.id, i.title, i.type, i.priority, i.status])))],
   ['lessons', 'Lessons', p => p.actions.length + p.lessons.length + (p.lastRetro ? 1 : 0), p => openActions(p).length + ' open actions', '/pm-retro', lessons],
   ['iterations', 'Iterations', p => p.iterations.length, p => String(p.iterations.length), '/pm-iterate', iterations],
@@ -1177,12 +1282,21 @@ const REGISTERS = [
 ]
 // The tab count: open risks, open problems, open actions of the Lessons and the Daily Log.
 const registersCount = p => p.risks.filter(r => isOpen(r.status)).length + p.issues.filter(i => isOpen(i.status)).length + openActions(p).length + openLogActions(p).length
+// The contextual button of a register, next to its title or its name on the Empty line (issue #94); none for the others.
+const REGISTER_ACTIONS = {
+  risks: p => contextButton('+ risk', 'add a risk to the Risk Register', () => riskDialog(p)),
+  problems: p => contextButton('+ problem', 'add a problem to the Problems register', () => problemDialog(p)),
+  iterations: p => contextButton('+ iteration', 'open the next iteration with Claude', () => iterateDialog(p)),
+  log: p => contextButton('+ log', 'add an entry to the Daily Log', () => logDialog(p)),
+}
+const registerAction = (p, id) => REGISTER_ACTIONS[id] ? REGISTER_ACTIONS[id](p) : null
 function registers(p) {
   const full = REGISTERS.filter(r => r[2](p))
   const empty = REGISTERS.filter(r => !r[2](p))
+  const head = (id, label, sub) => { const title = blockTitle(label, sub); const action = registerAction(p, id); if (action) title.append(action); return title }
   return el('div', {},
-    ...full.map(([id, label, , sub, , render]) => el('div', { id: 'register-' + id }, blockTitle(label, sub(p)), render(p))),
-    empty.length ? el('p', { className: 'dim', textContent: 'Empty: ' + empty.map(r => r[1] + ' (' + r[4] + ')').join(' · ') }) : null)
+    ...full.map(([id, label, , sub, , render]) => el('div', { id: 'register-' + id }, head(id, label, sub(p)), render(p))),
+    empty.length ? el('p', { className: 'dim' }, 'Empty: ', ...empty.flatMap((r, i) => [i ? ' · ' : '', r[1] + ' (' + r[4] + ')', registerAction(p, r[0])])) : null)
 }
 
 // The Daily Log: a filter bar (day, kinds, free text), then a block per day, newest first, its entries in file order; an open action
@@ -1216,7 +1330,7 @@ const canOwn = p => server && !p.pmRef && p.team.length > 0
 const nameOf = m => m.name || m.person
 const isOpenAction = d => d.kind === 'action' && d.status === 'open'
 function ownerControl(p, ids) {
-  const names = [...new Map(p.team.map(m => [nameOf(m).toLowerCase(), nameOf(m)])).values()]
+  const names = peopleOf(p)
   const pick = el('select', { className: 'assign', title: 'set or remove the owner of the selected actions',
     onchange: () => { const owner = pick.value; pick.value = ''; if (owner) act(p, { kind: 'log-owner', ids, owner: owner === '-' ? '' : owner }) } },
     el('option', { value: '', textContent: 'Assign to…' }), el('optgroup', { label: 'Assign' }, ...names.map(n => el('option', { value: n, textContent: '+ ' + n }))),
@@ -1300,7 +1414,7 @@ function boardLane(p, l) {
       l.progress ? el('span', { title: 'milestone items closed' }, bar(l.progress.closed, l.progress.total)) : null,
       l.reopened ? pill('reopened: ' + l.reopened + ' open', 'review') : null,
       unassigned ? pill(unassigned + ' unassigned', 'red') : null,
-      l.wp && issueTargets(p).some(w => w.id === l.wp) ? newIssueButton(p, l.wp, '+ issue') : null),
+      !l.wp || issueTargets(p).some(w => w.id === l.wp) ? newIssueButton(p, l.wp) : null),
     el('div', { className: 'lane-cols' }, ...LANE_COLUMNS.map(([key, label]) => column(key, label)),
       el('div', { className: 'lane-col' }, el('h4', { textContent: 'Done' }),
         l.progress ? el('div', { className: 'lane-done', textContent: l.progress.closed + ' closed' }) : el('div', { className: 'dim', textContent: '—' }))))
@@ -1308,13 +1422,13 @@ function boardLane(p, l) {
   const w = l.wp && p.workPackages.find(x => x.id === l.wp)
   return w ? dropTarget(p, lane, x => wpRequest(p, x, w), w.id + ' ' + w.title) : lane
 }
-// The board header: the text on the left, the New issue button on the right of the same line at any width (issue #66).
-const boardHead = (p, text) => el('div', { className: 'board-head' }, el('p', { className: 'dim', textContent: text }),
-  newIssueButton(p, '', 'New issue', 'btn-primary new-issue'))
+// The board header: the text, and with no lane to hold it the + issue of an issue in no work package on the same line (issue #94:
+// the big New issue button is gone, each + issue sits by the lane it adds to, the Unplanned one for no work package).
+const boardHead = (text, action) => el('div', { className: 'board-head' }, el('p', { className: 'dim', textContent: text }), action)
 function board(p) {
   const lanes = lanesOf(p)
-  if (lanes.length <= 1 && !unplannedCount(p)) return boardHead(p, "No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo.")
-  return el('div', {}, boardHead(p, "Open items by work package: To do, In progress, In review; Done is the milestone's closed count. The tab count is the open items in no work package. " +
+  if (lanes.length <= 1 && !unplannedCount(p)) return boardHead("No work package with a milestone and no open item: run /pm-link or /pm-package in the project's repo.", newIssueButton(p, ''))
+  return el('div', {}, boardHead("Open items by work package: To do, In progress, In review; Done is the milestone's closed count. The tab count is the open items in no work package. " +
     'An issue is in progress from its first commit, or once a pull request closes it; assigned alone it is still to do.'),
     ...lanes.map(l => boardLane(p, l)))
 }
